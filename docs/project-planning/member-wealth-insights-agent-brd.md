@@ -34,9 +34,9 @@ This Business Requirements Document (BRD) outlines the business requirements for
 
 The superannuation fund faces member churn and significant outflow of Funds Under Management (FUM) as members transition between life stages (e.g., career moves, home purchases, retirement transition, or consolidation into self-managed super funds (SMSFs) or competing retail/industry funds). Business analysts, retention teams, and member service consultants currently lack a unified, real-time understanding of customer behavior and holistic wealth indicators, leading to reactive and sub-optimal customer engagements.
 
-This initiative delivers an intelligence capability that aggregates member profiles and behavior signals, performs root-cause analytics on member growth and attrition, diagnoses FUM flow drivers, detects macro and cohort behavioral trends, and provides compliant, contextual recommendations for future member interactions.
+This initiative delivers an intelligence capability that aggregates member profiles and behavior signals, performs root-cause analytics on member growth and attrition, diagnoses FUM flow drivers, detects macro and cohort behavioral trends, and provides tailored analysis and recommendations based on a member's current appetite and wealth profile.
 
-Primary success metrics include reducing avoidable member attrition by 15%, curbing net negative FUM outflows by 20%, and increasing proactive member engagement effectiveness across key decision moments within 12 months of deployment.
+The intended business outcome and measurable success targets remain to be confirmed with the business sponsor. No attrition, FUM, or engagement target has been approved at this stage.
 
 ---
 
@@ -48,7 +48,7 @@ Key market and organizational dynamics include:
 
 1. **Member Portability & Inactive Account Churn:** Stapling rules and seamless rollover mechanisms (SuperMatch, ATO consolidation) allow members to switch funds with minimal friction.
 2. **Funds Under Management (FUM) Volatility:** Outflows are driven by retirement drawdowns, external SMSF rollovers, non-concessional withdrawals, and proactive poaching by retail platforms.
-3. **Information Asymmetry:** Most super funds possess deep data on superannuation balances and contributions but lack visibility into external assets, mortgages, external super accounts, or life milestones (whole-of-wealth profile).
+3. **Information Asymmetry:** The initial scope is limited to data held in the fund's internal systems; it will not provide a complete view of external assets, mortgages, or accounts held outside the fund.
 4. **Advice Regulatory Boundaries:** Providing "recommendations and advice" in Australian financial services is strictly governed by the distinction between Factual Information, General Advice, and Personal Advice under Chapter 7 of the Corporations Act 2001 (Cth) and ASIC Regulatory Guide 244 (RG 244).
 
 ---
@@ -60,7 +60,7 @@ Key market and organizational dynamics include:
 | **Head of Member Growth & Retention** | High | High | Manage Closely | Executive Sponsor; owns member retention targets and FUM preservation. |
 | **Business Analysis & Product Team** | High | High | Manage Closely | Authors requirements, defines behavioral metrics, validates analytics. |
 | **Legal, Risk & Compliance (AFSL Compliance)** | High | High | Manage Closely | Ensures advice guardrails (General vs Personal advice), APPs, and APRA compliance. |
-| **Member Service Operations / Contact Centre** | Medium | High | Keep Informed & Consult | Primary users of agent interaction recommendations and member context summaries. |
+| **Member Service Operations / Contact Centre** | Medium | High | Consult and co-design | Primary users; apply agent insights while supporting member interactions. |
 | **Data Engineering & Analytics Architecture** | Medium | Medium | Keep Satisfied | Data integration (registry, CRM, digital footprint, external feeds). |
 | **Superannuation Fund Members** | Low | High | Keep Informed | End beneficiaries; receive relevant, timely, and compliant interactions. |
 
@@ -70,31 +70,32 @@ Key market and organizational dynamics include:
 
 | ID | Title | Scope & Decision Summary | Downstream Impact |
 |---|---|---|---|
-| `DD-001` | Advice Boundary Baseline | System defaults to factual insights and General Advice / Next Best Action prompts for operators until intra-fund personal advice compliance parameters are finalized. | Directs agent response phrasing, guardrails, and compliance approval paths. |
-| `DD-002` | Whole-of-Wealth Data Sourcing | Profile construction combines internal fund data (registry, transaction, portal behavior) with consented external data (CDR / Open Banking / voluntary disclosure). | Informs consent management requirements, data freshness SLAs, and privacy architecture. |
+| `DD-001` | Advice Boundary Baseline | Agent outputs are limited to analysis, factual information, and general guidance; personalized financial advice is out of scope. | Directs agent response phrasing, guardrails, and compliance review. |
+| `DD-002` | Initial Data Scope | Profile construction uses internal superannuation data only. External financial data sources are out of scope for the initial release. | Limits the profile to information held in fund systems; any future external data expansion requires separate scope and privacy review. |
+| `DD-003` | Retention Outcome Comparison | Assess outreach outcomes by comparing members who received proactive staff outreach with similar flagged members who did not. Compare six-month exit or rollover outcomes from the outreach or matched index date. Interpret results as an association, not proof that outreach caused the difference. | Use available internal member, signal, outreach, and retention records; document the cohort-matching method. |
 
 ---
 
 ## Business Goals
 
 ```text
-BG-001: Reduce net avoidable member attrition and preserve Funds Under Management (FUM).
+BG-001: Improve member retention through more effective staff interactions and proactive outreach informed by tailored analysis of members' appetite and internal superannuation profiles.
 Priority: MUST
-KPI: Net annualized member churn rate and monthly net FUM outflow rate.
-Baseline: Current member churn of 7.5% per annum; net FUM outflow of $180M/quarter across targeted retention cohorts.
-Target: Reduce member churn to ≤ 6.0% (a 20% relative reduction) and decrease net avoidable FUM outflow by 15% within 12 months.
-Timeframe: Within 12 months of production deployment.
-Measurement source: Member Registry Data Warehouse and Finance FUM Reconciliation Dashboard.
-Owner: Head of Member Growth & Retention.
+KPI: Compare exit or rollover rates for members showing early disengagement signals who received proactive staff outreach with similar flagged members who did not. Interpret the comparison as an association, not proof of causation. Supporting measures: staff interaction effectiveness and proactive outreach.
+Baseline: To be established.
+Target: Provisional 5% relative reduction in the six-month exit or rollover rate versus the matched comparison group; validate feasibility against historical data before approval.
+Timeframe: Compare exit or rollover outcomes during the six months after outreach or the matched comparison group's index date.
+Measurement source: Internal member registry and staff interaction records, which the business stakeholder confirms can identify outreach, comparison cohorts, and subsequent exit or rollover outcomes.
+Owner: Business sponsor to be identified.
 ```
 
 **SMART Evaluation**:
 
-- [x] **S**pecific: Focuses directly on member attrition reduction and FUM outflow mitigation.
-- [x] **M**easurable: Quantified by churn percentage and dollar FUM outflow metrics.
-- [x] **A**chievable: 15-20% improvement aligns with industry benchmarks for predictive retention interventions.
-- [x] **R**elevant: Directly targets fund viability, scale benefits, and lower fee ratios for remaining members.
-- [x] **T**ime-bound: 12-month post-launch assessment window.
+- [x] **S**pecific: Improve retention through effective staff interactions and proactive outreach informed by member appetite and internal superannuation profiles.
+- [ ] **M**easurable: The primary KPI is identified; signal definitions, baseline, target, and attribution method remain to be agreed.
+- [ ] **A**chievable: Requires assessment after target and delivery scope are confirmed.
+- [ ] **R**Relevant: To be validated with the business sponsor.
+- [ ] **T**ime-bound: Timeframe is not yet defined.
 
 **Status**: deferred (assessed at Define→Govern gate)
 
@@ -110,12 +111,12 @@ Owner: Head of Member Growth & Retention.
 
 * `BR-001`: Financial Advice Regulatory Guardrails
   * **Category**: Regulatory (Corporations Act 2001 (Cth) Chapter 7, ASIC RG 244).
-  * **Rationale**: Providing financial product advice requires clear licensing parameters. Automated recommendations delivered directly to consumers or staff must adhere strictly to General Advice warnings or meet statutory Best Interests Duty / DBFO intra-fund advice requirements.
+  * **Rationale**: Agent outputs must remain within the agreed business scope of analysis, factual information, and general guidance. The agent must not generate personalized financial advice. Compliance must validate the implementation and applicable disclosures before use.
   * **Enforceability**: Mandatory.
   * **Enforcing FRs**: `FR-004`.
-* `BR-002`: Privacy & Consumer Consent (APPs & CDR Rules)
-  * **Category**: Regulatory (Privacy Act 1988 (Cth), Australian Privacy Principles).
-  * **Rationale**: Aggregation of whole-of-wealth data (banking, external super, debt) requires explicit, informed member consent and purpose-limitation controls.
+* `BR-002`: Privacy & Authorized Use of Internal Member Data
+  * **Category**: Regulatory / Operational (Privacy Act 1988 (Cth), Australian Privacy Principles, and fund privacy policies).
+  * **Rationale**: Internal member information must be accessed and used only for authorized purposes, with appropriate access controls and privacy safeguards. External financial data ingestion is not in the initial scope.
   * **Enforceability**: Mandatory.
   * **Enforcing FRs**: `FR-001`.
 * `BR-003`: APRA Prudential Compliance (CPS 234 Information Security & SPS 515 Strategic Planning)
@@ -128,16 +129,16 @@ Owner: Head of Member Growth & Retention.
 
 ## Functional Requirements
 
-- `FR-001`: Whole-of-Wealth Profile Aggregation
-  - **Statement**: The system shall aggregate and synthesize member profile data—including account balance history, voluntary contributions, investment option allocations, insurance status, interaction logs, and consented external financial assets—into a unified analytical view.
+- `FR-001`: Internal Superannuation Profile Aggregation
+  - **Statement**: The system shall aggregate and synthesize member data held in internal fund systems—including account balance history, contributions, investment option allocations, insurance status, and interaction history—into a unified analytical view. External financial data sources are excluded.
   - **Actor**: Business Analyst, Retention Specialist, Advisory Agent Engine.
   - **Trigger**: Batch synchronization, event-driven account changes, or consultant profile lookup.
-  - **Expected Outcome**: Produces an up-to-date, multi-dimensional whole-of-wealth profile with clear data provenance and consent indicators.
+  - **Expected Outcome**: Produces an up-to-date superannuation profile with clear data provenance. The profile does not represent the member's complete wealth outside the fund.
   - **Acceptance Criteria**: Links to `AC-001`.
   - **Business Goals**: Links to `BG-001`.
 
 - `FR-002`: Member Movement & Churn Root-Cause Analytics
-  - **Statement**: The system shall analyze historical and real-time member transaction events, rollovers-out, portal activity drops, and life-stage indicators to diagnose why members are departing, inactive, or consolidating balances into the fund.
+  - **Statement**: The system shall analyze internal member transaction and interaction data, including contributions reduced relative to a member's usual pattern, stopped contributions, digital activity declining relative to a member's usual pattern, closure inquiries, and completed rollovers, to diagnose why members are departing, becoming inactive, or consolidating balances into the fund.
   - **Actor**: Business Analyst, Marketing/Retention Lead.
   - **Trigger**: Scheduled reporting runs or ad-hoc cohort analysis requests.
   - **Expected Outcome**: Generates root-cause attribution scores (e.g., fee sensitivity, poor digital engagement, retirement transition, life event trigger) for member growth and attrition.
@@ -145,18 +146,18 @@ Owner: Head of Member Growth & Retention.
   - **Business Goals**: Links to `BG-001`.
 
 - `FR-003`: Funds Under Management (FUM) Outflow Diagnostic & Predictive Modeling
-  - **Statement**: The system shall identify, categorize, and predict high-risk FUM outflow events (e.g., partial rollovers to SMSFs, large lump-sum drawdowns, contribution cessation) and calculate estimated FUM at risk across segmented member cohorts.
+  - **Statement**: The system shall use selected internal disengagement signals, including contributions and digital activity reduced relative to a member's usual pattern, stopped contributions, and closure inquiries, to identify and categorize potential FUM outflow events and estimate FUM at risk across member cohorts.
   - **Actor**: Business Analyst, Executive Management.
   - **Trigger**: Weekly analytics refresh or member risk threshold breach.
   - **Expected Outcome**: Delivers an interactive FUM leakage breakdown with leading risk indicators and cohort impact sizing.
   - **Acceptance Criteria**: Links to `AC-003`.
   - **Business Goals**: Links to `BG-001`.
 
-- `FR-004`: Contextual Interaction Recommendations & Next-Best Action
-  - **Statement**: The system shall generate tailored, context-aware interaction guidance and next-best actions (e.g., educational nudges, contribution health-checks, intra-fund advice appointment offers) for future member communications.
-  - **Actor**: Member Service Consultant, Digital Journey Engine.
-  - **Trigger**: Inbound contact event or outbound trigger notification.
-  - **Expected Outcome**: Displays synthesized talking points, suggested engagement topics, and mandatory compliance disclaimers based on the member's profile and behavioral trend.
+- `FR-004`: Staff-Facing Contextual Interaction Recommendations
+  - **Statement**: The system shall provide internal staff with tailored analysis, factual information, and general guidance for member interactions based on the member's profile and behavioral trends, including opportunities for proactive outreach. It shall not generate personalized financial advice.
+  - **Actor**: Member service consultant or retention specialist.
+  - **Trigger**: Staff member opens a member profile, prepares for a member interaction, reviews members flagged for proactive outreach, or an internal closure inquiry is recorded.
+  - **Expected Outcome**: Provides staff with synthesized talking points, suggested engagement topics, and timely outreach opportunities based on the member's profile and behavioral trends, with applicable compliance guidance. A closure inquiry alone is sufficient to surface an outreach opportunity. The agent supports staff and does not communicate recommendations directly to members or provide personalized financial advice.
   - **Acceptance Criteria**: Links to `AC-004`.
   - **Business Goals**: Links to `BG-001`.
 
@@ -227,17 +228,16 @@ Owner: Head of Member Growth & Retention.
 
 ```mermaid
 flowchart TD
-    A[Member Data Sources: Registry, Transactions, Digital Activity, Consented External Data] --> B[Data Ingestion & Identity Resolution]
-    B --> C[Whole-of-Wealth Profile Engine]
+    A[Internal Fund Data: Registry, Transactions, Digital Activity] --> B[Data Ingestion & Identity Resolution]
+    B --> C[Superannuation Profile Engine]
     C --> D[Behavioral & Trend Analytics Engine]
     D --> E1[Churn & Growth Root Cause Diagnostics]
     D --> E2[FUM Outflow Risk & Leakage Model]
     D --> E3[Member Behavioral Cohort Trends]
     E1 & E2 & E3 --> F[AI Interaction & Next-Best Action Agent]
     F --> G{Compliance Filter: General Advice vs Personal Advice}
-    G -->|General Advice / Informational| H[Member Facing Digital Experience / App]
-    G -->|Consultant Guidance / Intra-fund Offer| I[Contact Centre & Retention Specialist Desktop]
-    H & I --> J[Member Interaction / Feedback Loop]
+    G --> I[Contact Centre & Retention Specialist Desktop]
+    I --> J[Staff-Supported Member Interaction / Feedback Loop]
     J --> A
 ```
 
@@ -245,31 +245,31 @@ flowchart TD
 
 ## Acceptance Criteria
 
-- `AC-001`: Whole-of-Wealth Synthesis Verification
+- `AC-001`: Internal Superannuation Profile Verification
   - **Given** a registered superannuation member with active super balance and historical contributions,
   - **When** the profile is requested by the agent or business analyst,
-  - **Then** the system displays a unified whole-of-wealth profile including balance trajectory, contribution consistency, and consent status for external asset markers within 2 seconds.
+  - **Then** the system displays a unified superannuation profile including balance trajectory, contribution consistency, and data provenance within 2 seconds, without implying coverage of external wealth.
   - **Covers**: `FR-001`.
   - **Status**: Not Started.
 
 - `AC-002`: Churn Root-Cause Attribution
   - **Given** a designated member cohort that rolled out balances or closed accounts over the trailing 6 months,
   - **When** a business analyst runs the member attrition diagnostic,
-  - **Then** the system outputs ranked contributing factors (e.g., fees, negative performance perception, competitive rollover, lack of digital engagement) with statistical significance indicators.
+  - **Then** the system reports contributing factors, including contribution changes, declining digital engagement, and closure inquiries where present, and distinguishes observed evidence from inferred causes.
   - **Covers**: `FR-002`.
   - **Status**: Not Started.
 
 - `AC-003`: FUM Outflow Prediction and Cohort Risk
-  - **Given** active members with declining voluntary contributions or frequent withdrawal page visits,
+  - **Given** active members with contributions reduced relative to their usual pattern, stopped contributions, declining digital engagement, or a closure inquiry,
   - **When** the FUM predictive risk model evaluates the member base,
-  - **Then** it flags members in the top 10% risk decile with estimated potential FUM outflow values and primary risk drivers.
+  - **Then** it identifies members who meet thresholds agreed for these signals and presents estimated potential FUM outflow and the observed risk indicators. The contribution baseline, reduction threshold, and observation window remain to be defined.
   - **Covers**: `FR-003`.
   - **Status**: Not Started.
 
-- `AC-004`: Compliant Interaction Guidance Generation
-  - **Given** a member flagged with moderate churn risk due to life-stage transition (e.g., turning 60),
-  - **When** a member service consultant opens the member's profile during an inquiry,
-  - **Then** the agent presents 2-3 tailored talking points, transition-to-retirement educational resources, and the mandatory General Advice warning statement.
+- `AC-004`: Staff Interaction and Proactive Outreach Guidance
+  - **Given** an internal member record contains a closure inquiry and no other disengagement signal,
+  - **When** a member service consultant reviews the member's profile,
+  - **Then** the agent surfaces an outreach opportunity with relevant context and applicable compliance guidance, without contacting the member or providing personalized financial advice.
   - **Covers**: `FR-004`.
   - **Status**: Not Started.
 
@@ -304,7 +304,7 @@ flowchart TD
 | Business Rule | Enforcing Functional Requirement |
 |---|---|
 | `BR-001` (Advice Regulatory Guardrails) | `FR-004` |
-| `BR-002` (Privacy & Consumer Consent) | `FR-001` |
+| `BR-002` (Privacy & Authorized Use of Internal Member Data) | `FR-001` |
 | `BR-003` (APRA CPS 234 Security) | `FR-001`, `FR-002` |
 
 ---
@@ -317,7 +317,7 @@ flowchart TD
 |---|---|---|---|---|---|
 | `ASM-001` | Internal data registry and CRM logs contain sufficient historical event granularity to train churn and FUM attrition models. | Untested | High | Conduct rapid data feasibility audit on historical transaction logs. | BRD Discovery |
 | `ASM-002` | Interaction advice will operate primarily within General Advice or Intra-fund Simple Advice boundaries without triggering complex full Statement of Advice (SOA) mandates. | Partially supported | Critical | Review guidance rules directly with AFSL Compliance team. | BRD Discovery |
-| `ASM-003` | Members will consent to sharing external financial account signals via CDR or voluntary input if tangible engagement value is provided. | Untested | Medium | Provide progressive value exchange and fall back to internal-only behavioral models when external data is absent. | BRD Discovery |
+| `ASM-003` | Internal fund systems contain sufficiently current member appetite and preference information to support tailored analysis. | Untested | Medium | Validate the availability, quality, and recency of appetite and preference data with data owners. | BRD Discovery |
 
 ### Risk Register
 
@@ -333,9 +333,15 @@ flowchart TD
 
 | ID | Question or gap | Why it matters | Owner | Target date | Status | Rationale for deferral | Target phase | Source |
 |---|---|---|---|---|---|---|---|---|
-| `Q-001` | Will the advisory agent be solely internal (assisting frontline consultants) or will it also interact directly with members via web/mobile portal? | Dictates conversational safety controls, authentication depth, and UI scope. | Business Analyst / Product Lead | 2026-10-20 | Open | — | — | BRD Discovery |
-| `Q-002` | What external data sources constitute the target "Whole-of-Wealth" view (e.g., CDR Open Banking, credit bureau, manual self-reporting, ATO linked super)? | Determines integration architecture, consent flows, and privacy boundaries. | Data Architect | 2026-10-25 | Open | — | — | BRD Discovery |
-| `Q-003` | Under the Delivering Better Financial Outcomes (DBFO) legislation, what specific advice license tier (General Advice vs Intra-fund Advice) is designated for this release? | Affects whether personal circumstances can be taken into account for recommendations. | AFSL Compliance Officer | 2026-10-22 | Open | — | — | BRD Discovery |
+| `Q-001` | Will the agent be solely internal or also interact directly with members? | Dictates conversational safety controls, authentication depth, and UI scope. | Business Analyst / Product Lead | 2026-10-20 | Resolved | Initial scope is an internal staff co-pilot; it will not communicate directly with members. | — | BRD Discovery |
+| `Q-002` | Should external financial data sources be considered in a future release? | Could expand profile coverage and would require separate scope, privacy, and consent assessment. | Product Lead / Data Architect | 2026-10-25 | Deferred | External data sources are excluded from the initial release. | Future-Release | BRD Discovery |
+| `Q-003` | Has Compliance validated that the agreed analysis, factual information, and general guidance boundary is appropriate for this use? | Confirms that output scope and controls align with the fund's obligations. | AFSL Compliance Officer | 2026-10-22 | Open | — | — | BRD Discovery |
+| `Q-004` | What member-relative contribution reduction threshold and observation window should trigger a disengagement signal? | The threshold and baseline period must distinguish meaningful changes from normal contribution variation. | Retention Lead / Data Analytics Lead | 2026-10-27 | Open | Calibrate criteria using historical fund data and validate them with the retention team. | — | BRD Discovery |
+| `Q-005` | What digital activity decline threshold and observation window should trigger a disengagement signal? | The comparison should account for each member's usual activity and distinguish meaningful decline from normal usage variation. | Digital Product Lead / Data Analytics Lead | 2026-10-27 | Open | Calibrate the threshold and observation window using historical fund data and validate them with the digital product and analytics teams. | — | BRD Discovery |
+| `Q-006` | Do internal systems record staff outreach and subsequent member exit or rollover outcomes? | The selected comparison approach depends on reliable records of outreach exposure and retention outcomes. | Retention Lead / CRM Data Owner | 2026-10-29 | Resolved | Business stakeholder confirms internal systems reliably identify members who received outreach and whether they later exited or rolled over. | — | BRD Discovery |
+| `Q-007` | Can internal data identify comparable flagged members who did not receive staff outreach? | Needed to construct the selected comparison group without misclassifying members or overstating outreach impact. | Retention Lead / CRM Data Owner | 2026-10-30 | Resolved | Business stakeholder confirms internal data can identify similar flagged members who did not receive staff outreach. | — | BRD Discovery |
+| `Q-008` | Is the provisional 5% relative reduction target feasible and approved after baseline review? | The provisional target must be tested against fund experience before it becomes a committed success criterion. | Business Sponsor / Retention Lead | 2026-11-03 | Open | Business stakeholder selected 5% provisionally; validate against the historical baseline before approval. | — | BRD Discovery |
+| `Q-009` | What historical lookback period should be used to establish the retention baseline and validate the provisional target? | The lookback period affects cohort size, seasonality, and relevance to current member behavior. | Retention Lead / Data Analytics Lead | 2026-11-05 | Open | — | — | BRD Discovery |
 
 ---
 

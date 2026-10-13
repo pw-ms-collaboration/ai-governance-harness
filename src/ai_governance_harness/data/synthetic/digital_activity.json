@@ -1,0 +1,82 @@
+[
+  {
+    "activity_id": "DIG-101",
+    "member_id": "MEM-001",
+    "month": "2026-08",
+    "login_count": 6,
+    "document_downloads": 2,
+    "baseline_logins": 5
+  },
+  {
+    "activity_id": "DIG-102",
+    "member_id": "MEM-001",
+    "month": "2026-09",
+    "login_count": 7,
+    "document_downloads": 1,
+    "baseline_logins": 5
+  },
+  {
+    "activity_id": "DIG-103",
+    "member_id": "MEM-001",
+    "month": "2026-10",
+    "login_count": 6,
+    "document_downloads": 0,
+    "baseline_logins": 5
+  },
+  {
+    "activity_id": "DIG-201",
+    "member_id": "MEM-002",
+    "month": "2026-08",
+    "login_count": 7,
+    "document_downloads": 2,
+    "baseline_logins": 8
+  },
+  {
+    "activity_id": "DIG-202",
+    "member_id": "MEM-002",
+    "month": "2026-09",
+    "login_count": 2,
+    "document_downloads": 0,
+    "baseline_logins": 8
+  },
+  {
+    "activity_id": "DIG-203",
+    "member_id": "MEM-002",
+    "month": "2026-10",
+    "login_count": 1,
+    "document_downloads": 0,
+    "baseline_logins": 8
+  },
+  {
+    "activity_id": "DIG-301",
+    "member_id": "MEM-003",
+    "month": "2026-08",
+    "login_count": 4,
+    "document_downloads": 1,
+    "baseline_logins": 4
+  },
+  {
+    "activity_id": "DIG-302",
+    "member_id": "MEM-003",
+    "month": "2026-09",
+    "login_count": 4,
+    "document_downloads": 2,
+    "baseline_logins": 4
+  },
+  {
+    "activity_id": "DIG-303",
+    "member_id": "MEM-003",
+    "month": "2026-10",
+    "login_count": 3,
+    "document_downloads": 1,
+    "baseline_logins": 4
+  },
+  {
+    "activity_id": "DIG-601",
+    "member_id": "MEM-006",
+    "month": "2026-10",
+    "login_count": 0,
+    "document_downloads": 0,
+    "baseline_logins": 6
+  }
+]

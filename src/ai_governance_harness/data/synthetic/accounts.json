@@ -1,0 +1,72 @@
+[
+  {
+    "account_id": "ACC-001",
+    "member_id": "MEM-001",
+    "balance": 145000.0,
+    "phase": "Accumulation",
+    "option_allocation": {
+      "Growth": 0.7,
+      "Australian Shares": 0.3
+    }
+  },
+  {
+    "account_id": "ACC-002",
+    "member_id": "MEM-002",
+    "balance": 320000.0,
+    "phase": "Accumulation",
+    "option_allocation": {
+      "Balanced": 0.8,
+      "Cash": 0.2
+    }
+  },
+  {
+    "account_id": "ACC-003",
+    "member_id": "MEM-003",
+    "balance": 580000.0,
+    "phase": "Accumulation",
+    "option_allocation": {
+      "Balanced": 0.6,
+      "Australian Shares": 0.2,
+      "International Shares": 0.2
+    }
+  },
+  {
+    "account_id": "ACC-004",
+    "member_id": "MEM-004",
+    "balance": 45000.0,
+    "phase": "Accumulation",
+    "option_allocation": {
+      "High Growth": 1.0
+    }
+  },
+  {
+    "account_id": "ACC-005",
+    "member_id": "MEM-005",
+    "balance": 720000.0,
+    "phase": "Transition to Retirement",
+    "option_allocation": {
+      "Conservative": 0.4,
+      "Balanced": 0.6
+    }
+  },
+  {
+    "account_id": "ACC-006",
+    "member_id": "MEM-006",
+    "balance": 210000.0,
+    "phase": "Accumulation",
+    "option_allocation": {
+      "Growth": 0.85,
+      "Cash": 0.15
+    }
+  },
+  {
+    "account_id": "ACC-007",
+    "member_id": "MEM-007",
+    "balance": 410000.0,
+    "phase": "Accumulation",
+    "option_allocation": {
+      "High Growth": 0.75,
+      "International Shares": 0.25
+    }
+  }
+]

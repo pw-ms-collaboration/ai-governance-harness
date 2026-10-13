@@ -1,0 +1,65 @@
+[
+  {
+    "member_id": "MEM-001",
+    "full_name": "Alex Morgan",
+    "age": 34,
+    "tenure_years": 6.5,
+    "risk_profile": "Growth",
+    "communication_pref": "email",
+    "has_closure_inquiry": false
+  },
+  {
+    "member_id": "MEM-002",
+    "full_name": "Jordan Taylor",
+    "age": 47,
+    "tenure_years": 11.2,
+    "risk_profile": "Balanced",
+    "communication_pref": "email",
+    "has_closure_inquiry": false
+  },
+  {
+    "member_id": "MEM-003",
+    "full_name": "Casey Chen",
+    "age": 52,
+    "tenure_years": 14.0,
+    "risk_profile": "Balanced",
+    "communication_pref": "phone",
+    "has_closure_inquiry": true
+  },
+  {
+    "member_id": "MEM-004",
+    "full_name": "Riley Patel",
+    "age": 29,
+    "tenure_years": 3.0,
+    "risk_profile": "High Growth",
+    "communication_pref": "email",
+    "has_closure_inquiry": false
+  },
+  {
+    "member_id": "MEM-005",
+    "full_name": "Samira Khan",
+    "age": 58,
+    "tenure_years": 16.8,
+    "risk_profile": "Balanced",
+    "communication_pref": "phone",
+    "has_closure_inquiry": false
+  },
+  {
+    "member_id": "MEM-006",
+    "full_name": "Liam O'Connor",
+    "age": 41,
+    "tenure_years": 8.2,
+    "risk_profile": "Growth",
+    "communication_pref": "email",
+    "has_closure_inquiry": false
+  },
+  {
+    "member_id": "MEM-007",
+    "full_name": "Elena Rostova",
+    "age": 55,
+    "tenure_years": 13.5,
+    "risk_profile": "High Growth",
+    "communication_pref": "email",
+    "has_closure_inquiry": true
+  }
+]

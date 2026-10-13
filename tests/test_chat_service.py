@@ -128,6 +128,39 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.anyio
+async def test_given_mcp_personal_advice_when_completing_then_blocks_before_next_model_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    model_client = _FakeModelClient()
+    project_client = _FakeProjectClient(model_client)
+
+    class AdviceMcpClient(_FakeMcpClient):
+        async def call_tool(self, name: str, arguments: dict[str, object]):
+            return SimpleNamespace(
+                is_error=False,
+                structured_content={
+                    "nested": [{"text": "You should switch your super to Growth."}],
+                },
+            )
+
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
+    )
+    monkeypatch.setattr("ai_governance_harness.chat.service.Client", AdviceMcpClient)
+    service = ChatService(ChatSettings(model_deployment="test-model"))
+    request = ChatRequest(messages=[ChatMessage(role="user", content="Show MEM-001")])
+
+    # Act & Assert
+    with pytest.raises(ChatServiceError, match="Governance denied"):
+        await service.complete(request)
+    assert len(model_client.chat.completions.calls) == 1
+    assert model_client.closed is True
+    assert project_client.closed is True
+
+
+@pytest.mark.anyio
 async def test_given_member_question_when_completing_then_calls_mcp_and_foundry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -135,6 +135,65 @@ async def test_given_unexpected_gateway_error_when_calling_tool_then_hides_detai
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("tool_name", "gateway_name", "arguments"),
+    [
+        ("get_member_profile", "get_member_profile", {"member_id": "MEM-001"}),
+        (
+            "get_member_disengagement_signals",
+            "get_member_disengagement_signals",
+            {"member_id": "MEM-001"},
+        ),
+        ("get_cohort_churn_analytics", "get_cohort_churn_analytics", {}),
+        ("get_fum_outflow_summary", "get_fum_outflow_summary", {}),
+        (
+            "prepare_member_outreach_case",
+            "get_member_disengagement_signals",
+            {"member_id": "MEM-001"},
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    ("text", "expected_error"),
+    [
+        ("You should switch your super to Growth. PRIVATE_MARKER", True),
+        ("Your current investment option is Growth.", False),
+        ("Consider obtaining personal financial advice before making a decision.", False),
+    ],
+)
+async def test_given_tool_response_when_releasing_then_checks_advice_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    tool_name: str,
+    gateway_name: str,
+    arguments: dict[str, str],
+    text: str,
+    expected_error: bool,
+) -> None:
+    # Arrange
+    def response(*args: object) -> dict[str, object]:
+        return {"nested": [{"text": text}]}
+
+    async def approve(_context, _params):
+        return types.ElicitResult(action="accept", content={"approved": True})
+
+    monkeypatch.setattr(gateway_tools, gateway_name, response)
+
+    # Act
+    async with Client(mcp, elicitation_callback=approve) as client:
+        result = await client.call_tool(tool_name, arguments)
+
+    # Assert
+    assert result.is_error is expected_error
+    assert "PRIVATE_MARKER" not in caplog.text
+    if expected_error:
+        assert result.content[0].text.endswith("Governance denied the tool response.")
+        assert "PRIVATE_MARKER" not in result.model_dump_json()
+    else:
+        assert text in result.model_dump_json()
+
+
+@pytest.mark.anyio
 async def test_given_approval_when_preparing_outreach_case_then_returns_case() -> None:
     # Arrange
     async def approve(_context, params):

@@ -6,6 +6,10 @@ agent: ai-governance-harness
 scope: global
 default_action: deny
 rules:
+  - name: deny-personal-advice-tool-response
+    stage: post_tool
+    condition: "data.advice_scan_status == 'personal_advice_detected'"
+    action: deny
   - name: allow-agent-startup
     stage: pre_input
     condition: "action.type == 'agent.startup'"
@@ -44,23 +48,23 @@ rules:
     action: allow
   - name: allow-member-profile-result
     stage: post_tool
-    condition: "action.type == 'get_member_profile'"
+    condition: "action.type == 'get_member_profile' and data.advice_scan_status == 'passed'"
     action: allow
   - name: allow-member-signals-result
     stage: post_tool
-    condition: "action.type == 'get_member_disengagement_signals'"
+    condition: "action.type == 'get_member_disengagement_signals' and data.advice_scan_status == 'passed'"
     action: allow
   - name: allow-cohort-analytics-result
     stage: post_tool
-    condition: "action.type == 'get_cohort_churn_analytics'"
+    condition: "action.type == 'get_cohort_churn_analytics' and data.advice_scan_status == 'passed'"
     action: allow
   - name: allow-fum-summary-result
     stage: post_tool
-    condition: "action.type == 'get_fum_outflow_summary'"
+    condition: "action.type == 'get_fum_outflow_summary' and data.advice_scan_status == 'passed'"
     action: allow
   - name: allow-approved-outreach-case-result
     stage: post_tool
-    condition: "action.type == 'prepare_member_outreach_case'"
+    condition: "action.type == 'prepare_member_outreach_case' and data.advice_scan_status == 'passed'"
     action: allow
   - name: allow-chat-output
     stage: pre_output

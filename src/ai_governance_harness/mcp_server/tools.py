@@ -18,6 +18,7 @@ from ai_governance_harness.governance.sandbox import (
     ExecutionClass,
     SandboxGuard,
 )
+from ai_governance_harness.guardrails.advice_filter import tool_response_policy_data
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "synthetic"
 Parameters = ParamSpec("Parameters")
@@ -50,7 +51,7 @@ def governed_read_only_tool(
             engine.require_allowed(
                 LifecyclePoint.POST_TOOL,
                 action,
-                policy_data={"result_type": type(result).__name__},
+                policy_data=tool_response_policy_data(result),
                 source="gateway",
             )
             return result

@@ -204,6 +204,25 @@ policy:
 * Treats required approval without an approval flow as denied.
 * Fails closed when policy loading or evaluation fails.
 
+Tool responses are scanned in memory using the existing personal-advice pattern
+guardrail, including strings nested in dictionaries and lists. The
+`deny-personal-advice-tool-response` post-tool rule blocks detected personalized
+financial advice. Known tool-result allow rules require
+`data.advice_scan_status == 'passed'`; missing or unknown scan status is denied.
+Factual information and general guidance that do not match prohibited patterns
+remain permitted.
+
+The shared gateway protects direct callers, the MCP adapter checks complete
+responses (including outreach cases), and the chat service checks structured
+MCP results before passing them to the model. A blocked MCP response returns a
+sanitized tool error, not a successful replacement payload. Only the scan
+status and result type enter policy evaluation, never the response text.
+The existing final chat-response guardrail remains in place.
+
+This deterministic pattern scan is not a legal advice classifier and cannot
+detect every paraphrase or contextual recommendation. Production use requires
+compliance-reviewed detection and evaluation cases.
+
 The five current tools read packaged synthetic data and do not execute
 generated code, shell commands, untrusted files, or unrestricted network
 requests. `GOVERNANCE_SANDBOX_PROVIDER=none` is therefore ready for the current

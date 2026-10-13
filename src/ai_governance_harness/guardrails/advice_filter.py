@@ -6,6 +6,7 @@ mandatory statutory disclaimers and in-fund data scope notices.
 """
 
 import re
+from collections.abc import Iterator
 from typing import List, Optional, Tuple
 
 GENERAL_ADVICE_WARNING = (
@@ -125,3 +126,34 @@ class DisclosureAttacher:
             result = f"{result}\n\n{IN_FUND_PROVENANCE_NOTICE}"
 
         return result
+
+
+def _response_text(payload: object) -> Iterator[str]:
+    if isinstance(payload, str):
+        yield payload
+    elif isinstance(payload, dict):
+        for key, value in payload.items():
+            yield from _response_text(key)
+            yield from _response_text(value)
+    elif isinstance(payload, (list, tuple)):
+        for value in payload:
+            yield from _response_text(value)
+    elif payload is not None and not isinstance(payload, (bool, int, float)):
+        raise TypeError("Tool advice scanning requires a JSON-compatible response.")
+
+
+def tool_response_policy_data(payload: object) -> dict[str, str]:
+    """Scan response text in memory and expose only bounded policy metadata.
+
+    A passed scan means no prohibited pattern was detected, not that the
+    response has been legally classified as factual information or general advice.
+    """
+    guardrail = AdviceClassificationGuardrail()
+    detected = any(
+        guardrail.scan_for_personal_advice(text)
+        for text in _response_text(payload)
+    )
+    return {
+        "result_type": type(payload).__name__,
+        "advice_scan_status": "personal_advice_detected" if detected else "passed",
+    }

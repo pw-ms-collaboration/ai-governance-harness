@@ -28,6 +28,7 @@ from ai_governance_harness.guardrails.advice_filter import (
     AdviceClassificationGuardrail,
     DisclosureAttacher,
     WholeOfWealthInvariantGuardrail,
+    tool_response_policy_data,
 )
 
 SYSTEM_INSTRUCTIONS = (
@@ -313,7 +314,10 @@ class ChatService:
                         self._governance.require_allowed(
                             LifecyclePoint.POST_TOOL,
                             tool_name,
-                            policy_data={"is_error": result.is_error},
+                            policy_data={
+                                **tool_response_policy_data(result.structured_content),
+                                "is_error": result.is_error,
+                            },
                             source="chat",
                         )
                         tools_used.append(tool_name)

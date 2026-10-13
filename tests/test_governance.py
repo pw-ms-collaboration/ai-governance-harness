@@ -76,6 +76,58 @@ def test_policy_allows_known_tool_and_denies_unknown_action() -> None:
     assert denied.action == "deny"
 
 
+@pytest.mark.parametrize(
+    "action",
+    [
+        "get_member_profile",
+        "get_member_disengagement_signals",
+        "get_cohort_churn_analytics",
+        "get_fum_outflow_summary",
+        "prepare_member_outreach_case",
+    ],
+)
+@pytest.mark.parametrize(
+    ("status", "expected_allowed"),
+    [("passed", True), ("personal_advice_detected", False), ("unknown", False), (None, False)],
+)
+def test_given_tool_scan_status_when_evaluating_result_then_requires_passed_scan(
+    action: str,
+    status: str | None,
+    expected_allowed: bool,
+) -> None:
+    # Arrange
+    engine = GovernanceEngine(_settings())
+    data = {"advice_scan_status": status} if status is not None else {}
+
+    # Act
+    decision = engine.evaluate(
+        LifecyclePoint.POST_TOOL,
+        action,
+        policy_data=data,
+    )
+
+    # Assert
+    assert decision.allowed is expected_allowed
+    if status == "personal_advice_detected":
+        assert decision.matched_rule == "deny-personal-advice-tool-response"
+
+
+def test_given_direct_gateway_advice_when_returning_result_then_policy_blocks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    engine = GovernanceEngine(_settings())
+    monkeypatch.setattr(tools, "get_governance_engine", lambda: engine)
+
+    @tools.governed_read_only_tool("get_member_profile")
+    def response() -> dict[str, object]:
+        return {"nested": [{"text": "You should switch your super to Growth."}]}
+
+    # Act & Assert
+    with pytest.raises(GovernanceDeniedError):
+        response()
+
+
 def test_policy_evaluation_failure_denies_without_sensitive_detail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

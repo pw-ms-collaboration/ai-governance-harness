@@ -10,15 +10,17 @@ from azure.ai.projects import AIProjectClient
 load_dotenv()
 
 
-def get_azure_credential() -> DefaultAzureCredential:
-    """Instantiate DefaultAzureCredential targeting the configured tenant if specified.
+def get_azure_credential():
+    """Instantiate an Azure credential targeting the configured tenant if specified.
 
-    When AZURE_TENANT_ID is provided, DefaultAzureCredential routes token
-    requests to that specific tenant, enabling cross-tenant access.
+    When AZURE_TENANT_ID is provided, routes token requests to that specific
+    tenant (via AzureCliCredential or DefaultAzureCredential with AZURE_TENANT_ID).
     """
     tenant_id = os.getenv("AZURE_TENANT_ID")
     if tenant_id:
-        return DefaultAzureCredential(tenant_id=tenant_id)
+        # DefaultAzureCredential does not take tenant_id directly in its constructor,
+        # but respects AZURE_TENANT_ID in the environment for underlying credentials.
+        os.environ["AZURE_TENANT_ID"] = tenant_id
     return DefaultAzureCredential()
 
 

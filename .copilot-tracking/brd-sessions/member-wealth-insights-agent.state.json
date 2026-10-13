@@ -1,0 +1,37 @@
+{
+  "brdFile": "docs/project-planning/member-wealth-insights-agent-brd.md",
+  "lastAccessed": "2026-10-13T10:00:00Z",
+  "currentPhase": "Discover",
+  "disclaimerShownAt": "2026-10-13T10:00:00Z",
+  "phaseSkillsLoaded": [
+    "brd-author#discover"
+  ],
+  "extensionsLoaded": [],
+  "proposalResponseArtifacts": [],
+  "brdToPrdHandoff": null,
+  "questionsAsked": [
+    "initiative-name-and-description",
+    "business-problem",
+    "regulatory-advice-boundary",
+    "whole-of-wealth-data-scope",
+    "primary-persona-and-stakeholders"
+  ],
+  "answeredQuestions": {
+    "initiative-name-and-description": "AI agent providing whole-of-wealth customer profile insight, member movement analytics, FUM retention analysis, and next-best interaction recommendations for an Australian superannuation provider.",
+    "business-problem": "Understand member behavior, identify attrition drivers, diagnose Funds Under Management (FUM) outflows, and deliver trend analysis to guide future customer interactions."
+  },
+  "referencesProcessed": [],
+  "nextActions": [
+    "Clarify regulatory classification of advice (General Advice vs Personal Advice vs intra-fund advice under Corporations Act / ASIC RG 244)",
+    "Clarify agent target user (Internal front-line staff / retention specialist co-pilot vs Direct-to-consumer digital agent)",
+    "Define Whole-of-Wealth data source boundaries and consent model (CDR / Open Banking / internal fund data)",
+    "Formulate SMART Business Goals (BG-001, BG-002) with FUM retention and member attrition metrics"
+  ],
+  "qualityChecks": [
+    "scope-clarified"
+  ],
+  "userPreferences": {
+    "detail-level": "comprehensive",
+    "question-style": "structured"
+  }
+}

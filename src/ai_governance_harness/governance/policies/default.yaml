@@ -1,0 +1,72 @@
+apiVersion: governance.toolkit/v1
+version: "1.0"
+name: ai-governance-harness-default
+description: Default-deny policy for the synthetic in-fund governance harness.
+agent: ai-governance-harness
+scope: global
+default_action: deny
+rules:
+  - name: allow-agent-startup
+    stage: pre_input
+    condition: "action.type == 'agent.startup'"
+    action: allow
+  - name: allow-chat-input
+    stage: pre_input
+    condition: "action.type == 'chat.input'"
+    action: allow
+  - name: allow-model-call
+    stage: pre_input
+    condition: "action.type == 'foundry.chat'"
+    action: allow
+  - name: allow-model-result
+    stage: post_tool
+    condition: "action.type == 'foundry.chat'"
+    action: allow
+  - name: allow-member-profile
+    stage: pre_tool
+    condition: "action.type == 'get_member_profile'"
+    action: allow
+  - name: allow-member-signals
+    stage: pre_tool
+    condition: "action.type == 'get_member_disengagement_signals'"
+    action: allow
+  - name: allow-cohort-analytics
+    stage: pre_tool
+    condition: "action.type == 'get_cohort_churn_analytics'"
+    action: allow
+  - name: allow-fum-summary
+    stage: pre_tool
+    condition: "action.type == 'get_fum_outflow_summary'"
+    action: allow
+  - name: allow-approved-outreach-case
+    stage: pre_tool
+    condition: "action.type == 'prepare_member_outreach_case'"
+    action: allow
+  - name: allow-member-profile-result
+    stage: post_tool
+    condition: "action.type == 'get_member_profile'"
+    action: allow
+  - name: allow-member-signals-result
+    stage: post_tool
+    condition: "action.type == 'get_member_disengagement_signals'"
+    action: allow
+  - name: allow-cohort-analytics-result
+    stage: post_tool
+    condition: "action.type == 'get_cohort_churn_analytics'"
+    action: allow
+  - name: allow-fum-summary-result
+    stage: post_tool
+    condition: "action.type == 'get_fum_outflow_summary'"
+    action: allow
+  - name: allow-approved-outreach-case-result
+    stage: post_tool
+    condition: "action.type == 'prepare_member_outreach_case'"
+    action: allow
+  - name: allow-chat-output
+    stage: pre_output
+    condition: "action.type == 'chat.output'"
+    action: allow
+  - name: allow-agent-shutdown
+    stage: pre_output
+    condition: "action.type == 'agent.shutdown'"
+    action: allow

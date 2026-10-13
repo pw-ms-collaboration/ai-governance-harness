@@ -1,0 +1,56 @@
+[
+  {
+    "interaction_id": "INT-101",
+    "member_id": "MEM-001",
+    "timestamp": "2026-09-14T09:30:00Z",
+    "channel": "portal_chat",
+    "category": "general_inquiry",
+    "notes": "Member asked about annual statement dispatch date.",
+    "closure_inquiry_flag": false
+  },
+  {
+    "interaction_id": "INT-201",
+    "member_id": "MEM-002",
+    "timestamp": "2026-09-28T14:15:00Z",
+    "channel": "phone",
+    "category": "fee_query",
+    "notes": "Member called inquiring about administration fees and comparison with industry funds.",
+    "closure_inquiry_flag": false
+  },
+  {
+    "interaction_id": "INT-301",
+    "member_id": "MEM-003",
+    "timestamp": "2026-10-02T11:45:00Z",
+    "channel": "phone",
+    "category": "closure_inquiry",
+    "notes": "Member requested rollover out statement and transfer paperwork to external SMSF. Closure inquiry registered.",
+    "closure_inquiry_flag": true
+  },
+  {
+    "interaction_id": "INT-401",
+    "member_id": "MEM-004",
+    "timestamp": "2026-08-11T16:20:00Z",
+    "channel": "portal_chat",
+    "category": "investment_switch",
+    "notes": "Completed online switch to 100% High Growth option.",
+    "closure_inquiry_flag": false
+  },
+  {
+    "interaction_id": "INT-501",
+    "member_id": "MEM-005",
+    "timestamp": "2026-09-19T10:10:00Z",
+    "channel": "phone",
+    "category": "retirement_planning",
+    "notes": "Member asked about transition to retirement pension options.",
+    "closure_inquiry_flag": false
+  },
+  {
+    "interaction_id": "INT-701",
+    "member_id": "MEM-007",
+    "timestamp": "2026-10-08T15:00:00Z",
+    "channel": "secure_mail",
+    "category": "closure_inquiry",
+    "notes": "Member submitted inquiry via secure portal regarding fund transfer process and exit requirements.",
+    "closure_inquiry_flag": true
+  }
+]

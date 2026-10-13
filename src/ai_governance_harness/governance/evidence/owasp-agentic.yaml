@@ -1,0 +1,71 @@
+version: 1
+framework: OWASP Top 10 for Agentic Applications 2026
+assessment: repository-specific self-assessment
+controls:
+  - id: ASI01
+    title: Agent Goal Hijack
+    status: partial
+    evidence:
+      - runtime lifecycle policy
+      - bounded adversarial chat tests
+    limitation: Action governance does not prove reasoning safety.
+  - id: ASI02
+    title: Tool Misuse and Exploitation
+    status: implemented
+    evidence:
+      - default-deny exact tool policy
+      - typed closed-world MCP tools
+  - id: ASI03
+    title: Identity and Privilege Abuse
+    status: partial
+    evidence:
+      - bounded workload context
+      - hosted tenant, audience, and scope validation
+    limitation: Hosted end-user identity propagation remains deployment work.
+  - id: ASI04
+    title: Agentic Supply Chain Vulnerabilities
+    status: partial
+    evidence:
+      - pinned toolkit release line
+      - dependency audit and CycloneDX generation
+    limitation: Signing and build provenance are not yet implemented.
+  - id: ASI05
+    title: Unexpected Code Execution
+    status: implemented
+    evidence:
+      - no executable remote tools
+      - fail-closed sandbox readiness contract
+  - id: ASI06
+    title: Memory and Context Poisoning
+    status: partial
+    evidence:
+      - bounded non-persistent chat history
+      - no server-side transcript memory
+    limitation: No external memory provider is governed.
+  - id: ASI07
+    title: Insecure Inter-Agent Communication
+    status: not_applicable
+    evidence:
+      - no inter-agent protocol in the current deployment
+    limitation: Reassess before adding another agent.
+  - id: ASI08
+    title: Cascading Failures
+    status: implemented
+    evidence:
+      - toolkit circuit breakers
+      - rate limits, tool-round budgets, and operation timeouts
+  - id: ASI09
+    title: Human-Agent Trust Exploitation
+    status: partial
+    evidence:
+      - general-advice and provenance disclosures
+      - required-approval decisions fail closed
+      - MCP form elicitation gates synthetic outreach case preparation
+    limitation: Approval depends on MCP client elicitation support; no universal approval UI is implemented.
+  - id: ASI10
+    title: Rogue Agents
+    status: partial
+    evidence:
+      - exact agent policy binding
+      - audit decisions and bounded behavior
+    limitation: Behavior quarantine is not active in local single-agent mode.

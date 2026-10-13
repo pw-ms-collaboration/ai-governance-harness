@@ -1,0 +1,26 @@
+schema: agt-runtime-evidence/v1
+generated_at: "2026-10-14T00:00:00Z"
+toolkit_version: "4.1.0"
+deployment:
+  policy_files_loaded:
+    - policies/default.yaml
+  registered_tools:
+    - get_member_profile
+    - get_member_disengagement_signals
+    - get_cohort_churn_analytics
+    - get_fum_outflow_summary
+    - prepare_member_outreach_case
+  audit_sink:
+    enabled: true
+    target: structured-standard-output
+  identity:
+    enabled: true
+    kind: exact-workload-policy-binding
+    hosted_principal_validation: deferred
+  packages:
+    - package: agent-governance-toolkit
+      version: "4.1.0"
+    - package: agent-governance-toolkit-core
+      version: "4.1.0"
+    - package: agt-sandbox
+      version: "4.1.0"

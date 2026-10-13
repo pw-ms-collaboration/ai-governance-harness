@@ -1,0 +1,111 @@
+{
+  "schemaVersion": "1.0.0",
+  "projectSlug": "ai-governance-harness",
+  "entryMode": "capture",
+  "outputTemplate": "madr-v4",
+  "phase": "complete",
+  "userPreferences": {
+    "autonomyTier": "partial",
+    "diagramFormat": "mermaid",
+    "targetSystem": "AI Governance Harness",
+    "outputDetailLevel": "detailed",
+    "includeOptionalArtifacts": {
+      "consequencesTable": true,
+      "decisionDrivers": true
+    }
+  },
+  "disclaimerShownAt": "2026-10-13T18:51:03Z",
+  "phaseSkillsLoaded": [
+    "adr-author/SKILL.md#frame",
+    "adr-author/SKILL.md#decide",
+    "adr-author/SKILL.md#govern"
+  ],
+  "inputs": [],
+  "decisionMetadata": {
+    "title": "AI Governance Harness architecture decision set",
+    "suggestedDecision": "",
+    "deciders": [
+      "Repository maintainers"
+    ],
+    "consulted": [],
+    "informed": [],
+    "tags": [
+      "governance",
+      "security",
+      "reliability",
+      "observability",
+      "supply-chain"
+    ]
+  },
+  "lineage": {
+    "supersedes": [],
+    "supersededBy": null,
+    "relatedTo": [
+      "docs/planning/adrs/0001-contain-agent-governance-toolkit-behind-a-versioned-adapter.md",
+      "docs/planning/adrs/0002-enforce-default-deny-at-every-execution-boundary.md",
+      "docs/planning/adrs/0003-minimize-identity-and-governance-telemetry.md",
+      "docs/planning/adrs/0004-use-local-first-reliability-and-sandbox-readiness-boundaries.md",
+      "docs/planning/adrs/0005-present-governance-through-a-same-origin-observability-panel.md",
+      "docs/planning/adrs/0006-govern-toolkit-dependency-risk-with-an-expiring-vex-exception.md",
+      "docs/planning/adrs/0007-use-feed-neutral-manifests-and-repeatable-team-commands.md"
+    ]
+  },
+  "asrTriggers": [
+    {
+      "kind": "security",
+      "evidence": "Default-deny policy enforcement and temporary dependency VEX exception",
+      "note": "Policy failure, bypass, identity leakage, or stale vulnerability exceptions would materially change the system risk posture."
+    },
+    {
+      "kind": "compliance",
+      "evidence": "Repository-owned OWASP Agentic ASI01-ASI10 evidence and governance verification",
+      "note": "Evidence must remain explicit, reproducible, and non-certifying while controls and known gaps evolve."
+    },
+    {
+      "kind": "availability",
+      "evidence": "Foundry and MCP timeout, circuit-breaker, readiness, and fail-closed behavior",
+      "note": "External dependency failure must remain diagnosable without allowing ungoverned execution."
+    },
+    {
+      "kind": "maintainability",
+      "evidence": "Released Toolkit adapter boundary and repository-owned policy contract",
+      "note": "Preview API churn and cross-process enforcement require one stable adapter and clear recovery instructions."
+    },
+    {
+      "kind": "evolvability",
+      "evidence": "Deferred hosted identity, sandbox providers, and future Toolkit upgrade path",
+      "note": "The local-first architecture must allow later hosted and privileged capabilities without weakening current controls."
+    }
+  ],
+  "untrustedSources": [
+    {
+      "sourceType": "web-fetch",
+      "identifier": "OSV advisory records for the temporary cryptography exception",
+      "atPhase": "frame"
+    }
+  ],
+  "handoffs": [
+    {
+      "id": "adr-ai-governance-harness-handoff-001",
+      "target": "ado",
+      "payloadPath": ".copilot-tracking/adr-plans/ai-governance-harness/handoffs/adr-follow-up.md",
+      "generatedAt": "2026-10-13T19:08:00Z",
+      "source": {
+        "planner": "adr-planner"
+      },
+      "tier": "partial"
+    },
+    {
+      "id": "adr-ai-governance-harness-handoff-002",
+      "target": "github",
+      "payloadPath": ".copilot-tracking/adr-plans/ai-governance-harness/handoffs/adr-follow-up.md",
+      "generatedAt": "2026-10-13T19:08:00Z",
+      "source": {
+        "planner": "adr-planner"
+      },
+      "tier": "partial"
+    }
+  ],
+  "repoVisibility": "public",
+  "lastUpdatedAt": "2026-10-13T19:08:00Z"
+}

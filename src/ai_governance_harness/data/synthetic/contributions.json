@@ -1,0 +1,119 @@
+[
+  {
+    "contribution_id": "CONTR-101",
+    "account_id": "ACC-001",
+    "member_id": "MEM-001",
+    "date": "2026-08-15",
+    "amount": 1250.0,
+    "type": "SG",
+    "usual_monthly_baseline": 1250.0
+  },
+  {
+    "contribution_id": "CONTR-102",
+    "account_id": "ACC-001",
+    "member_id": "MEM-001",
+    "date": "2026-09-15",
+    "amount": 1250.0,
+    "type": "SG",
+    "usual_monthly_baseline": 1250.0
+  },
+  {
+    "contribution_id": "CONTR-103",
+    "account_id": "ACC-001",
+    "member_id": "MEM-001",
+    "date": "2026-10-15",
+    "amount": 1250.0,
+    "type": "SG",
+    "usual_monthly_baseline": 1250.0
+  },
+  {
+    "contribution_id": "CONTR-201",
+    "account_id": "ACC-002",
+    "member_id": "MEM-002",
+    "date": "2026-08-20",
+    "amount": 2200.0,
+    "type": "SG",
+    "usual_monthly_baseline": 2200.0
+  },
+  {
+    "contribution_id": "CONTR-202",
+    "account_id": "ACC-002",
+    "member_id": "MEM-002",
+    "date": "2026-09-20",
+    "amount": 1100.0,
+    "type": "SG",
+    "usual_monthly_baseline": 2200.0
+  },
+  {
+    "contribution_id": "CONTR-203",
+    "account_id": "ACC-002",
+    "member_id": "MEM-002",
+    "date": "2026-10-20",
+    "amount": 1100.0,
+    "type": "SG",
+    "usual_monthly_baseline": 2200.0
+  },
+  {
+    "contribution_id": "CONTR-301",
+    "account_id": "ACC-003",
+    "member_id": "MEM-003",
+    "date": "2026-08-10",
+    "amount": 2800.0,
+    "type": "SG",
+    "usual_monthly_baseline": 2800.0
+  },
+  {
+    "contribution_id": "CONTR-302",
+    "account_id": "ACC-003",
+    "member_id": "MEM-003",
+    "date": "2026-09-10",
+    "amount": 2800.0,
+    "type": "SG",
+    "usual_monthly_baseline": 2800.0
+  },
+  {
+    "contribution_id": "CONTR-303",
+    "account_id": "ACC-003",
+    "member_id": "MEM-003",
+    "date": "2026-10-10",
+    "amount": 2800.0,
+    "type": "SG",
+    "usual_monthly_baseline": 2800.0
+  },
+  {
+    "contribution_id": "CONTR-401",
+    "account_id": "ACC-004",
+    "member_id": "MEM-004",
+    "date": "2026-10-05",
+    "amount": 650.0,
+    "type": "SG",
+    "usual_monthly_baseline": 650.0
+  },
+  {
+    "contribution_id": "CONTR-501",
+    "account_id": "ACC-005",
+    "member_id": "MEM-005",
+    "date": "2026-10-12",
+    "amount": 1800.0,
+    "type": "SG",
+    "usual_monthly_baseline": 3000.0
+  },
+  {
+    "contribution_id": "CONTR-601",
+    "account_id": "ACC-006",
+    "member_id": "MEM-006",
+    "date": "2026-10-18",
+    "amount": 1600.0,
+    "type": "SG",
+    "usual_monthly_baseline": 1600.0
+  },
+  {
+    "contribution_id": "CONTR-701",
+    "account_id": "ACC-007",
+    "member_id": "MEM-007",
+    "date": "2026-10-22",
+    "amount": 2400.0,
+    "type": "SG",
+    "usual_monthly_baseline": 2400.0
+  }
+]

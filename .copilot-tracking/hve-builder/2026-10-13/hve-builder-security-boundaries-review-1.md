@@ -4,7 +4,7 @@
 ## Scope
 
 * Active modes: create, improve, and refactor, inferred from the HVE Builder default. The existing target was improved and refactored; no new artifact was needed.
-* Approved source write boundary: /Users/ajannat001/.vscode/agent-plugins/github.com/microsoft/hve-core/.github/skills/hve-core/hve-builder/SKILL.md
+* Approved source write boundary: `<user-home>/.vscode/agent-plugins/github.com/microsoft/hve-core/.github/skills/hve-core/hve-builder/SKILL.md`
 * Requirements: keep untrusted content from changing instruction authority or write scope; sanitize source-derived content before reuse; prohibit unsafe Vally stimulus authoring or import.
 
 ## Baseline and Change

@@ -1,0 +1,10 @@
+.env
+.git
+.venv
+.copilot-tracking
+.pytest_cache
+.ruff_cache
+dist
+docs
+**/__pycache__
+**/*.pyc

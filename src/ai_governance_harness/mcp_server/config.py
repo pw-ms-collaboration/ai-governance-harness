@@ -46,7 +46,7 @@ class ServerSettings(BaseModel):
         "http://localhost",
     )
     hosted: bool = False
-    json_response: bool = True
+    json_response: bool = False
     auth_tenant_id: str | None = None
     auth_audience: str | None = None
     auth_required_scope: str | None = None
@@ -136,7 +136,7 @@ class ServerSettings(BaseModel):
             region=os.getenv("AZURE_AI_PROJECT_REGION") or os.getenv("AZURE_REGION"),
             allowed_origins=origins,
             hosted=_parse_bool(os.getenv("MCP_HOSTED"), default=False),
-            json_response=_parse_bool(os.getenv("MCP_JSON_RESPONSE"), default=True),
+            json_response=_parse_bool(os.getenv("MCP_JSON_RESPONSE"), default=False),
             auth_tenant_id=os.getenv("MCP_AUTH_TENANT_ID") or os.getenv("AZURE_TENANT_ID"),
             auth_audience=os.getenv("MCP_AUTH_AUDIENCE"),
             auth_required_scope=os.getenv("MCP_AUTH_REQUIRED_SCOPE"),

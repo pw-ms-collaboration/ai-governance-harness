@@ -7,19 +7,57 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
+from ai_governance_harness.governance import get_governance_engine
+from ai_governance_harness.governance.sandbox import SandboxGuard
+from ai_governance_harness.governance.snapshot import build_governance_snapshot
 from ai_governance_harness.mcp_server.config import ServerSettings
 from ai_governance_harness.mcp_server.security import RequestSecurityMiddleware
 from ai_governance_harness.mcp_server.server import mcp
 
 
 def build_http_app(settings: ServerSettings) -> Starlette:
-    """Build the stateless MCP HTTP app and its public operational routes."""
+    """Build the session-based MCP HTTP app and its public operational routes."""
 
     async def liveness(_: Request) -> JSONResponse:
         return JSONResponse({"status": "live"})
 
     async def readiness(_: Request) -> JSONResponse:
-        return JSONResponse({"status": "ready"})
+        governance = get_governance_engine()
+        sandbox = SandboxGuard(governance.settings)
+        ready = governance.ready and sandbox.ready
+        status = "ready" if ready else "not_ready"
+        return JSONResponse(
+            {
+                "status": status,
+                "governance": {
+                    "status": status,
+                    "enforcement": (
+                        "enabled"
+                        if governance.settings.enabled
+                        else "disabled_for_test"
+                    ),
+                    "policy_digest": governance.policy_digest,
+                },
+                "sandbox": {
+                    "status": (
+                        "not_required_for_read_only"
+                        if sandbox.provider_kind == "none"
+                        else ("ready" if sandbox.ready else "not_ready")
+                    ),
+                    "provider": sandbox.provider_kind,
+                },
+            },
+            status_code=200 if ready else 503,
+        )
+
+    async def governance_snapshot(_: Request) -> JSONResponse:
+        governance = get_governance_engine()
+        return JSONResponse(
+            build_governance_snapshot(
+                governance,
+                source="mcp",
+            )
+        )
 
     async def protected_resource_metadata(_: Request) -> JSONResponse:
         if not all(
@@ -43,7 +81,7 @@ def build_http_app(settings: ServerSettings) -> Starlette:
     app = mcp.streamable_http_app(
         streamable_http_path=settings.mcp_path,
         json_response=settings.json_response,
-        stateless_http=True,
+        stateless_http=False,
         max_request_body_size=settings.max_request_body_size,
         host=settings.host,
     )
@@ -51,6 +89,11 @@ def build_http_app(settings: ServerSettings) -> Starlette:
         [
             Route("/health/live", liveness, methods=["GET"]),
             Route("/health/ready", readiness, methods=["GET"]),
+            Route(
+                "/governance/snapshot",
+                governance_snapshot,
+                methods=["GET"],
+            ),
             Route(
                 "/.well-known/oauth-protected-resource",
                 protected_resource_metadata,

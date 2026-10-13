@@ -1,0 +1,105 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/pw-ms-collaboration/ai-governance-harness/security/vex/2026-10-14/v1",
+  "author": "https://github.com/pw-ms-collaboration",
+  "role": "Document Creator",
+  "timestamp": "2026-10-13T18:51:03Z",
+  "last_updated": "2026-10-13T18:51:03Z",
+  "version": 1,
+  "tooling": "AI-drafted reachability assessment; requires human review through repository change control before release.",
+  "statements": [
+    {
+      "@id": "https://github.com/pw-ms-collaboration/ai-governance-harness/security/vex/statements/PYSEC-2026-3552/v1",
+      "version": 1,
+      "vulnerability": {
+        "@id": "https://osv.dev/vulnerability/PYSEC-2026-3552",
+        "name": "PYSEC-2026-3552",
+        "aliases": [
+          "CVE-2026-69247",
+          "GHSA-g6cj-pr64-35w5"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:pypi/ai-governance-harness@0.1.0",
+          "identifiers": {
+            "purl": "pkg:pypi/ai-governance-harness@0.1.0"
+          },
+          "subcomponents": [
+            {
+              "@id": "pkg:pypi/cryptography@48.0.1",
+              "identifiers": {
+                "purl": "pkg:pypi/cryptography@48.0.1"
+              }
+            }
+          ]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "status_notes": "The harness and installed dependency Python sources do not call the affected PKCS#7 EnvelopedData decryption APIs. The governed demo accepts chat text and fixed synthetic tool inputs, not PKCS#7 or S/MIME payloads. Automated reachability and version checks run before the scoped audit exception. Reassess no later than 2026-11-13."
+    },
+    {
+      "@id": "https://github.com/pw-ms-collaboration/ai-governance-harness/security/vex/statements/PYSEC-2026-3553/v1",
+      "version": 1,
+      "vulnerability": {
+        "@id": "https://osv.dev/vulnerability/PYSEC-2026-3553",
+        "name": "PYSEC-2026-3553",
+        "aliases": [
+          "CVE-2026-69249",
+          "GHSA-jwv3-5hgf-82ww"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:pypi/ai-governance-harness@0.1.0",
+          "identifiers": {
+            "purl": "pkg:pypi/ai-governance-harness@0.1.0"
+          },
+          "subcomponents": [
+            {
+              "@id": "pkg:pypi/cryptography@48.0.1",
+              "identifiers": {
+                "purl": "pkg:pypi/cryptography@48.0.1"
+              }
+            }
+          ]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "status_notes": "The harness and installed dependency Python sources do not construct cryptography X.509 verification policies or validate attacker-supplied certificate chains. Platform TLS and Azure credential handling are delegated to their supported libraries rather than the affected verifier API. Automated reachability and version checks run before the scoped audit exception. Reassess no later than 2026-11-13."
+    },
+    {
+      "@id": "https://github.com/pw-ms-collaboration/ai-governance-harness/security/vex/statements/PYSEC-2026-3554/v1",
+      "version": 1,
+      "vulnerability": {
+        "@id": "https://osv.dev/vulnerability/PYSEC-2026-3554",
+        "name": "PYSEC-2026-3554",
+        "aliases": [
+          "CVE-2026-69248",
+          "GHSA-m2h6-j472-rp4c"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:pypi/ai-governance-harness@0.1.0",
+          "identifiers": {
+            "purl": "pkg:pypi/ai-governance-harness@0.1.0"
+          },
+          "subcomponents": [
+            {
+              "@id": "pkg:pypi/cryptography@48.0.1",
+              "identifiers": {
+                "purl": "pkg:pypi/cryptography@48.0.1"
+              }
+            }
+          ]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "status_notes": "The harness and installed dependency Python sources do not construct cryptography X.509 verification policies or process DNS name constraints through the affected verifier API. Automated reachability and version checks run before the scoped audit exception. Reassess no later than 2026-11-13."
+    }
+  ]
+}

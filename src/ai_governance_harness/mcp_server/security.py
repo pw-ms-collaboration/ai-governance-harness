@@ -17,6 +17,12 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
+from ai_governance_harness.governance.context import (
+    GovernanceContext,
+    get_governance_context,
+    reset_governance_context,
+    set_governance_context,
+)
 from ai_governance_harness.mcp_server.config import ServerSettings
 from ai_governance_harness.mcp_server.telemetry import (
     correlation_id_context,
@@ -31,6 +37,9 @@ _PUBLIC_PATHS = {
     "/health/ready",
     "/.well-known/oauth-protected-resource",
     "/.well-known/oauth-protected-resource/mcp",
+}
+_LOCAL_OPERATIONAL_PATHS = {
+    "/governance/snapshot",
 }
 
 
@@ -177,6 +186,16 @@ class RequestSecurityMiddleware(BaseHTTPMiddleware):
     ) -> Response:
         correlation_id = str(uuid.uuid4())
         token = correlation_id_context.set(correlation_id)
+        governance_token = set_governance_context(
+            GovernanceContext(
+                workload_id="ai-governance-harness",
+                environment=self._settings.environment,
+                correlation_id=correlation_id,
+                authentication_outcome=(
+                    "unauthenticated" if self._settings.hosted else "local"
+                ),
+            )
+        )
         started_at = time.perf_counter()
         route_kind = "public" if request.url.path in _PUBLIC_PATHS else "mcp"
         outcome = "error"
@@ -208,12 +227,21 @@ class RequestSecurityMiddleware(BaseHTTPMiddleware):
             }
             http_request_counter.add(1, metric_attributes)
             http_request_duration.record(elapsed, metric_attributes)
+            reset_governance_context(governance_token)
             correlation_id_context.reset(token)
 
     async def _validate_request(self, request: Request) -> Response | None:
         if request.url.path in _PUBLIC_PATHS:
             return None
-        if request.url.path != self._settings.mcp_path:
+        if (
+            request.url.path in _LOCAL_OPERATIONAL_PATHS
+            and not self._settings.hosted
+        ):
+            return None
+        if request.url.path not in {
+            self._settings.mcp_path,
+            *_LOCAL_OPERATIONAL_PATHS,
+        }:
             return JSONResponse({"error": "Not found."}, status_code=404)
 
         origin = request.headers.get("origin")
@@ -263,6 +291,17 @@ class RequestSecurityMiddleware(BaseHTTPMiddleware):
                 outcome="success" if principal_key else "rejected",
                 settings=self._settings,
                 authentication_outcome=auth_outcome,
+            )
+            current_context = get_governance_context()
+            set_governance_context(
+                current_context.model_copy(
+                    update={
+                        "principal_hash": principal_key,
+                        "authentication_outcome": (
+                            "authenticated" if principal_key else "rejected"
+                        ),
+                    }
+                )
             )
             if principal_key is None:
                 return JSONResponse(

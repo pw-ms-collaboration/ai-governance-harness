@@ -5,10 +5,59 @@ or exposing filesystem paths, and ensuring compliance with in-fund data scope in
 """
 
 import json
+from collections.abc import Callable
+from functools import wraps
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, ParamSpec, TypeVar
+
+from ai_governance_harness.governance import (
+    LifecyclePoint,
+    get_governance_engine,
+)
+from ai_governance_harness.governance.sandbox import (
+    ExecutionClass,
+    SandboxGuard,
+)
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "synthetic"
+Parameters = ParamSpec("Parameters")
+Result = TypeVar("Result")
+
+
+def governed_read_only_tool(
+    action: str,
+) -> Callable[[Callable[Parameters, Result]], Callable[Parameters, Result]]:
+    """Enforce shared policy beneath every MCP and legacy tool caller."""
+
+    def decorator(
+        operation: Callable[Parameters, Result],
+    ) -> Callable[Parameters, Result]:
+        @wraps(operation)
+        def wrapper(
+            *args: Parameters.args,
+            **kwargs: Parameters.kwargs,
+        ) -> Result:
+            engine = get_governance_engine()
+            engine.require_allowed(
+                LifecyclePoint.PRE_TOOL,
+                action,
+                source="gateway",
+            )
+            SandboxGuard(
+                engine.settings,
+            ).require_ready(ExecutionClass.READ_ONLY_DATA)
+            result = operation(*args, **kwargs)
+            engine.require_allowed(
+                LifecyclePoint.POST_TOOL,
+                action,
+                policy_data={"result_type": type(result).__name__},
+                source="gateway",
+            )
+            return result
+
+        return wrapper
+
+    return decorator
 
 
 class MemberNotFoundError(ValueError):
@@ -58,6 +107,7 @@ class SuperannuationDataGateway:
         with open(digital_file, "r", encoding="utf-8") as f:
             self._digital_activity = json.load(f)
 
+    @governed_read_only_tool("get_member_profile")
     def get_member_profile(self, member_id: str) -> Dict[str, Any]:
         """Retrieve unified internal superannuation profile for a member.
 
@@ -95,6 +145,7 @@ class SuperannuationDataGateway:
             "provenance_notice": "Data strictly restricted to in-fund superannuation holdings. External assets not verified.",
         }
 
+    @governed_read_only_tool("get_member_disengagement_signals")
     def get_member_disengagement_signals(self, member_id: str) -> Dict[str, Any]:
         """Analyze contribution drops, digital inactivity, and closure inquiries for a member."""
         member = self._members.get(member_id)
@@ -205,6 +256,7 @@ class SuperannuationDataGateway:
             },
         }
 
+    @governed_read_only_tool("get_cohort_churn_analytics")
     def get_cohort_churn_analytics(self, cohort_filter: Optional[str] = None) -> Dict[str, Any]:
         """Aggregate attrition factors and lookback attribution across the cohort."""
         total_members = len(self._members)
@@ -251,6 +303,7 @@ class SuperannuationDataGateway:
             "lookback_window": "90_days",
         }
 
+    @governed_read_only_tool("get_fum_outflow_summary")
     def get_fum_outflow_summary(self) -> Dict[str, Any]:
         """Calculate aggregate Funds Under Management (FUM) at risk and cohort breakdown."""
         total_fum = sum(acc.get("balance", 0.0) for acc in self._accounts.values())

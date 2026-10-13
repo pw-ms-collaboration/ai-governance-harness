@@ -35,6 +35,7 @@ def test_given_no_environment_when_loading_settings_then_uses_local_stdio_defaul
     assert settings.port == 8001
     assert settings.mcp_path == "/mcp"
     assert settings.hosted is False
+    assert settings.json_response is False
 
 
 def test_given_hosted_mode_without_region_when_loading_then_fails_closed(

@@ -8,11 +8,17 @@ from collections.abc import Callable
 from typing import Any, TypeVar
 
 from mcp.server import MCPServer
+from mcp.server.elicitation import ElicitationResult
+from mcp.server.mcpserver.resolve import Elicit, Resolve
 from mcp.server.mcpserver.tools.base import ToolError
 from mcp_types import ToolAnnotations
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from typing_extensions import Annotated
 
+from ai_governance_harness.governance import (
+    LifecyclePoint,
+    get_governance_engine,
+)
 from ai_governance_harness.mcp_server import tools as gateway_tools
 from ai_governance_harness.mcp_server.telemetry import (
     emit_audit_event,
@@ -33,12 +39,37 @@ READ_ONLY_ANNOTATIONS = ToolAnnotations(
     openWorldHint=False,
 )
 
+APPROVAL_ANNOTATIONS = ToolAnnotations(
+    readOnlyHint=True,
+    destructiveHint=False,
+    idempotentHint=False,
+    openWorldHint=False,
+)
+
+
+class OutreachCaseApproval(BaseModel):
+    """Primitive form returned by an MCP elicitation-capable client."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    approved: StrictBool = Field(
+        description=(
+            "Select true to approve preparing a read-only synthetic member "
+            "outreach case. No external contact will occur."
+        )
+    )
+
+
 mcp = MCPServer(
     name="ai-governance-harness",
-    description="Read-only synthetic superannuation governance tools.",
+    description=(
+        "Read-only synthetic superannuation governance tools with optional "
+        "form-based human approval."
+    ),
     instructions=(
         "Use these tools only for synthetic in-fund data. Raw tool results are factual "
-        "and are not financial advice."
+        "and are not financial advice. The prepare_member_outreach_case tool requires "
+        "MCP form elicitation and never performs external contact."
     ),
 )
 
@@ -90,6 +121,17 @@ def _call_gateway(tool_name: str, operation: Callable[[], ResultT]) -> ResultT:
     return result
 
 
+def _resolve_outreach_approval() -> Elicit[OutreachCaseApproval]:
+    return Elicit(
+        message=(
+            "Approve preparation of a read-only synthetic member outreach case. "
+            "The result may include synthetic disengagement signals, but no "
+            "message, notification, or other external action will be executed."
+        ),
+        schema=OutreachCaseApproval,
+    )
+
+
 @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
 def get_member_profile(member_id: MemberId) -> dict[str, Any]:
     """Return a synthetic member's internal superannuation profile.
@@ -132,3 +174,74 @@ def get_fum_outflow_summary() -> dict[str, Any]:
         "get_fum_outflow_summary",
         gateway_tools.get_fum_outflow_summary,
     )
+
+
+@mcp.tool(annotations=APPROVAL_ANNOTATIONS)
+def prepare_member_outreach_case(
+    member_id: MemberId,
+    approval: Annotated[
+        ElicitationResult[OutreachCaseApproval],
+        Resolve(_resolve_outreach_approval),
+    ],
+) -> dict[str, Any]:
+    """Prepare a synthetic outreach case after explicit MCP form approval.
+
+    This tool never sends a message or performs another external action.
+
+    Args:
+        member_id: Synthetic identifier in the form `MEM-001`.
+    """
+    engine = get_governance_engine()
+    engine.require_allowed(
+        LifecyclePoint.PRE_TOOL,
+        "prepare_member_outreach_case",
+        source="mcp",
+    )
+    if approval.action == "decline":
+        emit_audit_event(
+            "mcp.elicitation",
+            outcome="declined",
+            tool_name="prepare_member_outreach_case",
+        )
+        raise ToolError("Approval was declined. No operation was executed.")
+    if approval.action == "cancel":
+        emit_audit_event(
+            "mcp.elicitation",
+            outcome="cancelled",
+            tool_name="prepare_member_outreach_case",
+        )
+        raise ToolError("Approval was cancelled. No operation was executed.")
+    if not approval.data.approved:
+        emit_audit_event(
+            "mcp.elicitation",
+            outcome="not_approved",
+            tool_name="prepare_member_outreach_case",
+        )
+        raise ToolError("Explicit approval is required. No operation was executed.")
+
+    emit_audit_event(
+        "mcp.elicitation",
+        outcome="approved",
+        tool_name="prepare_member_outreach_case",
+    )
+
+    def build_case() -> dict[str, Any]:
+        signals = gateway_tools.get_member_disengagement_signals(member_id)
+        result = {
+            "member_id": member_id,
+            "approval": {
+                "status": "approved",
+                "mechanism": "mcp_form_elicitation",
+            },
+            "external_action_executed": False,
+            "disengagement_signals": signals,
+        }
+        engine.require_allowed(
+            LifecyclePoint.POST_TOOL,
+            "prepare_member_outreach_case",
+            policy_data={"result_type": type(result).__name__},
+            source="mcp",
+        )
+        return result
+
+    return _call_gateway("prepare_member_outreach_case", build_case)

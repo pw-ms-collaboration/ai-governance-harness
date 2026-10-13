@@ -11,6 +11,9 @@
   --assistant: #eaf2ff;
   --user: #174ea6;
   --danger: #a4262c;
+  --success: #0b6a0b;
+  --warning: #7a4d00;
+  --code-bg: #eef2f7;
   font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
 }
 
@@ -69,10 +72,14 @@ button:disabled {
   top: 1rem;
 }
 
+.skip-governance {
+  left: 13rem;
+}
+
 .site-header,
-.chat-shell,
+.app-shell,
 footer {
-  width: min(64rem, calc(100% - 2rem));
+  width: min(96rem, calc(100% - 2rem));
   margin-inline: auto;
 }
 
@@ -134,14 +141,22 @@ h1 {
   background: var(--danger);
 }
 
-.chat-shell {
+.app-shell {
   display: grid;
   gap: 1.25rem;
   padding-bottom: 2rem;
 }
 
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(26rem, 0.8fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
 .intro,
-.conversation {
+.conversation,
+.governance-panel {
   border: 1px solid var(--border);
   border-radius: 1rem;
   background: var(--surface);
@@ -150,7 +165,9 @@ h1 {
 }
 
 .intro h2,
-.conversation h2 {
+.conversation h2,
+.governance-panel h2,
+.governance-panel h3 {
   margin-top: 0;
 }
 
@@ -161,7 +178,8 @@ h1 {
 }
 
 .example,
-.secondary {
+.secondary,
+.danger-secondary {
   border: 1px solid var(--primary);
   background: #fff;
   color: var(--primary);
@@ -170,6 +188,15 @@ h1 {
 .example:hover,
 .secondary:hover {
   background: #edf4ff;
+}
+
+.danger-secondary {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.danger-secondary:hover {
+  background: #fde7e9;
 }
 
 .conversation-heading {
@@ -276,6 +303,249 @@ form > button {
   justify-self: start;
 }
 
+.governance-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.governance-panel > * {
+  min-width: 0;
+}
+
+.conversation,
+.governance-panel {
+  min-width: 0;
+}
+
+.panel-heading {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.panel-heading h2 {
+  margin-bottom: 0;
+  font-size: 1.45rem;
+}
+
+.panel-intro {
+  margin: 0;
+  color: var(--muted);
+}
+
+.panel-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.status-badge,
+.decision-badge,
+.evidence-status {
+  display: inline-flex;
+  align-items: center;
+  width: max-content;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0.25rem 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 750;
+  line-height: 1.2;
+  text-transform: capitalize;
+}
+
+.status-badge.ready,
+.decision-badge.allow,
+.evidence-status.implemented {
+  background: #e6f4e6;
+  color: var(--success);
+}
+
+.status-badge.partial,
+.status-badge.neutral,
+.evidence-status.partial,
+.evidence-status.not_applicable {
+  background: #fff4ce;
+  color: var(--warning);
+}
+
+.status-badge.not_ready,
+.status-badge.unavailable,
+.decision-badge.deny,
+.decision-badge.require_approval,
+.evidence-status.gap,
+.evidence-status.deferred {
+  background: #fde7e9;
+  color: var(--danger);
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin: 0;
+}
+
+.metric-grid div {
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  background: #f8faff;
+  padding: 0.75rem;
+}
+
+.metric-grid dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.metric-grid dd {
+  margin: 0.3rem 0 0;
+  font-size: 1.35rem;
+  font-weight: 750;
+}
+
+.runtime-summary {
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+
+.status-list,
+.evidence-list,
+.privacy-list {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.status-list li,
+.evidence-list li,
+.privacy-list li {
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  padding: 0.65rem 0.75rem;
+}
+
+.status-line,
+.evidence-heading {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.compact-definition {
+  display: grid;
+  gap: 0.35rem;
+  margin-block: 0.8rem;
+}
+
+.compact-definition div {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+.compact-definition dt {
+  font-weight: 700;
+}
+
+.compact-definition dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+code {
+  border-radius: 0.25rem;
+  background: var(--code-bg);
+  padding: 0.1rem 0.25rem;
+}
+
+.circuit-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.circuit-card {
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  padding: 0.55rem;
+}
+
+.circuit-card strong,
+.circuit-card span {
+  display: block;
+}
+
+.circuit-card span {
+  margin-top: 0.2rem;
+  color: var(--muted);
+  text-transform: capitalize;
+}
+
+details {
+  border-top: 1px solid var(--border);
+  padding-top: 0.8rem;
+}
+
+summary {
+  cursor: pointer;
+  font-weight: 750;
+}
+
+details[open] summary {
+  margin-bottom: 0.75rem;
+}
+
+.table-scroll {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  max-height: 25rem;
+  overflow: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+caption {
+  padding-bottom: 0.5rem;
+  color: var(--muted);
+  text-align: left;
+}
+
+th,
+td {
+  border-bottom: 1px solid var(--border);
+  padding: 0.55rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+}
+
+td code {
+  white-space: nowrap;
+}
+
+.evidence-list small,
+.privacy-list small {
+  display: block;
+  margin-top: 0.35rem;
+  color: var(--muted);
+}
+
 footer {
   padding-block: 1rem 2rem;
   color: var(--muted);
@@ -291,6 +561,31 @@ footer {
   .site-header {
     display: grid;
     padding-top: 2rem;
+  }
+
+  @media (max-width: 74rem) {
+    .workspace {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 36rem) {
+    .metric-grid,
+    .circuit-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .panel-heading,
+    .status-line,
+    .evidence-heading {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+
+    .compact-definition div {
+      grid-template-columns: 1fr;
+      gap: 0.15rem;
+    }
   }
 
   .message {

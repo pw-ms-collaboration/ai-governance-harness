@@ -13,7 +13,7 @@ from ai_governance_harness.mcp_server.http_app import build_http_app
 from ai_governance_harness.mcp_server.server import mcp
 
 
-def test_given_http_settings_when_running_server_then_uses_stateless_json_transport(
+def test_given_http_settings_when_running_server_then_uses_session_json_transport(
     monkeypatch,
 ) -> None:
     # Arrange
@@ -57,7 +57,7 @@ def test_given_custom_mcp_path_when_building_app_then_registers_only_that_path()
     app = mcp.streamable_http_app(
         streamable_http_path="/custom-mcp",
         json_response=True,
-        stateless_http=True,
+        stateless_http=False,
     )
 
     # Assert
@@ -125,7 +125,11 @@ def test_given_public_operational_paths_when_unauthenticated_then_remain_availab
 
     # Assert
     assert live.json() == {"status": "live"}
-    assert ready.json() == {"status": "ready"}
+    readiness = ready.json()
+    assert readiness["status"] == "ready"
+    assert readiness["governance"]["status"] == "ready"
+    assert readiness["governance"]["enforcement"] == "enabled"
+    assert len(readiness["governance"]["policy_digest"]) == 64
     assert metadata.json() == {
         "resource": "https://mcp.example/mcp",
         "authorization_servers": [
@@ -134,6 +138,33 @@ def test_given_public_operational_paths_when_unauthenticated_then_remain_availab
         "bearer_methods_supported": ["header"],
         "scopes_supported": ["Mcp.Tools.Read"],
     }
+
+
+def test_given_local_mode_when_getting_governance_then_snapshot_is_available() -> None:
+    settings = ServerSettings(transport="streamable-http", hosted=False)
+    client = TestClient(build_http_app(settings))
+
+    response = client.get("/governance/snapshot")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["schema"] == "ai-governance-observability/v1"
+    assert payload["source"] == "mcp"
+    assert payload["privacy"]["raw_prompts"] is False
+
+
+def test_given_hosted_mode_when_getting_governance_then_authentication_is_required() -> None:
+    client = TestClient(build_http_app(_hosted_settings()))
+
+    unauthenticated = client.get("/governance/snapshot")
+    authenticated = client.get(
+        "/governance/snapshot",
+        headers=_principal_headers(),
+    )
+
+    assert unauthenticated.status_code == 401
+    assert authenticated.status_code == 200
+    assert authenticated.json()["schema"] == "ai-governance-observability/v1"
 
 
 def test_given_wrong_tenant_or_audience_when_posting_then_returns_401() -> None:

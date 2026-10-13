@@ -49,11 +49,17 @@ http_request_duration = meter.create_histogram(
 _ALLOWED_EVENT_ATTRIBUTES = {
     "authentication_outcome",
     "correlation_id",
+    "decision_rule",
     "deployment_revision",
+    "enforcement_mode",
     "error_category",
     "event_name",
+    "governance_decision",
+    "governance_point",
     "latency_ms",
     "outcome",
+    "policy_digest",
+    "policy_name",
     "tool_name",
 }
 

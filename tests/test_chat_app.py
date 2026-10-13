@@ -20,6 +20,16 @@ class _FakeChatService:
         self.requests.append(request)
         return ChatResponse(message="Grounded response", tools_used=["get_member_profile"])
 
+    async def governance_snapshot(self) -> dict[str, object]:
+        return {
+            "schema": "ai-governance-observability/v1",
+            "status": "partial",
+            "services": [
+                {"name": "chat", "status": "ready"},
+                {"name": "mcp", "status": "unavailable"},
+            ],
+        }
+
 
 class _StructureParser(HTMLParser):
     def __init__(self) -> None:
@@ -124,4 +134,40 @@ def test_static_ui_has_required_accessible_structure() -> None:
         tag == "p" and attrs.get("role") == "alert"
         for tag, attrs in tags
     )
+    assert any(
+        tag == "aside" and attrs.get("aria-labelledby") == "governance-title"
+        for tag, attrs in tags
+    )
+    assert sum(tag == "details" for tag, _ in tags) >= 4
+    assert sum(tag == "caption" for tag, _ in tags) >= 2
+    assert any(
+        tag == "button" and attrs.get("id") == "refresh-governance"
+        for tag, attrs in tags
+    )
+    assert any(
+        tag == "button" and attrs.get("id") == "pause-governance"
+        for tag, attrs in tags
+    )
     assert Path(STATIC_DIR / "app.js").is_file()
+
+
+def test_governance_snapshot_returns_sanitized_service_view() -> None:
+    client = TestClient(build_chat_app(_settings(), _FakeChatService()))
+
+    response = client.get("/api/governance/snapshot")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "partial"
+    assert response.json()["services"][1]["status"] == "unavailable"
+
+
+def test_default_deny_demo_never_executes_an_operation() -> None:
+    client = TestClient(build_chat_app(_settings(), _FakeChatService()))
+
+    response = client.post("/api/governance/demo/deny")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["executed"] is False
+    assert payload["allowed"] is False
+    assert payload["decision"] == "deny"

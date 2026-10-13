@@ -1,0 +1,30 @@
+schema: ai-governance-audit-policy/v1
+vex_document: security/vex/ai-governance-harness.openvex.json
+reviewed_at: 2026-10-14
+expires_at: 2026-11-13
+expected_packages:
+  agent-governance-toolkit-core: 4.1.0
+  cryptography: 48.0.1
+ignored_vulnerabilities:
+  - PYSEC-2026-3552
+  - PYSEC-2026-3553
+  - PYSEC-2026-3554
+scan_distributions:
+  - agent-governance-toolkit
+  - agent-governance-toolkit-cli
+  - agent-governance-toolkit-core
+  - agent-governance-toolkit-integrations
+  - agent-governance-toolkit-protocols
+  - agt-sandbox
+  - azure-identity
+  - azure-storage-blob
+  - mcp
+  - msal
+  - pyjwt
+forbidden_symbols:
+  - pkcs7_decrypt_der
+  - pkcs7_decrypt_pem
+  - pkcs7_decrypt_smime
+  - cryptography.x509.verification
+  - build_client_verifier
+  - build_server_verifier

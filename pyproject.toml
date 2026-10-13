@@ -10,6 +10,8 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
+    "agent-governance-toolkit[full]==4.1.0",
+    "agt-sandbox[policy]==4.1.0",
     "azure-ai-projects>=1.0.0b1",
     "azure-ai-inference>=1.0.0b1",
     "azure-identity>=1.16.0",
@@ -18,6 +20,7 @@ dependencies = [
     "opentelemetry-api>=1.39.0,<2.0.0",
     "openai>=3.24.0,<4.0.0",
     "python-dotenv>=1.0.0",
+    "pyyaml>=6.0.0,<7.0.0",
     "pydantic>=2.0.0",
     "starlette>=1.0.0,<2.0.0",
     "uvicorn>=0.40.0,<1.0.0",
@@ -27,10 +30,12 @@ dependencies = [
 ai-governance-mcp = "ai_governance_harness.mcp_server.__main__:main"
 ai-governance-chat = "ai_governance_harness.chat.__main__:main"
 ai-governance-dev = "ai_governance_harness.dev_launcher:main"
+ai-governance-audit = "ai_governance_harness.security_audit:main"
 
 [project.optional-dependencies]
 dev = [
     "build>=1.2.2,<2.0.0",
+    "cyclonedx-bom>=7.0.0,<8.0.0",
     "pip-audit>=2.9.0,<3.0.0",
     "pytest>=8.0.0",
     "ruff>=0.4.0",

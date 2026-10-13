@@ -1,4 +1,4 @@
-"""Start the MCP server over stdio or stateless Streamable HTTP."""
+"""Start the MCP server over stdio or session-based Streamable HTTP."""
 
 from __future__ import annotations
 
@@ -7,6 +7,10 @@ import sys
 from pydantic import ValidationError
 import uvicorn
 
+from ai_governance_harness.governance import (
+    LifecyclePoint,
+    get_governance_engine,
+)
 from ai_governance_harness.mcp_server.config import ServerSettings
 from ai_governance_harness.mcp_server.http_app import build_http_app
 from ai_governance_harness.mcp_server.server import mcp
@@ -23,19 +27,32 @@ EXIT_CONFIGURATION_ERROR = 2
 
 def run_server(settings: ServerSettings) -> None:
     """Validate application data and run the selected MCP transport."""
+    governance = get_governance_engine()
+    governance.require_allowed(
+        LifecyclePoint.STARTUP,
+        "agent.startup",
+        source="mcp",
+    )
     initialize_gateway()
     emit_audit_event("mcp.readiness", outcome="ready", settings=settings)
-    if settings.transport == "stdio":
-        mcp.run("stdio")
-        return
+    try:
+        if settings.transport == "stdio":
+            mcp.run("stdio")
+            return
 
-    uvicorn.run(
-        build_http_app(settings),
-        host=settings.host,
-        port=settings.port,
-        log_config=None,
-        access_log=False,
-    )
+        uvicorn.run(
+            build_http_app(settings),
+            host=settings.host,
+            port=settings.port,
+            log_config=None,
+            access_log=False,
+        )
+    finally:
+        governance.require_allowed(
+            LifecyclePoint.SHUTDOWN,
+            "agent.shutdown",
+            source="mcp",
+        )
 
 
 def main() -> int:

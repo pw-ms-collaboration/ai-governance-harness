@@ -67,8 +67,43 @@ jobs:
       - name: Run Ruff
         run: uv run ruff check .
 
+      - name: Diagnose Agent Governance Toolkit
+        env:
+          PYTHONUTF8: "1"
+        run: uv run agt --json doctor
+
+      - name: Lint governance policy
+        env:
+          PYTHONUTF8: "1"
+        run: >-
+          uv run agt --json lint-policy --strict
+          src/ai_governance_harness/governance/policies/default.yaml
+
+      - name: Verify governance evidence
+        env:
+          PYTHONUTF8: "1"
+        run: >-
+          uv run agt --json verify --evidence
+          src/ai_governance_harness/governance/agt-runtime-evidence.yaml
+
       - name: Build package
         run: uv build
 
+      - name: Generate CycloneDX SBOM
+        run: >-
+          uv run cyclonedx-py environment
+          --pyproject pyproject.toml
+          --output-reproducible
+          --output-file dist/sbom.cdx.json
+
+      - name: Upload package and SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-and-sbom
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/sbom.cdx.json
+
       - name: Audit dependencies
-        run: uv run pip-audit
+        run: uv run ai-governance-audit

@@ -1,28 +1,65 @@
----
-title: AI Governance Harness
-description: Local MCP server and Azure AI Foundry chat UI for synthetic superannuation governance scenarios
----
-
 # AI Governance Harness
 
-The AI Governance Harness is a local development application for exploring
-governed AI interactions over synthetic superannuation data.
+**A local-first reference implementation for observable, default-deny AI agent
+governance with Azure AI Foundry, Model Context Protocol, and Microsoft Agent
+Governance Toolkit.**
 
-It provides:
+[![Continuous integration](https://github.com/pw-ms-collaboration/ai-governance-harness/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pw-ms-collaboration/ai-governance-harness/actions/workflows/ci.yml)
+[![MIT License](https://img.shields.io/badge/license-MIT-2EA44F)](./LICENSE)
+![Python 3.11-3.13](https://img.shields.io/badge/Python-3.11--3.13-3776AB?logo=python&logoColor=white)
+![MCP 2.x](https://img.shields.io/badge/Model_Context_Protocol-2.x-5A45FF)
+![Agent Governance Toolkit 4.1](https://img.shields.io/badge/Agent_Governance_Toolkit-4.1-0078D4?logo=github&logoColor=white)
+![Release v0.0.1 draft](https://img.shields.io/badge/release-v0.0.1_draft-F2C94C)
 
-* A protocol-compatible Model Context Protocol (MCP) server.
-* Five typed, read-only governance tools, including a form-elicitation approval
-  example.
-* MCP support over stdio and session-based Streamable HTTP.
-* A browser chat interface powered by an Azure AI Foundry model.
-* Mandatory Agent Governance Toolkit policy enforcement across chat, MCP, and
-  direct legacy gateway calls.
-* Advice-boundary, provenance, sovereignty, request-security, reliability,
-  sandbox-readiness, and privacy-safe telemetry controls.
-* Separate MCP and chat processes, plus one launcher that starts both.
+The harness combines a browser chat, a protocol-compatible MCP server, five
+typed tools, and a shared policy gateway. Every model and tool path is governed,
+observable, and designed to fail closed. The demonstration uses synthetic
+superannuation data so teams can explore practical governance controls without
+exposing real member information.
 
-The current implementation is intended for local use. Azure hosting and
-deployment automation remain planned but are not active.
+> [!IMPORTANT]
+> This release is a local demonstration and reference architecture, not a
+> production certification. Azure hosting and deployment automation remain
+> planned.
+
+## Quick Navigation
+
+* [See what the project demonstrates](#what-this-project-demonstrates)
+* [Tour the governance dashboard](#governance-dashboard-tour)
+* [Understand the request flow](#how-it-works)
+* [Review the MCP tools](#available-mcp-tools)
+* [Install and configure the project](#install-the-project)
+* [Start the local services](#start-mcp-and-the-chat-ui)
+* [Read the architecture decisions](#architecture-decisions)
+* [Run validation](#validate-the-project)
+* [Troubleshoot common problems](#troubleshooting)
+
+## Capabilities at a Glance
+
+| Capability | What the repository demonstrates |
+|---|---|
+| Default-deny enforcement | Policy checks before and after model and tool activity across chat, MCP, and direct gateway calls |
+| Observable governance | Live allow and deny decisions, active rules, runtime readiness, circuit state, sandbox posture, and OWASP Agentic evidence |
+| Bounded MCP access | Five schema-validated tools over stdio and session-based Streamable HTTP, with no arbitrary paths or writes |
+| Human approval | MCP form elicitation that proceeds only after validated approval and fails closed otherwise |
+| Privacy-safe telemetry | Bounded events that exclude prompts, tool payloads, model responses, tokens, and identity claims |
+| Reliability controls | Independent circuit breakers, timeouts, readiness checks, and sandbox capability classification |
+| Reproducible assurance | Python 3.11-3.13 CI, strict policy linting, toolkit verification, dependency audit, SBOM generation, and automated tests |
+| Maintainer guidance | Detailed ADRs, recovery steps, extension boundaries, screenshots, and troubleshooting guidance |
+
+## Technology Stack
+
+| Area | Tools and technologies | Role |
+|---|---|---|
+| Language and models | [Python](https://www.python.org/) 3.11-3.13, [Azure AI Foundry](https://ai.azure.com/) | Application runtime and model inference |
+| Agent governance | [Microsoft Agent Governance Toolkit](https://github.com/microsoft/agent-governance-toolkit) 4.1, `agt-sandbox` | Policy enforcement, evidence verification, identity contracts, and sandbox readiness |
+| Agent protocol | [Model Context Protocol](https://modelcontextprotocol.io/) Python SDK 2.x | Tool discovery, invocation, form elicitation, stdio, and Streamable HTTP |
+| Web runtime | [Starlette](https://www.starlette.io/), [Uvicorn](https://www.uvicorn.org/) | Local chat API, static dashboard, health endpoints, and HTTP transport |
+| Data contracts | [Pydantic](https://docs.pydantic.dev/), [PyYAML](https://pyyaml.org/) | Strict request, response, configuration, policy, and evidence schemas |
+| Observability | [OpenTelemetry](https://opentelemetry.io/), Azure Monitor OpenTelemetry | Privacy-safe traces, metrics, logs, and governance events |
+| Identity | [Azure Identity](https://learn.microsoft.com/python/api/overview/azure/identity-readme) | Developer and workload authentication for Azure AI Foundry |
+| Quality and supply chain | [pytest](https://pytest.org/), [Ruff](https://docs.astral.sh/ruff/), `pip-audit`, CycloneDX, OpenVEX | Tests, linting, dependency review, SBOM generation, and governed exceptions |
+| Automation | [GitHub Actions](https://github.com/features/actions), `uv`, Hatchling | Multi-version CI, environment synchronization, and package builds |
 
 ## What This Project Demonstrates
 
@@ -745,3 +782,7 @@ Deferred:
 * Third-party OWASP certification or independent security audit.
 * Infrastructure as code and deployment workflows.
 * Remote browser and MCP acceptance testing.
+
+## License
+
+This project is available under the [MIT License](./LICENSE).

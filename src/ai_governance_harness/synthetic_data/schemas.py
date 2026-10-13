@@ -1,6 +1,6 @@
 """Synthetic superannuation data models and schemas."""
 
-from typing import Dict, List, Optional
+from typing import Dict
 from pydantic import BaseModel, Field
 
 

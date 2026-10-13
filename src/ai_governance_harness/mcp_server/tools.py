@@ -7,7 +7,6 @@ or exposing filesystem paths, and ensuring compliance with in-fund data scope in
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "synthetic"
 
@@ -284,28 +283,42 @@ class SuperannuationDataGateway:
         }
 
 
-# Global singleton gateway
-_default_gateway = SuperannuationDataGateway()
+# Lazily initialized for direct callers and explicitly initialized by hosted startup.
+_default_gateway: SuperannuationDataGateway | None = None
+
+
+def initialize_gateway(data_directory: Path | None = None) -> SuperannuationDataGateway:
+    """Load and validate the synthetic data gateway."""
+    global _default_gateway
+    _default_gateway = SuperannuationDataGateway(data_directory)
+    return _default_gateway
+
+
+def get_default_gateway() -> SuperannuationDataGateway:
+    """Return the process-wide gateway, initializing it for direct callers."""
+    if _default_gateway is None:
+        return initialize_gateway()
+    return _default_gateway
 
 
 def get_member_profile(member_id: str) -> Dict[str, Any]:
     """MCP Tool: Return internal superannuation profile for member_id."""
-    return _default_gateway.get_member_profile(member_id)
+    return get_default_gateway().get_member_profile(member_id)
 
 
 def get_member_disengagement_signals(member_id: str) -> Dict[str, Any]:
     """MCP Tool: Return disengagement and churn diagnostic signals for member_id."""
-    return _default_gateway.get_member_disengagement_signals(member_id)
+    return get_default_gateway().get_member_disengagement_signals(member_id)
 
 
 def get_cohort_churn_analytics(cohort_filter: Optional[str] = None) -> Dict[str, Any]:
     """MCP Tool: Return cohort-wide churn attrition factors and lookback attribution."""
-    return _default_gateway.get_cohort_churn_analytics(cohort_filter)
+    return get_default_gateway().get_cohort_churn_analytics(cohort_filter)
 
 
 def get_fum_outflow_summary() -> Dict[str, Any]:
     """MCP Tool: Return aggregate FUM at risk and phase distribution."""
-    return _default_gateway.get_fum_outflow_summary()
+    return get_default_gateway().get_fum_outflow_summary()
 
 
 # Tool definitions for Azure AI Foundry / OpenAI Function Calling

@@ -7,6 +7,7 @@ from ai_governance_harness.mcp_server.tools import (
     get_member_disengagement_signals,
     get_cohort_churn_analytics,
     get_fum_outflow_summary,
+    initialize_gateway,
     MCP_TOOL_DEFINITIONS,
 )
 
@@ -17,5 +18,6 @@ __all__ = [
     "get_member_disengagement_signals",
     "get_cohort_churn_analytics",
     "get_fum_outflow_summary",
+    "initialize_gateway",
     "MCP_TOOL_DEFINITIONS",
 ]

@@ -2,7 +2,6 @@
 
 import pytest
 from ai_governance_harness.mcp_server import (
-    SuperannuationDataGateway,
     MemberNotFoundError,
     get_member_profile,
     get_member_disengagement_signals,

@@ -5,7 +5,6 @@ from ai_governance_harness.guardrails import (
     SovereigntyGuardrail,
     SovereigntyViolationError,
     AdviceClassificationGuardrail,
-    WholeOfWealthInvariantGuardrail,
     DisclosureAttacher,
     PersonalAdviceViolationError,
 )

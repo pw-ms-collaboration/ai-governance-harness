@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Chat with synthetic superannuation governance data">
+    <title>AI Governance Chat</title>
+    <link rel="stylesheet" href="/static/app.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#chat-input">Skip to message input</a>
+    <header class="site-header">
+      <div>
+        <p class="eyebrow">AI governance harness</p>
+        <h1>Superannuation insights chat</h1>
+        <p class="subtitle">Foundry-powered answers grounded in synthetic, in-fund MCP data.</p>
+      </div>
+      <div class="connection" aria-live="polite">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="connection-status">Checking services...</span>
+      </div>
+    </header>
+
+    <main class="chat-shell">
+      <section class="intro" aria-labelledby="intro-title">
+        <h2 id="intro-title">Ask a factual question</h2>
+        <p>
+          Try a synthetic member ID such as <code>MEM-001</code>,
+          <code>MEM-002</code>, or <code>MEM-003</code>. Responses are general
+          information, not personal financial advice.
+        </p>
+        <div class="examples" aria-label="Example questions">
+          <button type="button" class="example" data-question="Show me the profile for MEM-001.">
+            Profile MEM-001
+          </button>
+          <button type="button" class="example" data-question="What are the churn signals for MEM-002?">
+            Churn signals
+          </button>
+          <button type="button" class="example" data-question="Summarize the cohort churn risk and FUM at risk.">
+            Cohort summary
+          </button>
+        </div>
+      </section>
+
+      <section class="conversation" aria-labelledby="conversation-title">
+        <div class="conversation-heading">
+          <h2 id="conversation-title">Conversation</h2>
+          <button id="clear-chat" type="button" class="secondary">Clear chat</button>
+        </div>
+        <ol id="messages" class="messages" aria-live="polite" aria-relevant="additions text">
+          <li class="message assistant">
+            <article>
+              <h3>Assistant</h3>
+              <p>Hello. Ask me about a synthetic member profile, churn signals, cohort risk, or FUM outflow.</p>
+            </article>
+          </li>
+        </ol>
+        <p id="error-message" class="error" role="alert" hidden></p>
+        <p id="activity-status" class="activity" role="status" aria-live="polite"></p>
+
+        <form id="chat-form">
+          <label for="chat-input">Your message</label>
+          <textarea
+            id="chat-input"
+            name="message"
+            rows="3"
+            maxlength="4000"
+            required
+            aria-describedby="input-help character-count"
+          ></textarea>
+          <div class="form-meta">
+            <p id="input-help">Press Ctrl+Enter or use Send.</p>
+            <p id="character-count">0 / 4000</p>
+          </div>
+          <button id="send-button" type="submit">Send message</button>
+        </form>
+      </section>
+    </main>
+
+    <footer>
+      <p>Synthetic demonstration data only. External assets are not tracked or verified.</p>
+    </footer>
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>

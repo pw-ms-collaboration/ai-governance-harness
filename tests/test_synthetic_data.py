@@ -2,14 +2,9 @@
 
 import json
 from pathlib import Path
-import pytest
 
 from ai_governance_harness.synthetic_data.schemas import (
     MemberRecord,
-    AccountRecord,
-    ContributionRecord,
-    InteractionRecord,
-    DigitalActivityRecord,
 )
 from ai_governance_harness.synthetic_data.generator import (
     build_synthetic_dataset,

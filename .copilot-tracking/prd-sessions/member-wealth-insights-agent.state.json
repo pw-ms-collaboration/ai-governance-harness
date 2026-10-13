@@ -1,0 +1,104 @@
+{
+  "prdFile": "docs/project-planning/member-wealth-insights-agent.md",
+  "lastAccessed": "2026-10-13T03:28:05Z",
+  "currentPhase": "Build",
+  "disclaimerShownAt": "2026-10-13T03:19:36.821Z",
+  "phaseSkillsLoaded": [
+    "prd-author#assess",
+    "prd-author#discover",
+    "prd-author#create",
+    "prd-author#build"
+  ],
+  "questionsAsked": [
+    "initiative-name-and-description",
+    "business-problem",
+    "primary-user",
+    "advice-boundary",
+    "data-scope",
+    "business-success-outcomes",
+    "primary-retention-measure",
+    "early-disengagement-signals",
+    "closure-inquiry-trigger",
+    "contribution-signal-rule",
+    "contribution-threshold-calibration",
+    "digital-engagement-signal-rule",
+    "retention-comparison-approach",
+    "outreach-outcome-data-availability",
+    "comparison-cohort-availability",
+    "retention-outcome-window",
+    "retention-target-approach",
+    "retention-target-percent",
+    "historical-lookback-period",
+    "signal-baseline-window"
+  ],
+  "answeredQuestions": {
+    "initiative-name-and-description": "AI agent providing whole-of-wealth customer profile insight, member movement analytics, FUM retention analysis, and next-best interaction recommendations for an Australian superannuation provider.",
+    "business-problem": "Understand member behavior, identify attrition drivers, diagnose Funds Under Management (FUM) outflows, and deliver trend analysis to guide future customer interactions.",
+    "primary-user": "Internal staff supporting member interactions, including member service consultants, retention specialists, and business analysts.",
+    "advice-boundary": "Limit outputs to analysis, factual information, and general guidance; personalized financial advice is out of scope.",
+    "data-scope": "Initial scope uses internal superannuation data only; external financial data sources are excluded.",
+    "business-success-outcomes": "Improve member retention, make staff interactions more effective, and enable proactive outreach.",
+    "primary-retention-measure": "Track whether members showing early disengagement signals later exit or roll over less often.",
+    "early-disengagement-signals": "Reduced or stopped contributions, declining digital engagement, and a closure inquiry.",
+    "closure-inquiry-trigger": "A closure inquiry alone should surface a timely outreach opportunity for staff; no additional disengagement signal is required.",
+    "contribution-signal-rule": "A contribution reduction is assessed relative to the individual member's usual contribution pattern.",
+    "contribution-threshold-calibration": "Use historical fund data to calibrate the contribution reduction threshold and observation window, then validate them with the retention team.",
+    "digital-engagement-signal-rule": "Compare each member's digital activity with their usual pattern and use historical fund data to calibrate the decline threshold and observation window.",
+    "retention-comparison-approach": "Compare members who received proactive outreach with similar flagged members who did not; interpret results as an association, not proof of causation.",
+    "outreach-outcome-data-availability": "Internal systems reportedly identify members who received staff outreach and whether they later exited or rolled over.",
+    "comparison-cohort-availability": "Internal data reportedly identifies similar flagged members who did not receive staff outreach.",
+    "retention-outcome-window": "Measure exit or rollover outcomes during the six months following outreach, using the same six-month window from the matched comparison group's index date.",
+    "retention-target-approach": "Use a fixed relative reduction target for the six-month exit or rollover rate, validated against historical data.",
+    "retention-target-percent": "Provisional target: 5% relative reduction in exit or rollover rate versus the matched comparison group; validate feasibility against historical data before approval.",
+    "historical-lookback-period": "Use a six-month historical lookback to establish the baseline and validate the provisional target; confirm that the data are sufficient.",
+    "signal-baseline-window": "Calibrate contribution and digital-activity signal windows separately using historical data; do not assume they match the six-month retention KPI lookback."
+  },
+  "referencesProcessed": [
+    {
+      "file": "docs/project-planning/member-wealth-insights-agent-brd.md",
+      "status": "analyzed",
+      "timestamp": "2026-10-13T03:19:36.821Z",
+      "keyFindings": "Draft BRD BRD-2026-SUPER-001 defines internal staff users, internal-only data, four functional capabilities, eight source NFRs, Australian advice/privacy/security/data-sovereignty boundaries, and a provisional 5% relative six-month retention target. The user selected a six-month historical lookback for baseline and target validation; data sufficiency, signal thresholds, target feasibility, sponsor ownership, and compliance review remain unresolved. No BRD-to-PRD handoff is recorded in its session state.",
+      "integratedSections": [
+        "Product Context",
+        "Users and Personas",
+        "Design Decisions",
+        "Product Goals",
+        "Functional Requirements",
+        "Non-Functional Requirements",
+        "Constraints",
+        "Acceptance Criteria",
+        "Traceability Matrix",
+        "MVP and Release Framing",
+        "Success Metrics",
+        "Risks and Assumptions",
+        "Glossary"
+      ],
+      "conflicts": [
+        "The BRD provides a six-month outcome window but its SMART evaluation says the timeframe remains undefined; PRD records the six-month window while keeping the goal status deferred pending clarification."
+      ],
+      "pendingActions": [
+        "Validate whether the six-month historical period provides sufficient baseline data and cohort size.",
+        "Define separate historical calibration windows and thresholds for contribution and digital-activity signals.",
+        "Confirm the source BRD's draft status and scope through business governance before treating requirements as approved."
+      ]
+    }
+  ],
+  "sourceBrdHandoff": null,
+  "nextActions": [
+    "Validate whether the six-month lookback provides sufficient baseline data and cohort size.",
+    "Define separate historical calibration windows and thresholds for contribution and digital-activity signals.",
+    "Refine load profiles, audit requirements, and release horizon.",
+    "Confirm sponsor ownership and compliance review path."
+  ],
+  "qualityChecks": [
+    "scope-clarified",
+    "source-brd-reviewed",
+    "candidate-success-metric-seeded",
+    "source-governance-status-recorded"
+  ],
+  "userPreferences": {
+    "detail-level": "comprehensive",
+    "question-style": "one question per turn with options and a recommendation"
+  }
+}

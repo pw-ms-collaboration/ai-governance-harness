@@ -1,0 +1,227 @@
+﻿{
+    "projectSlug":  "member-wealth-insights-agent",
+    "raiPlanFile":  ".copilot-tracking/rai-plans/member-wealth-insights-agent/rai-plan.md",
+    "currentPhase":  2,
+    "entryMode":  "from-prd",
+    "preflight":  {
+                      "templates":  [
+
+                                    ],
+                      "assessmentContentFile":  null
+                  },
+    "disclaimerShownAt":  "2026-10-13T15:19:52.435+11:00",
+    "noticeLog":  [
+                      {
+                          "noticeType":  "disclaimer",
+                          "source":  ".github/instructions/shared/disclaimer-language.instructions.md",
+                          "phase":  1,
+                          "shownAt":  "2026-10-13T15:19:52.435+11:00"
+                      },
+                      {
+                          "noticeType":  "framework-attribution",
+                          "source":  ".github/instructions/rai-planning/rai-identity.instructions.md",
+                          "frameworkId":  "nist-ai-rmf",
+                          "version":  "1.0",
+                          "phase":  1,
+                          "shownAt":  "2026-10-13T15:19:52.435+11:00"
+                      }
+                  ],
+    "securityPlanRef":  null,
+    "assessmentDepth":  "comprehensive",
+    "standardsMapped":  false,
+    "securityModelAnalysisStarted":  false,
+    "raiThreatCount":  0,
+    "impactAssessmentGenerated":  false,
+    "evidenceRegisterComplete":  false,
+    "handoffGenerated":  {
+                             "ado":  false,
+                             "github":  false
+                         },
+    "phaseGates":  {
+                       "phase1":  {
+                                      "gate":  "summary-and-advance"
+                                  },
+                       "phase2":  {
+                                      "gate":  "hard",
+                                      "confirmedAt":  null
+                                  },
+                       "phase3":  {
+                                      "gate":  "hard",
+                                      "confirmedAt":  null
+                                  },
+                       "phase4":  {
+                                      "gate":  "summary-and-advance"
+                                  },
+                       "phase5":  {
+                                      "gate":  "summary-and-advance"
+                                  },
+                       "phase6":  {
+                                      "gate":  "hard",
+                                      "confirmedAt":  null
+                                  }
+                   },
+    "gateResults":  {
+                        "prohibitedUsesGate":  {
+                                                   "status":  "passed",
+                                                   "sourceFrameworks":  [
+                                                                            "NIST AI RMF 1.0 default context",
+                                                                            "Australian superannuation scope documented in BRD"
+                                                                        ],
+                                                   "notes":  "Preliminary scope-based screen: no prohibited use identified in the described internal staff-support use. No fund-specific prohibited-use policy or compliance determination was supplied; this is not legal clearance and must be revisited if purpose, data use, or autonomy changes."
+                                               }
+                    },
+    "riskClassification":  {
+                               "framework":  {
+                                                 "id":  "nist-ai-rmf",
+                                                 "name":  "NIST AI Risk Management Framework",
+                                                 "version":  "1.0",
+                                                 "source":  ".github/skills/rai/rai-standards/SKILL.md",
+                                                 "replaceDefaultIndicators":  false,
+                                                 "replaceDefaultFramework":  false
+                                             },
+                               "indicators":  {
+                                                  "safety_reliability":  {
+                                                                             "method":  "binary",
+                                                                             "nistSource":  [
+                                                                                                "MS-2.5",
+                                                                                                "MS-2.6"
+                                                                                            ],
+                                                                             "activated":  true,
+                                                                             "observation":  "Inaccurate profiles, churn explanations, or FUM-risk estimates could affect consequential staff interactions and outreach prioritization, although the system is not described as making financial decisions or contacting members autonomously.",
+                                                                             "result":  "activated"
+                                                                         },
+                                                  "rights_fairness_privacy":  {
+                                                                                  "method":  "categorical",
+                                                                                  "nistSource":  [
+                                                                                                     "MS-2.8",
+                                                                                                     "MS-2.10",
+                                                                                                     "MS-2.11"
+                                                                                                 ],
+                                                                                  "activated":  true,
+                                                                                  "observation":  "Individual-level linkage of identifiable member, financial, and behavioral records creates material privacy risk and potential for disparate outreach or treatment; confirmed minimization and exclusions reduce but do not remove risk.",
+                                                                                  "result":  "activated"
+                                                                              },
+                                                  "security_explainability":  {
+                                                                                  "method":  "continuous",
+                                                                                  "nistSource":  [
+                                                                                                     "MS-2.7",
+                                                                                                     "MS-2.9"
+                                                                                                 ],
+                                                                                  "activated":  true,
+                                                                                  "observation":  "The system handles identifiable financial and behavioral data and produces predictive estimates and guidance; unauthorized access, linkage errors, opaque attribution, or over-reliance could affect members. Listed security and audit controls are requirements, not verified controls.",
+                                                                                  "result":  "activated"
+                                                                              }
+                                              },
+                               "activatedCount":  3,
+                               "riskScore":  null,
+                               "suggestedDepthTier":  "comprehensive"
+                           },
+    "runningObservations":  [
+                                {
+                                    "phase":  1,
+                                    "observation":  "User confirmed the initial-release data boundary: minimum necessary approved structured account/activity fields only; free text and sensitive/contextual data excluded by default unless separately justified and reviewed; no member-data training or external-provider inference unless separately approved.",
+                                    "flagLevel":  "noted"
+                                },
+                                {
+                                    "phase":  2,
+                                    "observation":  "Prohibited-uses gate remains pending because no applicable fund-specific prohibited-use framework or determination is in the available evidence. User instructed not to ask more questions, so the gate and downstream indicator/depth classification are not assumed complete.",
+                                    "flagLevel":  "noted"
+                                },
+                                {
+                                    "phase":  2,
+                                    "observation":  "Preliminary prohibited-use screen found no prohibited use apparent in the documented internal staff-support scope; no fund-specific policy or compliance determination was supplied. All three default risk indicators activated; Comprehensive depth suggested. Phase 2 hard gate remains unconfirmed.",
+                                    "flagLevel":  "noted"
+                                }
+                            ],
+    "principleTracker":  {
+                             "validReliable":  {
+                                                   "suggestedStatus":  "not-yet-covered",
+                                                   "mappedInPhase3":  false,
+                                                   "threatsIdentified":  0,
+                                                   "controlsEvaluated":  0,
+                                                   "nistSubcat":  "MS-2.5",
+                                                   "openObservations":  [
+
+                                                                        ]
+                                               },
+                             "safe":  {
+                                          "suggestedStatus":  "not-yet-covered",
+                                          "mappedInPhase3":  false,
+                                          "threatsIdentified":  0,
+                                          "controlsEvaluated":  0,
+                                          "nistSubcat":  "MS-2.6",
+                                          "openObservations":  [
+
+                                                               ]
+                                      },
+                             "secureResilient":  {
+                                                     "suggestedStatus":  "not-yet-covered",
+                                                     "mappedInPhase3":  false,
+                                                     "threatsIdentified":  0,
+                                                     "controlsEvaluated":  0,
+                                                     "nistSubcat":  "MS-2.7",
+                                                     "openObservations":  [
+
+                                                                          ]
+                                                 },
+                             "accountableTransparent":  {
+                                                            "suggestedStatus":  "not-yet-covered",
+                                                            "mappedInPhase3":  false,
+                                                            "threatsIdentified":  0,
+                                                            "controlsEvaluated":  0,
+                                                            "nistSubcat":  "MS-2.8",
+                                                            "openObservations":  [
+
+                                                                                 ]
+                                                        },
+                             "explainableInterpretable":  {
+                                                              "suggestedStatus":  "not-yet-covered",
+                                                              "mappedInPhase3":  false,
+                                                              "threatsIdentified":  0,
+                                                              "controlsEvaluated":  0,
+                                                              "nistSubcat":  "MS-2.9",
+                                                              "openObservations":  [
+
+                                                                                   ]
+                                                          },
+                             "privacyEnhanced":  {
+                                                     "suggestedStatus":  "not-yet-covered",
+                                                     "mappedInPhase3":  false,
+                                                     "threatsIdentified":  0,
+                                                     "controlsEvaluated":  0,
+                                                     "nistSubcat":  "MS-2.10",
+                                                     "openObservations":  [
+
+                                                                          ]
+                                                 },
+                             "fairBiasManaged":  {
+                                                     "suggestedStatus":  "not-yet-covered",
+                                                     "mappedInPhase3":  false,
+                                                     "threatsIdentified":  0,
+                                                     "controlsEvaluated":  0,
+                                                     "nistSubcat":  "MS-2.11",
+                                                     "openObservations":  [
+
+                                                                          ]
+                                                 }
+                         },
+    "referencesProcessed":  [
+
+                            ],
+    "nextActions":  [
+                        "Phase 2 screening complete; suggested Comprehensive depth awaits user confirmation before Phase 3."
+                    ],
+    "signingRequested":  false,
+    "signingManifestPath":  null,
+    "userPreferences":  {
+                            "autonomyTier":  "partial",
+                            "outputDetailLevel":  "comprehensive",
+                            "targetSystem":  "both",
+                            "audienceProfile":  "mixed",
+                            "includeOptionalArtifacts":  {
+                                                             "transparencyNote":  false,
+                                                             "monitoringSummary":  false,
+                                                             "artifactSigning":  false
+                                                         }
+                        }
+}

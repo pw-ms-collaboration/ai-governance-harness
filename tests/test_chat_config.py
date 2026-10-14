@@ -13,6 +13,7 @@ def test_given_environment_when_loading_then_parses_service_settings(
 ) -> None:
     # Arrange
     monkeypatch.setenv("AZURE_AI_MODEL_DEPLOYMENT_NAME", "model-name")
+    monkeypatch.setenv("FOUNDRY_AGENT_NAME", "member-wealth-insights-agent")
     monkeypatch.setenv("MCP_SERVER_URL", "http://127.0.0.1:9000/mcp")
     monkeypatch.setenv("CHAT_PORT", "8081")
 
@@ -21,6 +22,7 @@ def test_given_environment_when_loading_then_parses_service_settings(
 
     # Assert
     assert settings.model_deployment == "model-name"
+    assert settings.agent_name == "member-wealth-insights-agent"
     assert settings.mcp_url == "http://127.0.0.1:9000/mcp"
     assert settings.port == 8081
 

@@ -33,6 +33,9 @@ param foundryProjectEndpoint string
 @description('Foundry model deployment name used by the chat service.')
 param foundryModelDeploymentName string
 
+@description('Name of the existing Foundry Prompt Agent invoked by the chat service.')
+param foundryAgentName string
+
 @description('Container image tag already pushed to the registry created by this template.')
 param imageTag string
 
@@ -352,6 +355,7 @@ module chatApp 'br/public:avm/res/app/container-app:0.23.0' = {
           { name: 'AZURE_AI_PROJECT_ENDPOINT', value: foundryProjectEndpoint }
           { name: 'AZURE_AI_PROJECT_REGION', value: location }
           { name: 'AZURE_AI_MODEL_DEPLOYMENT_NAME', value: foundryModelDeploymentName }
+          { name: 'FOUNDRY_AGENT_NAME', value: foundryAgentName }
           { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', secretRef: 'appinsights-connection' }
         ]
       }

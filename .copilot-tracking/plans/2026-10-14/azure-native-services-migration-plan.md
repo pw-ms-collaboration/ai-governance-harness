@@ -179,7 +179,7 @@ Details:
 * Read-only ARM inventory found no Azure Container Apps environment or Container App in the selected resource group. It found an existing Application Insights component in `australiaeast`, using Log Analytics ingestion with a linked workspace and 90-day retention. Verify ownership, access, and policy suitability before routing this app's telemetry there.
 * The existing APIM service is Developer tier with `virtualNetworkType: None` and currently reports outbound IP `20.92.175.204`. The approved MVP template restricts external MCP ACA ingress to that `/32` and also requires Entra authentication; this is not private networking and the allowlist must be revalidated at deployment.
 * Local security verification: `tests/test_mcp_http.py` and `tests/test_mcp_config.py` passed 21 tests; `tests/test_telemetry.py` and `tests/test_governance.py` passed 43 tests, for 64 focused tests total. These prove application middleware/configuration and telemetry behavior only, not Azure Container Apps built-in Entra authentication or deployed network isolation.
-* Bicep CLI `0.48.1` is installed. Existing [infra/main.bicep](../../../infra/main.bicep) compiles after AVM modules are restored. A refreshed full-template `what-if` using the created app IDs, MCP API audience, and `Mcp.Tools.Invoke` role reported 9 creates and 19 ignored resources; the bootstrapped ACR was ignored with no modify/delete changes. This remains structural preview only because the chat secret and image tag were placeholders and role assignments were disabled.
+* Bicep CLI `0.48.1` is installed. Existing [infra/main.bicep](../../../infra/main.bicep) compiles after AVM modules are restored. A refreshed full-template `what-if` using the created app IDs, MCP API audience, `Mcp.Tools.Invoke` role, and existing Prompt Agent name reported 9 creates and 19 ignored resources; the bootstrapped ACR was ignored with no modify/delete changes. This remains structural preview only because the chat secret and image tag were placeholders and role assignments were disabled.
 * Added [infra/bootstrap-acr.bicep](../../../infra/bootstrap-acr.bicep) with the same deterministic registry name, Basic SKU, and disabled admin account as the full template. Bootstrap `what-if` predicted one ACR create and 18 ignored resources; deployment `bootstrap-acr-20261014` then succeeded. The full template now references that registry as existing, preserving its policy-managed tags and properties.
 * The user authorized and applied bootstrap deployment `bootstrap-acr-20261014`. The registry reports `Succeeded`, Basic SKU, and disabled admin user. This was the only Azure resource applied; no Container Apps, APIM configuration, identity grants, or role assignments were deployed.
 * A second `what-if` including role assignments was rejected because the current principal lacks `Microsoft.Authorization/roleAssignments/write`. A deployer with Owner, User Access Administrator, or an appropriately scoped Role Based Access Control Administrator permission must create the ACR pull and Foundry workload role assignments.
@@ -330,10 +330,11 @@ Requirements:
 * `FR-001`, `FR-005`, `NFR-001`, `NFR-005`.
 * Acceptance: The chat API preserves request bounds, safe error responses, output guardrails, readiness reporting, and the current synthetic-data user journey.
 * Acceptance: Hosted startup is non-interactive, binds only required interfaces, does not open a browser, and reports readiness only when required configuration and dependencies are valid.
-* Verification: Run existing chat and governance tests plus hosted-agent contract tests; start the container without `.env`, verify `/health/live` and `/health/ready`, and complete profile, cohort/FUM, refusal, and policy-denial smoke scenarios.
+* Verification: Run existing chat and governance tests plus hosted-agent contract tests; start the container without `.env`, verify `/health/live` and `/health/ready`, and complete profile, cohort/FUM, refusal, and policy-denial smoke scenarios. These hosted checks remain outstanding.
 
 Details:
-* Replace the development supervisor as the production container command. The current [Dockerfile](../../../Dockerfile) starts `ai-governance-dev`, which is designed for local orchestration.
+* The [infra/main.bicep](../../../infra/main.bicep) Container Apps modules override the Dockerfile's local `ai-governance-dev` command with separate `ai-governance-chat` and `ai-governance-mcp` entry points.
+* `ChatSettings` supports optional `FOUNDRY_AGENT_NAME`. When configured, `ChatService` invokes the named Prompt Agent with the SDK-supported Responses API `agent_reference`; when unset, the direct Chat Completions/MCP route remains available for rollback. The existing remote agent MCP tool and identity are not yet configured or validated end to end.
 * Keep the browser-facing same-origin API. The browser must not call Foundry, APIM, or MCP directly.
 
 References:
@@ -670,15 +671,15 @@ Dependencies:
 
 | Field | Record |
 |---|---|
-| Planning execution and readiness | Partial; D5-D7 are confirmed. Both Bicep templates compile, and 170 repository tests pass. The ACR bootstrap succeeded. Full-template What-If predicts 9 creates and 19 ignores with the ACR ignored; role assignments remain disabled. No other resources were applied. The existing `AZURE_CLIENT_ID` remains a separate workload service principal. |
-| Blockers | Foundry Agent MCP tool configuration and ChatService-to-Prompt-Agent integration; app-role assignment to Foundry Agent Identity; chat EasyAuth secret and post-ACA redirect URI; production-ready image; RBAC-authorized full deployment. VNet/private networking and durable audit are deferred. |
+| Planning execution and readiness | Partial; D5-D7 are confirmed. Both Bicep templates compile, the optional Prompt Agent adapter is covered, and 171 repository tests pass. The ACR bootstrap succeeded. Full-template What-If predicts 9 creates and 19 ignores with the ACR ignored; role assignments remain disabled. No other resources were applied. The existing `AZURE_CLIENT_ID` remains a separate workload service principal. |
+| Blockers | Configure the remote Foundry Agent MCP tool and assign `Mcp.Tools.Invoke` to its identity; pass deployed Prompt Agent/MCP smoke tests; produce the final image; configure chat EasyAuth secret/redirect; obtain RBAC-authorized full deployment. VNet/private networking and durable audit are deferred. |
 | Latest critique | Not run. |
 | Relevant research | Not activated; supplied architecture, prior planning artifacts, and repository code establish the current design delta. |
 | Plan | `.copilot-tracking/plans/2026-10-14/azure-native-services-migration-plan.md` |
 | Changes-record role | `.copilot-tracking/changes/2026-10-14/azure-native-services-migration-changes.md` will record implementation evidence if this plan proceeds. |
 | Continuation owner | User, standalone planning. |
-| Required gates or confirmations | Obtain separate authorization before Azure apply; use an identity with `roleAssignments/write`; add the chat redirect URI after ACA FQDN exists; securely supply the chat secret; assign `Mcp.Tools.Invoke` to the Foundry Agent Identity; publish the image; complete and test Prompt Agent/MCP code integration. |
-| Next action | Configure the existing Foundry Agent's MCP tool and app-role grant with an authorized Entra owner, implement ChatService invocation of the Prompt Agent, then build and push the production-ready image. Complete chat EasyAuth configuration and obtain role-assignment rights before a full-template What-If and separately approved apply. |
+| Required gates or confirmations | Configure the existing Foundry Agent's MCP tool; obtain an authorized Entra owner for `Mcp.Tools.Invoke`; complete hosted chat/MCP smoke tests; build and publish the final image; add the chat redirect URI after ACA FQDN exists and securely supply its client secret; use an identity with `roleAssignments/write`; obtain separate approval before full Azure apply. |
+| Next action | With an authorized Entra owner, configure the existing Foundry Agent's MCP connection and app-role grant, then run a hosted synthetic vertical slice. Build/push the final image only after that passes; complete EasyAuth configuration, then request a deployment What-If and separate apply approval. |
 
 ## Goals
 

@@ -21,6 +21,7 @@ class ChatSettings(BaseModel):
     port: int = Field(default=8080, ge=1, le=65535)
     mcp_url: str = "http://127.0.0.1:8001/mcp"
     model_deployment: str
+    agent_name: str | None = None
     allowed_origins: tuple[str, ...] = (
         "http://127.0.0.1:8080",
         "http://localhost:8080",
@@ -38,6 +39,17 @@ class ChatSettings(BaseModel):
         normalized = value.strip()
         if not normalized:
             raise ValueError("Value must not be empty.")
+        return normalized
+
+    @field_validator("agent_name")
+    @classmethod
+    def validate_agent_name(cls, value: str | None) -> str | None:
+        """Normalize an optional Foundry Prompt Agent name."""
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("FOUNDRY_AGENT_NAME must not be empty when configured.")
         return normalized
 
     @field_validator("mcp_url")
@@ -74,6 +86,7 @@ class ChatSettings(BaseModel):
             port=int(os.getenv("CHAT_PORT", "8080")),
             mcp_url=os.getenv("MCP_SERVER_URL", "http://127.0.0.1:8001/mcp"),
             model_deployment=os.getenv("AZURE_AI_MODEL_DEPLOYMENT_NAME", ""),
+            agent_name=os.getenv("FOUNDRY_AGENT_NAME"),
             allowed_origins=origins,
             max_messages=int(os.getenv("CHAT_MAX_MESSAGES", "20")),
             max_message_length=int(os.getenv("CHAT_MAX_MESSAGE_LENGTH", "4000")),

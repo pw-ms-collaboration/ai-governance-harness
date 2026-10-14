@@ -206,6 +206,7 @@ class ChatResponse(BaseModel):
 
 class _CompletionClient(Protocol):
     chat: Any
+    responses: Any
 
     def close(self) -> None: ...
 
@@ -320,6 +321,8 @@ class ChatService:
             )
             project_client = get_foundry_client()
             model_client = project_client.get_openai_client()
+            if self._settings.agent_name:
+                return await self._complete_prompt_agent(model_client, request)
             async with Client(self._settings.mcp_url) as mcp_client:
                 discovered = await self._mcp_reliability.call(
                     mcp_client.list_tools,
@@ -524,6 +527,107 @@ class ChatService:
             "The model exceeded the allowed tool-call rounds.",
             code="model_round_limit",
         )
+
+    async def _complete_prompt_agent(
+        self,
+        model_client: _CompletionClient,
+        request: ChatRequest,
+    ) -> ChatResponse:
+        """Invoke the configured Foundry Prompt Agent and apply chat guardrails."""
+        messages = [
+            {"role": "system", "content": SYSTEM_INSTRUCTIONS},
+            *[
+                {"role": message.role, "content": message.content}
+                for message in request.messages
+            ],
+        ]
+        self._governance.require_allowed(
+            LifecyclePoint.PRE_MODEL,
+            "foundry.chat",
+            policy_data={"message_count": len(messages), "tool_count": 0},
+            source="chat",
+        )
+
+        async def invoke_agent() -> tuple[Any | None, str | None]:
+            try:
+                response = await anyio.to_thread.run_sync(
+                    lambda: model_client.responses.create(
+                        model=self._settings.model_deployment,
+                        input=messages,
+                        max_output_tokens=self._settings.max_output_tokens,
+                        store=False,
+                        extra_body={
+                            "agent_reference": {
+                                "name": self._settings.agent_name,
+                                "type": "agent_reference",
+                            }
+                        },
+                    )
+                )
+            except APIStatusError as exc:
+                guardrail_code = _foundry_guardrail_code(exc)
+                if guardrail_code is None:
+                    raise
+                return None, guardrail_code
+            incomplete_details = getattr(response, "incomplete_details", None)
+            if getattr(incomplete_details, "reason", None) == "content_filter":
+                return None, "content_filter"
+            return response, None
+
+        response, guardrail_code = await self._foundry_reliability.call(invoke_agent)
+        if guardrail_code is not None:
+            decision = self._governance.record_external_denial(
+                LifecyclePoint.POST_MODEL,
+                "foundry.chat",
+                policy_name="azure-ai-foundry",
+                matched_rule=guardrail_code,
+                source="chat",
+            )
+            raise GovernanceDeniedError(
+                "Azure AI Foundry guardrail denied the request.",
+                action="foundry.chat",
+                decision=decision,
+            )
+        if response is None or getattr(response, "status", "completed") != "completed":
+            raise ChatServiceError(
+                "The Foundry Agent returned an incomplete response.",
+                code="invalid_model_response",
+            )
+
+        output_text = getattr(response, "output_text", None)
+        if not isinstance(output_text, str) or not output_text.strip():
+            raise ChatServiceError(
+                "The Foundry Agent returned an empty response.",
+                code="invalid_model_response",
+            )
+
+        output_items = getattr(response, "output", ()) or ()
+        self._governance.require_allowed(
+            LifecyclePoint.POST_MODEL,
+            "foundry.chat",
+            policy_data={"choice_count": len(output_items)},
+            source="chat",
+        )
+        response_text = self._sanitize_response(output_text)
+        tools_used = list(
+            dict.fromkeys(
+                item.name
+                for item in output_items
+                if getattr(item, "type", None) == "mcp_call"
+                and isinstance(getattr(item, "name", None), str)
+                and _SAFE_ERROR_VALUE.fullmatch(item.name)
+            )
+        )
+        self._governance.require_allowed(
+            LifecyclePoint.OUTPUT,
+            "chat.output",
+            policy_data={
+                "response_length": len(response_text),
+                "tool_count": len(tools_used),
+            },
+            source="chat",
+        )
+        return ChatResponse(message=response_text, tools_used=tools_used)
 
     def _sanitize_response(self, response: str) -> str:
         scoped = self._wealth_guardrail.sanitize_scope_claims(response)

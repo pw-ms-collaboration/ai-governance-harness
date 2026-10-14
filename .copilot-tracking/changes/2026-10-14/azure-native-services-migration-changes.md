@@ -10,10 +10,10 @@
 ## Execution Status
 
 * Status: Partial
-* Declared invocation scope: ACR bootstrap and MCP app-role authorization
+* Declared invocation scope: ACR bootstrap, MCP app-role support, and Prompt Agent chat adapter
 * Completed scope markers: None
-* Remaining active markers: `P01-T02`, `P03-T02`
-* Status basis: Deployed only the ACR bootstrap stage and added locally tested app-role authorization support. The full application deployment remains incomplete.
+* Remaining active markers: `P01-T02`, `P02-T01`, `P02-T02`, `P02-T03`, `P03-T02`
+* Status basis: Deployed only the ACR bootstrap stage and added locally tested app-role authorization and optional Prompt Agent invocation. Remote agent configuration and full application deployment remain incomplete.
 
 ## Completed Work
 
@@ -38,8 +38,21 @@
 * Behavior or functionality changed: Hosted MCP can require exactly one delegated scope or application role. The deployment now requires `Mcp.Tools.Invoke`; the middleware accepts role claims and retains delegated-scope support. The full template references the bootstrapped ACR as existing to avoid changing policy-managed tags or properties, and both Container Apps wait for the conditional `AcrPull` assignment when it is enabled.
 * Validation: All 170 tests passed, Ruff passed, and the full Bicep template compiled. The final full-template What-If predicted 9 creates and 19 ignores; the ACR was ignored, with no modify/delete changes. Role assignments were disabled and placeholder image/secret values were used.
 
+### Added an optional Prompt Agent chat route
+
+* Related phase or task: `P02-T03`
+* Files:
+  * [.env.example](../../../.env.example)
+  * [infra/main.bicep](../../../infra/main.bicep)
+  * [src/ai_governance_harness/chat/config.py](../../../src/ai_governance_harness/chat/config.py)
+  * [src/ai_governance_harness/chat/service.py](../../../src/ai_governance_harness/chat/service.py)
+  * [tests/test_chat_config.py](../../../tests/test_chat_config.py)
+  * [tests/test_chat_service.py](../../../tests/test_chat_service.py)
+* Behavior or functionality changed: Optional `FOUNDRY_AGENT_NAME` selects the installed SDK's Responses API `agent_reference` route. The direct Chat Completions/MCP orchestration remains available when the setting is absent. Both routes retain request governance, response sanitization, and safe error handling.
+* Validation: All 171 repository tests passed, Ruff passed, Bicep compiled, and full-template What-If with the existing agent name predicted 9 creates and 19 ignores; the ACR remained ignored. No remote agent configuration or additional Azure resource deployment occurred.
+
 ## Remaining Work
 
-* Configure the Foundry Agent's MCP tool and assign `Mcp.Tools.Invoke`; complete ChatService-to-Prompt-Agent integration.
-* Build and push the completed application image to the deployed registry.
+* Configure the Foundry Agent's MCP tool and assign `Mcp.Tools.Invoke`; pass a hosted synthetic vertical slice.
+* Build and push the completed application image to the deployed registry after the vertical slice passes.
 * Complete chat EasyAuth secret/redirect configuration and obtain role-assignment rights before the production-shaped What-If and separately approved apply.

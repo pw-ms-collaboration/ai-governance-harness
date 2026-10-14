@@ -596,9 +596,22 @@ class ChatService:
                 decision=decision,
             )
         if response is None or getattr(response, "status", "completed") != "completed":
+            values = {
+                "response_status": getattr(response, "status", "missing"),
+                "incomplete_reason": getattr(
+                    getattr(response, "incomplete_details", None), "reason", None
+                ),
+            }
+            details = {
+                key: value
+                for key, value in values.items()
+                if isinstance(value, str) and _SAFE_ERROR_VALUE.fullmatch(value)
+            }
+            logger.warning("Foundry Agent did not complete: %s", details)
             raise ChatServiceError(
                 "The Foundry Agent returned an incomplete response.",
                 code="invalid_model_response",
+                details=details,
             )
 
         output_text = getattr(response, "output_text", None)

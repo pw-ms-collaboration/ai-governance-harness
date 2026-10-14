@@ -289,6 +289,41 @@ async def test_given_agent_name_when_completing_then_invokes_agent_reference_wit
     assert project_client.closed is True
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("status", "reason"),
+    [
+        ("incomplete", "max_output_tokens"),
+        ("failed", None),
+        ("incomplete", "unsafe reason with spaces"),
+    ],
+)
+async def test_given_incomplete_agent_when_completing_then_exposes_only_bounded_reason(
+    monkeypatch: pytest.MonkeyPatch, status: str, reason: str | None,
+) -> None:
+    model_client = _FakeAgentModelClient()
+    monkeypatch.setattr(
+        model_client.responses,
+        "create",
+        lambda **kwargs: SimpleNamespace(
+            status=status,
+            incomplete_details=SimpleNamespace(reason=reason),
+            output_text="Incomplete content must not be returned.",
+        ),
+    )
+    service = ChatService(ChatSettings(model_deployment="model", agent_name="agent"))
+    request = ChatRequest(messages=[ChatMessage(role="user", content="Hello")])
+
+    with pytest.raises(ChatServiceError) as captured:
+        await service._complete_prompt_agent(model_client, request)
+
+    assert captured.value.code == "invalid_model_response"
+    assert captured.value.details == {
+        "response_status": status,
+        **({"incomplete_reason": reason} if reason == "max_output_tokens" else {}),
+    }
+
+
 class _WrappingMcpClient(_FakeMcpClient):
     async def __aexit__(self, exc_type, exc, traceback) -> None:
         if exc is not None:

@@ -21,9 +21,9 @@ superannuation data so teams can explore practical governance controls without
 exposing real member information.
 
 > [!IMPORTANT]
-> This release is a local demonstration and reference architecture, not a
-> production certification. Azure hosting and deployment automation remain
-> planned.
+> This release is a synthetic-data demonstration and reference architecture,
+> not a production certification. A manually deployed Azure demo is available;
+> automated deployment pipelines and production readiness remain future work.
 
 ## Quick Navigation
 
@@ -34,6 +34,7 @@ exposing real member information.
 * [Review the MCP tools](#available-mcp-tools)
 * [Install and configure the project](#install-the-project)
 * [Start the local services](#start-mcp-and-the-chat-ui)
+* [Deploy and update the Azure demo](#azure-deployment-and-updates)
 * [Read the architecture decisions](#architecture-decisions)
 * [Run validation](#validate-the-project)
 * [Troubleshoot common problems](#troubleshooting)
@@ -49,6 +50,7 @@ guardrails configured on your Azure AI Foundry deployment.
 | [Getting started](./docs/getting-started.md)                     | Installation, local startup, Foundry guardrail verification, assurance commands, troubleshooting, and adoption prerequisites       |
 | [Architecture and controls](./docs/architecture-and-controls.md) | Current runtime diagrams, component responsibilities, request flow, policy stages, tool contracts, limitations, and safe extension |
 | [Configuration reference](./docs/configuration.md)               | Environment variables, defaults, limits, identity prerequisites, SDK caveats, telemetry, ports, and paths                          |
+| [Azure deployment and updates](#azure-deployment-and-updates) | Demo resources, image builds, runtime configuration, verification, rollback, and security boundaries |
 
 Additional Foundry model guardrails are configured outside this repository.
 Their assigned risks, thresholds, and blocking actions must be verified in
@@ -580,6 +582,272 @@ ai-governance-mcp
 The stdio process reserves standard output for MCP protocol messages and sends
 diagnostics to standard error.
 
+## Azure Deployment and Updates
+
+The synthetic-data demo runs chat and MCP as separate Azure Container Apps.
+Chat invokes an existing Foundry Prompt Agent; APIM protects the MCP tool
+endpoint and a separate governance-snapshot endpoint. Updating the container
+image does not update the remote Foundry agent definition, model deployment,
+or its assigned Foundry guardrails.
+
+### Deployment resources and prerequisites
+
+Replace all angle-bracket placeholders with your approved deployment values.
+Real resource names and identifiers must stay out of public documentation.
+Confirm the intended tenant and subscription before running any mutation.
+Use Azure CLI with the Container Apps extension, `uv` for local
+checks, and permissions to build in ACR and update the selected app.
+Infrastructure provisioning and role assignments require separate permissions.
+
+| Resource | Deployment value |
+| --- | --- |
+| Resource group | `<resource-group>` |
+| Region | `australiaeast` |
+| Container registry | `<registry-name>` |
+| Image repository | `<image-repository>` |
+| Container Apps environment | `<container-apps-environment>` |
+| Chat app | `<chat-app-name>` |
+| MCP app | `<mcp-app-name>` |
+| APIM service | `<apim-service-name>` |
+| Foundry Prompt Agent | `<foundry-agent-name>` |
+
+Run the examples from the repository root in Bash or zsh:
+
+```bash
+az account show --query '{subscription:name,id:id,tenant:tenantId}' -o json
+RESOURCE_GROUP='<resource-group>'
+ACR_NAME='<registry-name>'
+IMAGE_REPOSITORY='<image-repository>'
+CHAT_APP='<chat-app-name>'
+MCP_APP='<mcp-app-name>'
+REGISTRY_SERVER=$(az acr show --name "$ACR_NAME" --query loginServer -o tsv)
+```
+
+### Provisioning and security boundaries
+
+[bootstrap-acr.bicep](./infra/bootstrap-acr.bicep) creates the registry before
+the image build. [main.bicep](./infra/main.bicep) references that registry and
+defines the Container Apps, identities, and APIM integration. The dedicated
+[MCP API template](./infra/apim-mcp-api.bicep) and
+[snapshot API template](./infra/apim-governance-api.bicep) define the gateway
+boundaries. Review all template parameters before provisioning another
+environment.
+
+For a new environment, bootstrap the registry with your approved prefix and
+region, then build an image before applying the main template:
+
+```bash
+RESOURCE_PREFIX=yourprefix
+az deployment group what-if --resource-group "$RESOURCE_GROUP" \
+   --template-file infra/bootstrap-acr.bicep \
+   --parameters resourcePrefix="$RESOURCE_PREFIX" location=australiaeast
+az deployment group create --resource-group "$RESOURCE_GROUP" \
+   --template-file infra/bootstrap-acr.bicep \
+   --parameters resourcePrefix="$RESOURCE_PREFIX" location=australiaeast
+```
+
+Refresh `ACR_NAME` and `REGISTRY_SERVER` from the bootstrap outputs for that
+environment. Supply the main template's reviewed parameters through an
+operator-controlled parameter file outside the repository; use Key Vault
+references for secrets. Do not put client secrets or connection strings in
+commands, committed files, or logs.
+
+```bash
+AZURE_PARAMETERS_FILE=/path/to/approved-deployment.parameters.json
+az deployment group what-if --resource-group "$RESOURCE_GROUP" \
+   --template-file infra/main.bicep --parameters @"$AZURE_PARAMETERS_FILE"
+```
+
+Apply the main template with `az deployment group create` only after reviewing
+the What-If and approving resource, identity, and network changes. Do not
+reapply the whole template for an application-only update: existing runtime
+overrides and manually configured authentication must first be reconciled.
+
+Preserve these boundaries during provisioning, updates, and rollback:
+
+* Run chat with `ai-governance-chat` and MCP with `ai-governance-mcp`. The
+   [Dockerfile](./Dockerfile) defaults to the local combined launcher; it is not
+   the hosted entrypoint.
+* Keep chat protected by Entra EasyAuth. Only `/health/live` and
+   `/health/ready` are excluded from authentication in the current demo.
+* Keep direct MCP ingress restricted to the approved APIM egress address.
+   Do not open MCP to the internet to work around authentication failures.
+* Preserve `Mcp.Tools.Invoke` for the Foundry agent identity. The chat workload
+   has the separate `Mcp.Governance.Read` snapshot role, not tool access.
+* Keep `MCP_GOVERNANCE_SNAPSHOT_URL` pointing to the authenticated APIM snapshot
+   route and `MCP_GOVERNANCE_SNAPSHOT_AUDIENCE` set to its intended audience.
+* Verify the Container Apps environment permits the intended public chat
+   access; public ingress alone is not proof that environment-level public
+   network access is enabled.
+* Preserve governance enforcement, managed identities, registry pull
+   permissions, origin allowlists, and the exact EasyAuth browser redirect
+   origin. Read-only tools do not justify enabling executable sandbox access.
+
+### Build and update an application image
+
+Review the working tree first. ACR builds the current source directory,
+including uncommitted changes; the commit in an image tag does not establish
+that the build was made from a clean tree. The
+[build exclusions](./.dockerignore) omit `.env`, `.git`, `.venv`, tracking
+artifacts, and caches. Verify that no other local secrets enter the context.
+
+```bash
+git status --short
+uv run --no-sync pytest -q
+uv run --no-sync ruff check src tests
+```
+
+Select the app to update and record its previous ready revision and image
+before mutation. Use `TARGET_APP="$MCP_APP"` for MCP. For shared changes, roll
+out MCP and verify it before updating chat to the same image digest; a
+chat-only fix does not require an MCP rollout.
+
+```bash
+TARGET_APP="$CHAT_APP"
+PREVIOUS_REVISION=$(az containerapp show --resource-group "$RESOURCE_GROUP" \
+   --name "$TARGET_APP" --query properties.latestReadyRevisionName -o tsv)
+PREVIOUS_IMAGE=$(az containerapp revision show --resource-group "$RESOURCE_GROUP" \
+   --name "$TARGET_APP" --revision "$PREVIOUS_REVISION" \
+   --query 'properties.template.containers[0].image' -o tsv)
+IMAGE_TAG="demo-$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
+IMAGE_DIGEST=$(az acr build --registry "$ACR_NAME" \
+   --image "$IMAGE_REPOSITORY:$IMAGE_TAG" --file Dockerfile . \
+   --no-logs --only-show-errors --query 'outputImages[0].digest' -o tsv)
+test -n "$IMAGE_DIGEST"
+IMAGE="$REGISTRY_SERVER/$IMAGE_REPOSITORY@$IMAGE_DIGEST"
+REVISION_SUFFIX="update-$(date -u +%Y%m%d%H%M%S)"
+az containerapp update --resource-group "$RESOURCE_GROUP" --name "$TARGET_APP" \
+   --image "$IMAGE" --revision-suffix "$REVISION_SUFFIX" \
+   --query '{latest:properties.latestRevisionName,ready:properties.latestReadyRevisionName}' \
+   -o json
+```
+
+Run each step only after the preceding command succeeds; never deploy an empty
+digest or reuse a tag for different source. The digest pins the exact image.
+The demo uses single-revision mode with 100% traffic assigned to the latest
+revision. An update returning `Succeeded` does not establish that the new
+revision has finished activating or that a model/tool request works.
+
+### Change runtime configuration
+
+Use `--set-env-vars` to change only selected settings while preserving the
+others. Record previous values before changing them, and use a unique revision
+suffix. Do not use `--replace-env-vars` for a targeted change because it can
+remove identity, endpoint, and telemetry settings.
+
+The deployed GPT-5 Prompt Agent uses a 4,000-token output budget; the local
+default remains 1,200. Agent output tokens include reasoning as well as the
+visible answer. The 1,200-token budget produced `max_output_tokens` stops in
+live testing. The existing settings validation caps this budget at 4,000.
+
+```bash
+az containerapp update --resource-group "$RESOURCE_GROUP" --name "$CHAT_APP" \
+   --set-env-vars CHAT_MAX_OUTPUT_TOKENS=4000 \
+   --revision-suffix "config-$(date -u +%Y%m%d%H%M%S)" \
+   --query '{latest:properties.latestRevisionName,ready:properties.latestReadyRevisionName}' \
+   -o json
+```
+
+Keep `CHAT_USE_PROMPT_AGENT=true` and the intended `FOUNDRY_AGENT_NAME` when
+using the hosted agent route. Foundry rejects request-level `reasoning`
+overrides when `agent_reference` is specified; adding `reasoning.effort` to
+that request is not a supported token-budget fix. The separate semantic
+classifier continues to use its own bounded output setting.
+
+### Verify and roll back
+
+Check the selected revision directly rather than assuming an old healthy
+revision proves that the update succeeded:
+
+```bash
+NEW_REVISION=$(az containerapp show --resource-group "$RESOURCE_GROUP" \
+   --name "$TARGET_APP" --query properties.latestRevisionName -o tsv)
+az containerapp revision show --resource-group "$RESOURCE_GROUP" \
+   --name "$TARGET_APP" --revision "$NEW_REVISION" \
+   --query '{health:properties.healthState,active:properties.active,traffic:properties.trafficWeight}' \
+   -o json
+CHAT_FQDN=$(az containerapp show --resource-group "$RESOURCE_GROUP" \
+   --name "$CHAT_APP" --query properties.configuration.ingress.fqdn -o tsv)
+curl --fail --silent --show-error --max-time 30 "https://$CHAT_FQDN/health/live"
+curl --fail --silent --show-error --max-time 30 "https://$CHAT_FQDN/health/ready"
+curl --silent --show-error --max-time 30 --output /dev/null \
+   --write-out 'Unauthenticated snapshot HTTP %{http_code}\n' \
+   "https://$CHAT_FQDN/api/governance/snapshot"
+MCP_FQDN=$(az containerapp show --resource-group "$RESOURCE_GROUP" \
+   --name "$MCP_APP" --query properties.configuration.ingress.fqdn -o tsv)
+curl --silent --show-error --max-time 30 --output /dev/null \
+   --write-out 'Direct MCP HTTP %{http_code}\n' "https://$MCP_FQDN/mcp"
+```
+
+Expect the new revision to be `Healthy`, both chat health endpoints to return
+HTTP 200, unauthenticated snapshot access to return HTTP 401, and direct MCP
+access to return HTTP 403. Readiness must show governance enforcement enabled.
+Sign in through the browser and separately verify a synthetic profile request,
+its confirmation, the authenticated governance snapshot, and the approved
+retention workflow. Confirm successful tool-call metadata rather than relying
+on a completed model response or a claim that a tool was called.
+
+For an image rollback, create a new revision from the image recorded before
+the update. These variables are per app; do not reuse the chat rollback image
+or revision record for MCP.
+
+```bash
+test -n "$PREVIOUS_IMAGE"
+az containerapp update --resource-group "$RESOURCE_GROUP" --name "$TARGET_APP" \
+   --image "$PREVIOUS_IMAGE" --revision-suffix "rollback-$(date -u +%Y%m%d%H%M%S)" \
+   --query '{latest:properties.latestRevisionName,ready:properties.latestReadyRevisionName}' \
+   -o json
+```
+
+An image rollback keeps the current environment settings. Restore any changed
+settings separately with `--set-env-vars`, or `--remove-env-vars` if the
+setting was previously absent, then repeat verification. Never disable
+governance or relax ingress restrictions as a rollback shortcut.
+
+### Corporate proxy certificate trust
+
+If ACR lookups, Container Apps logs, or HTTPS probes fail certificate
+verification behind an approved corporate proxy, combine the standard CA
+bundle with your organization's trusted certificate. Substitute paths from
+your local setup; do not disable TLS verification.
+
+```bash
+SYSTEM_CA_BUNDLE=/path/to/system-ca-bundle.pem
+ORGANIZATION_CA_CERTIFICATE=/path/to/organization-certificate.pem
+CA_BUNDLE=$(mktemp)
+cat "$SYSTEM_CA_BUNDLE" "$ORGANIZATION_CA_CERTIFICATE" > "$CA_BUNDLE"
+export REQUESTS_CA_BUNDLE="$CA_BUNDLE"
+export SSL_CERT_FILE="$CA_BUNDLE"
+export CURL_CA_BUNDLE="$CA_BUNDLE"
+```
+
+Keep the temporary bundle until deployment and verification finish, then
+unset these variables and remove it. A successful remote ACR build and a
+failed local registry lookup can coexist; inspect the completed build's image
+digest and fix local certificate trust before continuing.
+
+The [observability workbook](./docs/observability/ai-governance-observability.workbook.json)
+uses a placeholder Application Insights resource path. Before importing it,
+replace `<subscription-id>`, `<resource-group>`, and
+`<application-insights-name>` in `fallbackResourceIds` and every
+`crossComponentResources` entry. Keep the configured copy outside public
+documentation.
+
+### Verification evidence
+
+Recorded on 2026-10-15; query Azure for the current state before another update.
+Keep actual image digests, resource names, and revision names in your private
+deployment record rather than this README.
+
+Both apps were healthy with 100% traffic, and chat retained
+`CHAT_MAX_OUTPUT_TOKENS=4000`. Chat readiness, unauthenticated access denial,
+and the direct MCP ingress block were verified during these updates.
+The latest code passed 340 tests. Live classifier probes allowed the factual
+profile confirmation while denying financial-advice confirmations, an
+ambiguous standalone `yes`, and instruction-like assistant context.
+Successful authenticated end-to-end Foundry MCP tool execution remains
+unverified; neither readiness nor a completed model response proves it.
+
 ## Local Endpoints
 
 With the default ports:
@@ -645,8 +913,11 @@ Personalized financial-advice requests pass through a dedicated, tool-free
 Foundry classifier before the primary assistant. The classifier uses strict
 JSON schema, a closed intent taxonomy, minimal reasoning, low verbosity,
 `store=False`, and the bounded `CHAT_CLASSIFIER_MAX_OUTPUT_TOKENS` budget.
-It receives the current and immediately preceding user turns as separately
-labelled context so split-turn requests do not rely on member-ID regex routing.
+It receives the current and immediately preceding user turns plus the assistant
+turn immediately before the current user message as separately labelled,
+untrusted context. This lets short confirmations such as `yes` inherit the
+requested action without relying on member-ID regex routing or treating
+assistant text as policy authority.
 
 Only typed fields such as `request_intent`, `advice_subject`,
 `financial_action`, `product_scope`, `confidence`, and
@@ -705,8 +976,8 @@ production-facing deployment remains future work; there is no automatic
 development/production presentation switch yet.
 
 The OAuth protected-resource metadata routes exist for future hosted
-authentication work. Local development does not require Container Apps identity
-headers.
+integrations. The deployed demo uses Entra authentication and APIM; local
+development does not require Container Apps identity headers.
 
 ## Use the Chat UI
 
@@ -987,15 +1258,20 @@ Implemented and locally validated:
 * Accessible dependency-free browser chat.
 * Separate and combined local launchers.
 
+Deployed demo capabilities:
+
+* Separate Azure Container Apps for chat and MCP with digest-pinned updates.
+* Entra EasyAuth for browser chat, managed identities, and APIM-restricted MCP.
+* Authenticated governance snapshots with a separate reader role.
+* Bicep infrastructure definitions and the manual update/rollback runbook above.
+
 Deferred:
 
-* Azure Container Apps deployment.
-* Deployed Microsoft Entra authentication.
 * Privileged Docker, Azure Container Apps, or Hyperlight sandbox providers.
 * A universal human-approval interface and external memory governance.
 * Third-party OWASP certification or independent security audit.
-* Infrastructure as code and deployment workflows.
-* Remote browser and MCP acceptance testing.
+* Automated infrastructure and application deployment pipelines.
+* Complete authenticated browser and Foundry MCP acceptance testing.
 
 ## License
 

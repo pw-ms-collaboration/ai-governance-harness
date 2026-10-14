@@ -6,6 +6,7 @@
 * Task ID: `azure-native-migration-2026-10-14`
 * Related plan: [.copilot-tracking/plans/2026-10-14/azure-native-services-migration-plan.md](../../plans/2026-10-14/azure-native-services-migration-plan.md)
 * Implementation date: 2026-10-14
+* Sanitization: Deployment resource names, endpoints, identity IDs, and image identifiers use placeholders. Validation records retain their original historical scope.
 
 ## Execution Status
 
@@ -23,7 +24,7 @@
 * Files:
   * [infra/bootstrap-acr.bicep](../../../infra/bootstrap-acr.bicep)
 * Behavior or functionality changed: Added and deployed a standalone Basic ACR with the same deterministic name, disabled admin account, and tags as the full template. Its outputs provide the registry name and login server for image publishing before the full Container Apps deployment.
-* Validation: Bootstrap and full Bicep templates compiled. Bootstrap What-If predicted one ACR create and 18 ignored resources. Infrastructure deployment `bootstrap-acr-20261014` succeeded; the registry is Basic with admin access disabled. No other infrastructure resources were applied in that deployment.
+* Validation: Bootstrap and full Bicep templates compiled. Bootstrap What-If predicted one ACR create and 18 ignored resources. Infrastructure deployment `<acr-bootstrap-deployment-name>` succeeded; the registry is Basic with admin access disabled. No other infrastructure resources were applied in that deployment.
 
 ### Added MCP application-role authorization
 
@@ -67,15 +68,15 @@
 ### Configured the Prompt Agent MCP connection
 
 * Related phase or task: `P02-T01`, `P02-T02`, `P03-T02`
-* Azure configuration: Created remote-tool project connection `aighack-mcp-agent` with agentic identity, target `https://ajhackathon.azure-api.net/aighack-mcp/mcp`, and audience `api://ef56b0a6-b773-4c10-8cd2-db2433281896`.
+* Azure configuration: Created remote-tool project connection `<mcp-project-connection-name>` with agentic identity, target `https://<apim-service-name>.azure-api.net/<mcp-api-path>/mcp`, and audience `api://<mcp-api-client-id>`.
 * Behavior or functionality changed: Created Prompt Agent version 2 with one MCP server entry and an allowlist containing only `get_member_profile`, `get_member_disengagement_signals`, `get_cohort_churn_analytics`, and `get_fum_outflow_summary`. Approval is disabled for these read-only tools. Version 1 and the prompt instructions remain unchanged.
 * Validation: ARM read-back confirmed the connection auth type, target, and audience. Foundry read-back confirmed version 2 is active with the MCP entry; the version 1 and version 2 models match and their instruction hashes are identical. Graph read-back confirmed the app-role assignment. No tool invocation was attempted because the APIM MCP API is not deployed.
 
 ### Built and published the application image
 
 * Related phase or task: `P01-T02`, `P02-T03`
-* Image: `aighack4oy7zgd25qpjc.azurecr.io/ai-governance-harness:demo-20261014-mcp-agent-v2`
-* Digest: `sha256:7c6b00c0deb123a8abd3ce4ef57bf8d7889af1b4a09c3d3c412620858013741f`
+* Image: `<registry-name>.azurecr.io/<image-repository>:<image-tag>`
+* Digest: `sha256:<image-digest>`
 * Behavior or functionality changed: Built for `linux/amd64` and pushed to the bootstrapped ACR. `.dockerignore` excludes `.env`, `.git`, and tracking artifacts.
 * Validation: ACR confirmed the pushed tag. The image's chat and MCP entrypoints both reached ready in local containers, and unauthenticated MCP POST returned HTTP 401. The real-tag full-template What-If predicted 9 creates and 19 ignores, with the ACR ignored; no Azure app resources were applied. APIM-backed Prompt Agent invocation remains untested because the APIM route is not deployed.
 * Validation: ACR confirmed the pushed tag. The image's chat and MCP entrypoints both reached ready in local containers, and unauthenticated MCP POST returned HTTP 401. The latest Owner-authorized full-template What-If with role assignments enabled predicted 11 creates and 19 ignores, including both Bicep role assignments; the ACR remained ignored. No ACA/APIM resources were applied. APIM-backed Prompt Agent invocation remains untested because the APIM route is not deployed.

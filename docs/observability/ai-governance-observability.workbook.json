@@ -2,7 +2,7 @@
   "version": "Notebook/1.0",
   "isLocked": false,
   "fallbackResourceIds": [
-    "/subscriptions/58e2334a-e2a8-4f53-9121-a29a6b4a501d/resourceGroups/rg-aigovernance-amp-guardrails-hack/providers/microsoft.insights/components/rg-aigovernance-applicationinsight"
+    "/subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/microsoft.insights/components/<application-insights-name>"
   ],
   "items": [
     {
@@ -60,7 +60,7 @@
         "timeContextFromParameter": "TimeRange",
         "visualization": "table",
         "crossComponentResources": [
-          "/subscriptions/58e2334a-e2a8-4f53-9121-a29a6b4a501d/resourceGroups/rg-aigovernance-amp-guardrails-hack/providers/microsoft.insights/components/rg-aigovernance-applicationinsight"
+          "/subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/microsoft.insights/components/<application-insights-name>"
         ]
       }
     },
@@ -77,7 +77,7 @@
         "timeContextFromParameter": "TimeRange",
         "visualization": "timechart",
         "crossComponentResources": [
-          "/subscriptions/58e2334a-e2a8-4f53-9121-a29a6b4a501d/resourceGroups/rg-aigovernance-amp-guardrails-hack/providers/microsoft.insights/components/rg-aigovernance-applicationinsight"
+          "/subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/microsoft.insights/components/<application-insights-name>"
         ]
       }
     },
@@ -94,7 +94,7 @@
         "timeContextFromParameter": "TimeRange",
         "visualization": "timechart",
         "crossComponentResources": [
-          "/subscriptions/58e2334a-e2a8-4f53-9121-a29a6b4a501d/resourceGroups/rg-aigovernance-amp-guardrails-hack/providers/microsoft.insights/components/rg-aigovernance-applicationinsight"
+          "/subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/microsoft.insights/components/<application-insights-name>"
         ]
       }
     },
@@ -111,7 +111,7 @@
         "timeContextFromParameter": "TimeRange",
         "visualization": "timechart",
         "crossComponentResources": [
-          "/subscriptions/58e2334a-e2a8-4f53-9121-a29a6b4a501d/resourceGroups/rg-aigovernance-amp-guardrails-hack/providers/microsoft.insights/components/rg-aigovernance-applicationinsight"
+          "/subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/microsoft.insights/components/<application-insights-name>"
         ]
       }
     },
@@ -128,7 +128,7 @@
         "timeContextFromParameter": "TimeRange",
         "visualization": "timechart",
         "crossComponentResources": [
-          "/subscriptions/58e2334a-e2a8-4f53-9121-a29a6b4a501d/resourceGroups/rg-aigovernance-amp-guardrails-hack/providers/microsoft.insights/components/rg-aigovernance-applicationinsight"
+          "/subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/microsoft.insights/components/<application-insights-name>"
         ]
       }
     },
@@ -145,7 +145,7 @@
         "timeContextFromParameter": "TimeRange",
         "visualization": "table",
         "crossComponentResources": [
-          "/subscriptions/58e2334a-e2a8-4f53-9121-a29a6b4a501d/resourceGroups/rg-aigovernance-amp-guardrails-hack/providers/microsoft.insights/components/rg-aigovernance-applicationinsight"
+          "/subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/microsoft.insights/components/<application-insights-name>"
         ]
       }
     },
@@ -162,7 +162,7 @@
         "timeContextFromParameter": "TimeRange",
         "visualization": "table",
         "crossComponentResources": [
-          "/subscriptions/58e2334a-e2a8-4f53-9121-a29a6b4a501d/resourceGroups/rg-aigovernance-amp-guardrails-hack/providers/microsoft.insights/components/rg-aigovernance-applicationinsight"
+          "/subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/microsoft.insights/components/<application-insights-name>"
         ]
       }
     },

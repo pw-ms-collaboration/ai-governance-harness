@@ -177,6 +177,8 @@ Requirements:
 Details:
 * The current [real-mcp-server plan](../../plans/2026-10-14/real-mcp-server-plan.md) owns baseline ACA, Bicep, remote MCP security, and deployment. Its P03/P04 tasks are unchecked in the available artifact. Complete or explicitly supersede that work before treating ACA as an available platform.
 * Read-only ARM inventory found no Azure Container Apps environment or Container App in the selected resource group. It found an existing Application Insights component in `australiaeast`, using Log Analytics ingestion with a linked workspace and 90-day retention. Verify ownership, access, and policy suitability before routing this app's telemetry there.
+* Local security verification: `tests/test_mcp_http.py` and `tests/test_mcp_config.py` passed 21 tests; `tests/test_telemetry.py` and `tests/test_governance.py` passed 43 tests, for 64 focused tests total. These prove application middleware/configuration and telemetry behavior only, not Azure Container Apps built-in Entra authentication or deployed network isolation.
+* Bicep CLI `0.48.1` is installed. No `.bicep` or `.bicepparam` files currently exist in the repository, so template compilation, `what-if`, and deployed ACA security verification remain outstanding.
 * Do not duplicate the existing plan's infrastructure tasks here. Any necessary change to its topology belongs in a reviewed update to that plan or a superseding architecture decision.
 
 References:

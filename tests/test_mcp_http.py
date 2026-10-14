@@ -188,6 +188,31 @@ def test_given_wrong_tenant_or_audience_when_posting_then_returns_401() -> None:
     assert wrong_audience.status_code == 401
 
 
+def test_given_wrong_identity_provider_when_posting_then_returns_401() -> None:
+    # Arrange
+    client = TestClient(build_http_app(_hosted_settings()))
+    headers = _principal_headers()
+    headers["X-MS-CLIENT-PRINCIPAL-IDP"] = "untrusted"
+
+    # Act
+    response = client.post("/mcp", headers=headers, json={})
+
+    # Assert
+    assert response.status_code == 401
+
+
+def test_given_missing_required_scope_when_posting_then_returns_401() -> None:
+    # Arrange
+    client = TestClient(build_http_app(_hosted_settings()))
+    headers = _principal_headers(scope="Mcp.Tools.Write")
+
+    # Act
+    response = client.post("/mcp", headers=headers, json={})
+
+    # Assert
+    assert response.status_code == 401
+
+
 def test_given_disallowed_origin_when_posting_then_rejects_before_authentication() -> None:
     # Arrange
     client = TestClient(build_http_app(_hosted_settings()))

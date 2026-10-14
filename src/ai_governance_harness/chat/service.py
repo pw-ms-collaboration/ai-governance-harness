@@ -153,6 +153,29 @@ class ChatRequest(BaseModel):
         return value
 
 
+def _active_advice_request_text(messages: list[ChatMessage]) -> str:
+    """Include prior user intent when the latest turn only supplies a member ID."""
+    latest = messages[-1]
+    if (
+        latest.role != "user"
+        or len(latest.content) > 80
+        or re.search(r"\bMEM-\d{3}\b", latest.content, re.IGNORECASE) is None
+    ):
+        return latest.content
+
+    previous_user = next(
+        (
+            message
+            for message in reversed(messages[:-1])
+            if message.role == "user"
+        ),
+        None,
+    )
+    if previous_user is None:
+        return latest.content
+    return f"{previous_user.content}\n{latest.content}"
+
+
 class ChatResponse(BaseModel):
     """Sanitized response returned to the browser."""
 
@@ -268,7 +291,9 @@ class ChatService:
                 "chat.input",
                 policy_data={
                     "message_count": len(request.messages),
-                    **advice_request_policy_data(request.messages[-1].content),
+                    **advice_request_policy_data(
+                        _active_advice_request_text(request.messages)
+                    ),
                 },
                 source="chat",
             )

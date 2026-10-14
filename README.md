@@ -542,7 +542,9 @@ model call. Only the bounded `advice_request_status` reaches policy evaluation;
 request text is not included in policy data or governance events. The
 `deny-personal-advice-request` rule returns HTTP 403 and appears as a denial in
 the governance panel. General factual questions continue through the normal
-chat path.
+chat path. When a short follow-up supplies only a member ID, classification
+also considers the immediately preceding user request so a multi-turn personal
+advice request cannot bypass the input rule by deferring the identifier.
 
 The OAuth protected-resource metadata routes exist for future hosted
 authentication work. Local development does not require Container Apps identity

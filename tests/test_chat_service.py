@@ -222,6 +222,46 @@ async def test_given_personal_advice_request_when_completing_then_blocks_before_
 
 
 @pytest.mark.anyio
+async def test_given_member_id_follow_up_to_advice_request_then_blocks_before_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    def unexpected_foundry_call():
+        raise AssertionError("Foundry must not be called for a denied input.")
+
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        unexpected_foundry_call,
+    )
+    service = ChatService(ChatSettings(model_deployment="test-model"))
+    request = ChatRequest(
+        messages=[
+            ChatMessage(
+                role="user",
+                content=(
+                    "Given this customer's account balance, give me some financial "
+                    "recommendations on how to grow their balance"
+                ),
+            ),
+            ChatMessage(
+                role="assistant",
+                content="Please share the member ID.",
+            ),
+            ChatMessage(role="user", content="MEM-001"),
+        ]
+    )
+
+    # Act
+    with pytest.raises(ChatServiceError) as error:
+        await service.complete(request)
+
+    # Assert
+    assert error.value.code == "governance_denied"
+    assert error.value.details["action"] == "chat.input"
+    assert error.value.details["matched_rule"] == "deny-personal-advice-request"
+
+
+@pytest.mark.anyio
 async def test_given_member_question_when_completing_then_calls_mcp_and_foundry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

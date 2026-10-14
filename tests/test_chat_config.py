@@ -10,12 +10,23 @@ from ai_governance_harness.chat.config import ChatSettings
 pytestmark = pytest.mark.usefixtures("mock_chat_environment")
 
 
-def test_given_hosted_environment_when_loading_then_does_not_require_mock_sidecar(
+def test_given_container_apps_environment_when_starting_then_does_not_require_mock_sidecar(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from starlette.testclient import TestClient
+
+    from ai_governance_harness.chat import __main__ as entrypoint
+    from ai_governance_harness.identity.sidecar import SidecarClient
+
     monkeypatch.setenv("CHAT_HOSTED", "true")
     monkeypatch.setenv("MOCK_IDENTITY_ENABLED", "false")
     monkeypatch.setenv("CONTAINER_APP_NAME", "synthetic-chat")
+    monkeypatch.setenv("CONTAINER_APP_REVISION", "synthetic-revision")
+    monkeypatch.setenv("MCP_HOSTED", "true")
+    monkeypatch.setenv("MCP_ENVIRONMENT", "production")
+    monkeypatch.setenv("GOVERNANCE_ENVIRONMENT", "production")
+    monkeypatch.setenv("GOVERNANCE_ENABLED", "true")
+    monkeypatch.setenv("GOVERNANCE_SANDBOX_PROVIDER", "none")
     monkeypatch.setenv("CHAT_HOST", "0.0.0.0")
     monkeypatch.setenv("CHAT_AUTH_TENANT_ID", "tenant-test")
     monkeypatch.setenv("CHAT_AUTH_AUDIENCE", "api://chat-test")
@@ -33,6 +44,30 @@ def test_given_hosted_environment_when_loading_then_does_not_require_mock_sideca
 
     assert settings.hosted is True
     assert settings.agent_name == "test-agent"
+
+    started = []
+    exports = []
+
+    def run(app, **kwargs):
+        started.append(kwargs)
+        with TestClient(app) as client:
+            assert client.get("/health/live").status_code == 200
+            assert client.get("/api/chat").status_code == 401
+            assert client.post("/api/mock-identity/signin", json={}).status_code == 404
+
+    def unexpected_sidecar(*args, **kwargs):
+        pytest.fail("Hosted startup must not construct a mock sidecar")
+
+    monkeypatch.setattr(SidecarClient, "__init__", unexpected_sidecar)
+    monkeypatch.setattr(entrypoint.uvicorn, "run", run)
+    monkeypatch.setattr(entrypoint, "configure_azure_export", lambda **kwargs: exports.append(kwargs))
+
+    result = entrypoint.main()
+
+    assert result == entrypoint.EXIT_SUCCESS
+    assert started == [{"host": "0.0.0.0", "port": settings.port, "log_config": None, "access_log": False}]
+    assert exports[0]["environment"] == "production"
+    assert exports[0]["manual_only"] is True
 
 
 def test_given_environment_when_loading_then_parses_service_settings(

@@ -180,6 +180,7 @@ Details:
 * The existing APIM service is Developer tier with `virtualNetworkType: None` and currently reports outbound IP `20.92.175.204`. The approved MVP template restricts external MCP ACA ingress to that `/32` and also requires Entra authentication; this is not private networking and the allowlist must be revalidated at deployment.
 * Local security verification: `tests/test_mcp_http.py` and `tests/test_mcp_config.py` passed 21 tests; `tests/test_telemetry.py` and `tests/test_governance.py` passed 43 tests, for 64 focused tests total. These prove application middleware/configuration and telemetry behavior only, not Azure Container Apps built-in Entra authentication or deployed network isolation.
 * Bicep CLI `0.48.1` is installed. Existing staged [infra/main.bicep](../../../infra/main.bicep) compiles after AVM modules are restored. A refreshed `what-if` using the created chat/MCP app IDs and MCP API audience reported 10 creates and 18 ignored resources; no deletes/replacements were shown and no Azure resources were applied. This remains structural preview only because the chat secret and image tag were placeholders and role assignments were disabled.
+* Added [infra/bootstrap-acr.bicep](../../../infra/bootstrap-acr.bicep) with the same deterministic registry name, Basic SKU, and disabled admin account as the full template. Both templates compile. A bootstrap-only `what-if` predicted one ACR create and 18 ignored resources; no Azure resources were applied. This enables a registry-first image-push sequence but does not complete the ACA foundation or deployment gates.
 * A second `what-if` including role assignments was rejected because the current principal lacks `Microsoft.Authorization/roleAssignments/write`. A deployer with Owner, User Access Administrator, or an appropriately scoped Role Based Access Control Administrator permission must create the ACR pull and Foundry workload role assignments.
 * The updated `.env` `AZURE_CLIENT_ID` resolves to the `demo-ai-governance-harness` service principal and does not match the Foundry agent identity. Its app registration has no identifier URI or web/SPA redirect URIs, so it is not ready to serve as the chat EasyAuth/API registration without explicit configuration.
 * The actual Entra app/client IDs, API audience/scope, chat auth secret, and built/published container image remain required for a deployment-ready preview. The Bicep file's ChatService currently still uses direct Foundry/MCP orchestration, so the Prompt Agent integration is also an application-code prerequisite to a faithful end-to-end demo.
@@ -667,7 +668,7 @@ Dependencies:
 
 | Field | Record |
 |---|---|
-| Planning execution and readiness | Partial; D5-D7 are confirmed. Bicep compiles and refreshed structural What-If completed with the real chat/MCP app IDs and role assignments disabled (10 creates, 18 ignores); no resources were applied. The existing `AZURE_CLIENT_ID` remains a separate workload service principal. |
+| Planning execution and readiness | Partial; D5-D7 are confirmed. Main and ACR-bootstrap Bicep templates compile. Bootstrap What-If predicted one ACR create and 18 ignores; full-template What-If predicted 10 creates and 18 ignores with role assignments disabled. No resources were applied. The existing `AZURE_CLIENT_ID` remains a separate workload service principal. |
 | Blockers | Authorized deployer for role assignments; chat redirect URI and EasyAuth secret; app-role assignment to Foundry Agent Identity; built/published image; ChatService-to-Prompt-Agent and authenticated MCP integration. VNet/private networking and durable audit are deferred. |
 | Latest critique | Not run. |
 | Relevant research | Not activated; supplied architecture, prior planning artifacts, and repository code establish the current design delta. |
@@ -675,7 +676,7 @@ Dependencies:
 | Changes-record role | `.copilot-tracking/changes/2026-10-14/azure-native-services-migration-changes.md` will record implementation evidence if this plan proceeds. |
 | Continuation owner | User, standalone planning. |
 | Required gates or confirmations | Obtain separate authorization before Azure apply; use an identity with `roleAssignments/write`; add the chat redirect URI after ACA FQDN exists; securely supply the chat secret; assign `Mcp.Tools.Invoke` to the Foundry Agent Identity; publish the image; complete and test Prompt Agent/MCP code integration. |
-| Next action | Coordinate the chat redirect/secret and MCP app-role assignment with the Entra owner; obtain RBAC assignment rights, build/publish the image, and complete Prompt Agent/MCP wiring before requesting explicit approval for a deployment What-If and apply. No Azure apply has run. |
+| Next action | After explicit authorization and with ACR create permission, deploy `infra/bootstrap-acr.bicep`, then build and push the actual image. Coordinate the chat secret and MCP app-role assignment with the Entra owner, complete Prompt Agent/MCP wiring, and obtain role-assignment rights before a full-template What-If and separately approved apply. |
 
 ## Goals
 

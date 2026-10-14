@@ -6,11 +6,24 @@ agent: ai-governance-harness
 scope: global
 default_action: deny
 rules:
+  # Provenance is documentary metadata until adapter/observability support is added.
   - name: deny-personal-advice-request
+    description: "BU-SUPER-001 v1.0; source: superannuation-ba-policy-source.yaml; request advice boundary."
+    provenance:
+      layer: business-unit
+      policy_id: BU-SUPER-001
+      policy_version: "1.0"
+      source: superannuation-ba-policy-source.yaml
     stage: pre_input
     condition: "action.type == 'chat.input' and data.advice_request_status == 'personal_advice_requested'"
     action: deny
   - name: deny-personal-advice-tool-response
+    description: "BU-SUPER-001 v1.0; source: superannuation-ba-policy-source.yaml; tool-result advice boundary."
+    provenance:
+      layer: business-unit
+      policy_id: BU-SUPER-001
+      policy_version: "1.0"
+      source: superannuation-ba-policy-source.yaml
     stage: post_tool
     condition: "data.advice_scan_status == 'personal_advice_detected'"
     action: deny
@@ -19,6 +32,12 @@ rules:
     condition: "action.type == 'agent.startup'"
     action: allow
   - name: allow-chat-input
+    description: "BU-SUPER-001 v1.0; source: superannuation-ba-policy-source.yaml; requires a passed request scan."
+    provenance:
+      layer: business-unit
+      policy_id: BU-SUPER-001
+      policy_version: "1.0"
+      source: superannuation-ba-policy-source.yaml
     stage: pre_input
     condition: "action.type == 'chat.input' and data.advice_request_status == 'passed'"
     action: allow
@@ -51,22 +70,52 @@ rules:
     condition: "action.type == 'prepare_member_outreach_case'"
     action: allow
   - name: allow-member-profile-result
+    description: "BU-SUPER-001 v1.0; source: superannuation-ba-policy-source.yaml; requires a passed advice scan."
+    provenance:
+      layer: business-unit
+      policy_id: BU-SUPER-001
+      policy_version: "1.0"
+      source: superannuation-ba-policy-source.yaml
     stage: post_tool
     condition: "action.type == 'get_member_profile' and data.advice_scan_status == 'passed'"
     action: allow
   - name: allow-member-signals-result
+    description: "BU-SUPER-001 v1.0; source: superannuation-ba-policy-source.yaml; requires a passed advice scan."
+    provenance:
+      layer: business-unit
+      policy_id: BU-SUPER-001
+      policy_version: "1.0"
+      source: superannuation-ba-policy-source.yaml
     stage: post_tool
     condition: "action.type == 'get_member_disengagement_signals' and data.advice_scan_status == 'passed'"
     action: allow
   - name: allow-cohort-analytics-result
+    description: "BU-SUPER-001 v1.0; source: superannuation-ba-policy-source.yaml; requires a passed advice scan."
+    provenance:
+      layer: business-unit
+      policy_id: BU-SUPER-001
+      policy_version: "1.0"
+      source: superannuation-ba-policy-source.yaml
     stage: post_tool
     condition: "action.type == 'get_cohort_churn_analytics' and data.advice_scan_status == 'passed'"
     action: allow
   - name: allow-fum-summary-result
+    description: "BU-SUPER-001 v1.0; source: superannuation-ba-policy-source.yaml; requires a passed advice scan."
+    provenance:
+      layer: business-unit
+      policy_id: BU-SUPER-001
+      policy_version: "1.0"
+      source: superannuation-ba-policy-source.yaml
     stage: post_tool
     condition: "action.type == 'get_fum_outflow_summary' and data.advice_scan_status == 'passed'"
     action: allow
   - name: allow-approved-outreach-case-result
+    description: "BU-SUPER-001 v1.0; source: superannuation-ba-policy-source.yaml; requires a passed advice scan."
+    provenance:
+      layer: business-unit
+      policy_id: BU-SUPER-001
+      policy_version: "1.0"
+      source: superannuation-ba-policy-source.yaml
     stage: post_tool
     condition: "action.type == 'prepare_member_outreach_case' and data.advice_scan_status == 'passed'"
     action: allow

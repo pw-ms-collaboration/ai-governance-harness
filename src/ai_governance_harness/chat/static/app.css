@@ -249,6 +249,12 @@ h1 {
   color: #fff;
 }
 
+.message .policy-notice {
+  margin-top: 0.6rem;
+  color: var(--danger);
+  font-weight: 700;
+}
+
 .activity {
   min-height: 1.5rem;
   color: var(--muted);

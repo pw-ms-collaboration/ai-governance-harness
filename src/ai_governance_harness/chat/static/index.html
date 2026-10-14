@@ -3,9 +3,9 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Chat with synthetic superannuation governance data">
-    <title>AI Governance Chat</title>
-    <link rel="stylesheet" href="/static/app.css">
+    <meta name="description" content="Customer insights chat for bank business analysts using synthetic data">
+    <title>Business Analyst Insights Chat</title>
+    <link rel="stylesheet" href="/static/app.css?v=policy-notice">
   </head>
   <body>
     <a class="skip-link" href="#chat-input">Skip to message input</a>
@@ -13,8 +13,8 @@
     <header class="site-header">
       <div>
         <p class="eyebrow">AI governance harness</p>
-        <h1>Superannuation insights chat</h1>
-        <p class="subtitle">Foundry-powered answers grounded in synthetic, in-fund MCP data.</p>
+        <h1>Customer insights for business analysts</h1>
+        <p class="subtitle">Foundry-powered account profile answers from synthetic customer data.</p>
       </div>
       <div class="connection" aria-live="polite">
         <span class="status-dot" aria-hidden="true"></span>
@@ -26,19 +26,14 @@
       <section class="intro" aria-labelledby="intro-title">
         <h2 id="intro-title">Ask a factual question</h2>
         <p>
-          Try a synthetic member ID such as <code>MEM-001</code>,
-          <code>MEM-002</code>, or <code>MEM-003</code>. Responses are general
-          information, not personal financial advice.
+          Look up a synthetic customer's account profile by member ID, such as
+          <code>MEM-001</code>, <code>MEM-002</code>, or <code>MEM-003</code>.
+          Responses show account balance, phase, and option allocation only.
+          Other customer information is not available.
         </p>
         <div class="examples" role="group" aria-label="Example questions">
-          <button type="button" class="example" data-question="Show me the profile for MEM-001.">
+          <button type="button" class="example" data-question="Show me the account profile for MEM-001.">
             Profile MEM-001
-          </button>
-          <button type="button" class="example" data-question="What are the churn signals for MEM-002?">
-            Churn signals
-          </button>
-          <button type="button" class="example" data-question="Summarize the cohort churn risk and FUM at risk.">
-            Cohort summary
           </button>
         </div>
       </section>
@@ -53,7 +48,7 @@
             <li class="message assistant">
               <article>
                 <h3>Assistant</h3>
-                <p>Hello. Ask me about a synthetic member profile, churn signals, cohort risk, or FUM outflow.</p>
+                <p>Hello. Ask me for a synthetic customer's account profile by member ID, such as MEM-001.</p>
               </article>
             </li>
           </ol>
@@ -157,6 +152,8 @@
                     <th scope="col">Lifecycle</th>
                     <th scope="col">Action</th>
                     <th scope="col">Decision</th>
+                    <th scope="col">Policy</th>
+                    <th scope="col">Matched rule</th>
                     <th scope="col">Latency</th>
                   </tr>
                 </thead>
@@ -206,6 +203,6 @@
     <footer>
       <p>Synthetic demonstration data only. External assets are not tracked or verified.</p>
     </footer>
-    <script src="/static/app.js" defer></script>
+    <script src="/static/app.js?v=policy-notice" defer></script>
   </body>
 </html>

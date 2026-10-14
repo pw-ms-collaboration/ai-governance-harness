@@ -34,7 +34,7 @@ const privacyControls = document.querySelector("#privacy-controls");
 let history = [];
 let governancePaused = false;
 
-function addMessage(role, content) {
+function addMessage(role, content, policyNotice = null) {
   const item = document.createElement("li");
   item.className = `message ${role}`;
 
@@ -45,6 +45,15 @@ function addMessage(role, content) {
   heading.textContent = role === "user" ? "You" : "Assistant";
   body.textContent = content;
   article.append(heading, body);
+  if (policyNotice) {
+    const rule = policyNotice.rule || "unnamed rule";
+    const policy = policyNotice.policy_name || "unknown policy";
+    const decision = String(policyNotice.decision || "deny").replaceAll("_", " ");
+    const notice = document.createElement("p");
+    notice.className = "policy-notice";
+    notice.textContent = `Policy break: rule ${rule} in ${policy} (${decision}).`;
+    article.append(notice);
+  }
   item.append(article);
   messagesElement.append(item);
   messagesElement.scrollTop = messagesElement.scrollHeight;
@@ -153,7 +162,7 @@ function renderEvents(events) {
   if (!values.length) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
-    cell.colSpan = 6;
+    cell.colSpan = 8;
     cell.textContent = "No governance decisions have been recorded yet.";
     row.append(cell);
     decisionEvents.append(row);
@@ -178,6 +187,8 @@ function renderEvents(events) {
     decisionBadge.textContent = String(event.decision || "unknown").replaceAll("_", " ");
     decisionCell.append(decisionBadge);
     row.append(decisionCell);
+    appendTableCell(row, event.policy_name || "not recorded");
+    appendTableCell(row, event.matched_rule || "no rule matched", { code: true });
     appendTableCell(row, `${Number(event.evaluation_ms || 0).toFixed(3)} ms`);
     decisionEvents.append(row);
   }
@@ -324,7 +335,7 @@ form.addEventListener("submit", async (event) => {
     if (!response.ok) {
       throw new Error(payload.error || "The chat request failed.");
     }
-    addMessage("assistant", payload.message);
+    addMessage("assistant", payload.message, payload.policy_notice);
     history.push({ role: "assistant", content: payload.message });
     history = history.slice(-20);
   } catch (error) {
@@ -360,7 +371,7 @@ clearButton.addEventListener("click", () => {
   messagesElement.replaceChildren();
   addMessage(
     "assistant",
-    "Conversation cleared. Ask about a synthetic member, churn risk, or FUM outflow.",
+    "Conversation cleared. Ask for a synthetic customer's account profile by member ID.",
   );
   clearError();
   input.focus();

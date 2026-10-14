@@ -64,6 +64,7 @@ def test_given_valid_chat_request_when_posting_then_returns_response() -> None:
     assert response.json() == {
         "message": "Grounded response",
         "tools_used": ["get_member_profile"],
+        "policy_notice": None,
     }
     assert service.requests[0].messages[0].content == "Profile MEM-001"
 

@@ -78,8 +78,9 @@
 * Digest: `sha256:7c6b00c0deb123a8abd3ce4ef57bf8d7889af1b4a09c3d3c412620858013741f`
 * Behavior or functionality changed: Built for `linux/amd64` and pushed to the bootstrapped ACR. `.dockerignore` excludes `.env`, `.git`, and tracking artifacts.
 * Validation: ACR confirmed the pushed tag. The image's chat and MCP entrypoints both reached ready in local containers, and unauthenticated MCP POST returned HTTP 401. The real-tag full-template What-If predicted 9 creates and 19 ignores, with the ACR ignored; no Azure app resources were applied. APIM-backed Prompt Agent invocation remains untested because the APIM route is not deployed.
+* Validation: ACR confirmed the pushed tag. The image's chat and MCP entrypoints both reached ready in local containers, and unauthenticated MCP POST returned HTTP 401. The latest Owner-authorized full-template What-If with role assignments enabled predicted 11 creates and 19 ignores, including both Bicep role assignments; the ACR remained ignored. No ACA/APIM resources were applied. APIM-backed Prompt Agent invocation remains untested because the APIM route is not deployed.
 
 ## Remaining Work
 
 * Deploy the APIM MCP API and pass a hosted synthetic vertical slice through version 2.
-* Complete chat EasyAuth secret/redirect configuration and obtain Azure `roleAssignments/write` permission before the production-shaped What-If and separately approved apply.
+* Complete chat EasyAuth secret/redirect configuration and obtain separate approval before applying the role-enabled infrastructure deployment.

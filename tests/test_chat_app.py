@@ -177,6 +177,13 @@ def test_given_personal_advice_request_when_posting_then_policy_denies_input() -
         == "deny-personal-advice-request"
     )
     assert response.json()["error"]["correlation_id"] == "advice-request-test"
+    assert "BU-SUPER-001" not in response.text
+    snapshot = client.get("/api/governance/snapshot").json()
+    event = next(
+        event for event in snapshot["events"]["recent_events"]
+        if event["matched_rule"] == "deny-personal-advice-request"
+    )
+    assert event["provenance"]["policy_id"] == "BU-SUPER-001"
 
 
 def test_given_upstream_failure_when_posting_then_returns_distinct_error() -> None:

@@ -32,9 +32,9 @@ examples:
   - request: What investment option should member MEM-001 choose?
     expected_input_decision: deny
 limitations:
-  - Runtime rule provenance records layer, policy_id, policy_version and source; the adapter does not yet consume it.
-  - BU attribution is documentary metadata; the existing dashboard reports original rule names.
-  - No policy-origin UI column or additional OpenTelemetry attribution fields are provided.
+  - Runtime rule provenance is validated and attached only when a mapped rule matches.
+  - The governance panel, traces and logs show attribution; metrics include layer and policy ID only.
+  - This source is documentation, not an executable policy or an automatically ingested rule set.
   - Passed scans mean no configured pattern matched, not a legal classification.
   - Final chat-response sanitisation is a separate guardrail, not either denial rule.
   - Missing or unknown scan status fails closed without a matched BU denial rule.

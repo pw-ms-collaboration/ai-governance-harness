@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 import pytest
 from opentelemetry.sdk.metrics import MeterProvider
@@ -201,3 +202,69 @@ def test_given_mcp_settings_when_configuring_then_existing_role_is_preserved(
         "environment": "test",
         "region": None,
     }]
+
+
+def test_given_bu_denial_when_exporting_then_spans_metrics_and_logs_have_origin(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO)
+    reader = InMemoryMetricReader()
+    metrics_provider = MeterProvider(metric_readers=[reader])
+    meter = metrics_provider.get_meter("provenance-test")
+    spans = InMemorySpanExporter()
+    trace_provider = TracerProvider()
+    trace_provider.add_span_processor(SimpleSpanProcessor(spans))
+    monkeypatch.setattr(engine, "tracer", trace_provider.get_tracer("provenance-test"))
+    monkeypatch.setattr(governance_telemetry, "decision_counter",
+                        meter.create_counter("governance.policy.decision.count"))
+    monkeypatch.setattr(governance_telemetry, "evaluation_duration",
+                        meter.create_histogram("governance.policy.evaluation.duration"))
+    governance = engine.GovernanceEngine(GovernanceSettings(environment="test"))
+
+    try:
+        governance.evaluate(
+            LifecyclePoint.INPUT, "chat.input", source="chat",
+            policy_data={"advice_request_status": "personal_advice_requested",
+                         "prompt": "private@example.com"},
+        )
+        governance.evaluate(LifecyclePoint.PRE_TOOL, "shell.execute", source="chat")
+        governance.record_external_denial(
+            LifecyclePoint.POST_MODEL, "foundry.chat",
+            policy_name="azure-ai-foundry", matched_rule="deny-personal-advice-request",
+            source="chat",
+        )
+
+        finished = spans.get_finished_spans()
+        assert finished[0].attributes["governance.policy.id"] == "BU-SUPER-001"
+        assert finished[0].attributes["governance.policy.layer"] == "business-unit"
+        assert finished[0].attributes["governance.policy.version"] == "1.0"
+        assert finished[0].attributes["governance.policy.source"] == (
+            "superannuation-ba-policy-source.yaml"
+        )
+        assert "governance.policy.id" not in finished[1].attributes
+        data = reader.get_metrics_data()
+        assert data is not None
+        attributes = [
+            dict(point.attributes)
+            for resource in data.resource_metrics
+            for scope in resource.scope_metrics
+            for metric in scope.metrics
+            for point in metric.data.data_points
+        ]
+        tagged = [item for item in attributes if "governance.policy.id" in item]
+        assert len(tagged) == 2
+        assert all(item["governance.policy.id"] == "BU-SUPER-001" for item in tagged)
+        assert all("governance.policy.source" not in item
+                   and "governance.policy.version" not in item for item in attributes)
+        formatter = telemetry.PrivacySafeJsonFormatter("test", "revision")
+        logs = [json.loads(formatter.format(record)) for record in caplog.records
+                if record.message == "governance.policy.decision"]
+        assert logs[0]["attributes"]["policy_id"] == "BU-SUPER-001"
+        assert logs[0]["attributes"]["policy_source"] == (
+            "superannuation-ba-policy-source.yaml"
+        )
+        assert "policy_id" not in logs[1]["attributes"]
+        assert "private@example.com" not in json.dumps(logs + attributes)
+    finally:
+        metrics_provider.shutdown()
+        trace_provider.shutdown()

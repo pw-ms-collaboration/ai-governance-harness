@@ -175,6 +175,15 @@ function appendTableCell(row, value, { code = false } = {}) {
   row.append(cell);
 }
 
+function provenanceLabel(provenance, { includeSource = false } = {}) {
+  if (!provenance) {
+    return "Not attributed";
+  }
+  const layer = provenance.layer === "business-unit" ? "Business unit" : "Enterprise";
+  const label = `${layer}: ${provenance.policy_id} v${provenance.policy_version}`;
+  return includeSource ? `${label} (${provenance.source})` : label;
+}
+
 function renderEvents(events) {
   decisionEvents.replaceChildren();
   const values = Array.isArray(events) ? events : [];
@@ -206,8 +215,8 @@ function renderEvents(events) {
     decisionBadge.textContent = String(event.decision || "unknown").replaceAll("_", " ");
     decisionCell.append(decisionBadge);
     row.append(decisionCell);
-    appendTableCell(row, event.policy_name || "not recorded");
     appendTableCell(row, event.matched_rule || "no rule matched", { code: true });
+    appendTableCell(row, provenanceLabel(event.provenance));
     appendTableCell(row, `${Number(event.evaluation_ms || 0).toFixed(3)} ms`);
     decisionEvents.append(row);
   }
@@ -226,6 +235,7 @@ function renderPolicy(policy) {
     appendTableCell(row, rule.stage || "unknown");
     appendTableCell(row, rule.name || "unnamed");
     appendTableCell(row, rule.action || "unknown");
+    appendTableCell(row, provenanceLabel(rule.provenance, { includeSource: true }));
     appendTableCell(row, rule.condition || "No condition", { code: true });
     policyRules.append(row);
   }

@@ -6,7 +6,7 @@ agent: ai-governance-harness
 scope: global
 default_action: deny
 rules:
-  # Provenance is documentary metadata until adapter/observability support is added.
+  # Provenance attributes matched rules; it does not change enforcement.
   - name: deny-personal-advice-request
     description: "BU-SUPER-001 v1.0; source: superannuation-ba-policy-source.yaml; request advice boundary."
     provenance:

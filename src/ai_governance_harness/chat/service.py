@@ -12,6 +12,7 @@ from typing import Any, Literal, Protocol
 
 import anyio
 from mcp import Client
+from openai import APIStatusError
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ai_governance_harness.chat.config import ChatSettings
@@ -113,6 +114,26 @@ def _known_service_error(error: BaseException) -> ChatServiceError | None:
             known_error = _known_service_error(nested_error)
             if known_error is not None:
                 return known_error
+    return None
+
+
+def _foundry_guardrail_code(error: APIStatusError) -> str | None:
+    """Recognize explicit policy-denial codes without inspecting error messages."""
+    codes = [error.code]
+    if isinstance(error.body, dict):
+        details = error.body.get("error", error.body)
+        if isinstance(details, dict):
+            codes.append(details.get("code"))
+            inner_error = details.get("innererror")
+            if isinstance(inner_error, dict):
+                codes.append(inner_error.get("code"))
+    for code in codes:
+        if isinstance(code, str) and code.lower() in {
+            "content_filter",
+            "content_policy_violation",
+            "responsibleaipolicyviolation",
+        }:
+            return "content_filter"
     return None
 
 
@@ -334,22 +355,47 @@ class ChatService:
                         source="chat",
                     )
 
-                    async def request_completion() -> Any:
-                        return await anyio.to_thread.run_sync(
-                            lambda: model_client.chat.completions.create(
-                                model=self._settings.model_deployment,
-                                messages=messages,
-                                tools=model_tools,
-                                tool_choice="auto",
-                                parallel_tool_calls=False,
-                                max_completion_tokens=self._settings.max_output_tokens,
-                                store=False,
+                    async def request_completion() -> tuple[Any, str | None]:
+                        try:
+                            completion = await anyio.to_thread.run_sync(
+                                lambda: model_client.chat.completions.create(
+                                    model=self._settings.model_deployment,
+                                    messages=messages,
+                                    tools=model_tools,
+                                    tool_choice="auto",
+                                    parallel_tool_calls=False,
+                                    max_completion_tokens=self._settings.max_output_tokens,
+                                    store=False,
+                                )
                             )
-                        )
+                        except APIStatusError as exc:
+                            guardrail_code = _foundry_guardrail_code(exc)
+                            if guardrail_code is None:
+                                raise
+                            return None, guardrail_code
+                        return completion, None
 
-                    completion = await self._foundry_reliability.call(
+                    completion, guardrail_code = await self._foundry_reliability.call(
                         request_completion,
                     )
+                    if guardrail_code is None and any(
+                        getattr(choice, "finish_reason", None) == "content_filter"
+                        for choice in completion.choices
+                    ):
+                        guardrail_code = "content_filter"
+                    if guardrail_code is not None:
+                        decision = self._governance.record_external_denial(
+                            LifecyclePoint.POST_MODEL,
+                            "foundry.chat",
+                            policy_name="azure-ai-foundry",
+                            matched_rule=guardrail_code,
+                            source="chat",
+                        )
+                        raise GovernanceDeniedError(
+                            "Azure AI Foundry guardrail denied the request.",
+                            action="foundry.chat",
+                            decision=decision,
+                        )
                     self._governance.require_allowed(
                         LifecyclePoint.POST_MODEL,
                         "foundry.chat",

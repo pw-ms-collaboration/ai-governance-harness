@@ -5,8 +5,11 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+import httpx
 import pytest
+from openai import BadRequestError
 
+from ai_governance_harness.chat.app import build_chat_app
 from ai_governance_harness.chat.config import ChatSettings
 from ai_governance_harness.chat.service import (
     ChatMessage,
@@ -14,6 +17,8 @@ from ai_governance_harness.chat.service import (
     ChatService,
     ChatServiceError,
 )
+from ai_governance_harness.governance import GovernanceEngine, GovernanceSettings
+from ai_governance_harness.governance.events import governance_events
 
 
 class _FakeToolCall:
@@ -379,3 +384,168 @@ async def test_given_goal_hijack_when_model_selects_unknown_tool_then_fails_clos
     assert _FakeMcpClient.called_tools == []
     assert project_client.closed is True
     assert model_client.closed is True
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "outcome", ["error", "wrapped_error_body", "inner_error", "filtered_response"],
+)
+@pytest.mark.parametrize("mcp_client_type", [_FakeMcpClient, _WrappingMcpClient])
+async def test_given_foundry_guardrail_when_completing_then_records_dashboard_denial(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    outcome: str,
+    mcp_client_type: type[_FakeMcpClient],
+) -> None:
+    # Arrange
+    _FakeMcpClient.called_tools = []
+    model_client = _FakeModelClient()
+    project_client = _FakeProjectClient(model_client)
+
+    def blocked_completion(**kwargs):
+        model_client.chat.completions.calls.append(kwargs)
+        error_bodies = {
+            "error": {"code": "content_filter"},
+            "wrapped_error_body": {"error": {"code": "content_filter"}},
+            "inner_error": {
+                "error": {
+                    "code": "BadRequest",
+                    "innererror": {"code": "ResponsibleAIPolicyViolation"},
+                },
+            },
+        }
+        if outcome in error_bodies:
+            raise BadRequestError(
+                "PRIVATE_PROVIDER_DIAGNOSTICS",
+                response=httpx.Response(
+                    400,
+                    request=httpx.Request("POST", "https://foundry.example/chat"),
+                ),
+                body=error_bodies[outcome],
+            )
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    finish_reason="content_filter",
+                    message=SimpleNamespace(
+                        content="PRIVATE_FILTERED_OUTPUT",
+                        tool_calls=[_FakeToolCall()],
+                    ),
+                )
+            ],
+        )
+
+    monkeypatch.setattr(model_client.chat.completions, "create", blocked_completion)
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.Client",
+        mcp_client_type,
+    )
+    engine = GovernanceEngine(
+        GovernanceSettings(environment="test", circuit_failure_threshold=1),
+    )
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_governance_engine",
+        lambda: engine,
+    )
+    settings = ChatSettings(model_deployment="test-model")
+    service = ChatService(settings)
+    monkeypatch.setattr(
+        service,
+        "_read_mcp_snapshot",
+        lambda: {
+            "schema": "ai-governance-observability/v1",
+            "status": "ready",
+            "events": {},
+        },
+    )
+    request = ChatRequest(messages=[ChatMessage(role="user", content="Show MEM-001")])
+    transport = httpx.ASGITransport(app=build_chat_app(settings, service))
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        before = (await client.get("/api/governance/snapshot")).json()
+        for attempt in range(1, 3):
+            # Act
+            response = await client.post("/api/chat", json=request.model_dump())
+            snapshot_response = await client.get("/api/governance/snapshot")
+            snapshot = snapshot_response.json()
+
+            # Assert
+            assert snapshot_response.status_code == 200
+            assert snapshot["events"]["counts"]["deny"] == (
+                before["events"]["counts"]["deny"] + attempt
+            )
+            event = snapshot["events"]["recent_events"][0]
+            assert event["source"] == "chat"
+            assert event["lifecycle_point"] == "post_model"
+            assert event["action"] == "foundry.chat"
+            assert event["decision"] == "deny"
+            assert event["allowed"] is False
+            assert event["policy_name"] == "azure-ai-foundry"
+            assert event["matched_rule"] == "content_filter"
+            assert snapshot["runtime"]["circuits"]["foundry"] == "closed"
+            assert response.status_code == 403
+            error = response.json()["error"]
+            assert error["code"] == "governance_denied"
+            assert error["details"]["policy_name"] == "azure-ai-foundry"
+            assert _FakeMcpClient.called_tools == []
+            assert len(model_client.chat.completions.calls) == attempt
+            assert model_client.closed is True
+            assert project_client.closed is True
+            public_data = json.dumps({"snapshot": snapshot, "error": error})
+            assert "PRIVATE_PROVIDER_DIAGNOSTICS" not in public_data
+            assert "PRIVATE_FILTERED_OUTPUT" not in public_data
+            assert "PRIVATE_PROVIDER_DIAGNOSTICS" not in caplog.text
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "error_body",
+    [
+        {"code": "invalid_request_error"},
+        {"code": "content_filter_error"},
+        {"code": {"content_filter": True}},
+    ],
+)
+async def test_given_other_foundry_error_when_completing_then_does_not_record_denial(
+    monkeypatch: pytest.MonkeyPatch,
+    error_body: dict[str, object],
+) -> None:
+    # Arrange
+    model_client = _FakeModelClient()
+    project_client = _FakeProjectClient(model_client)
+
+    def failed_completion(**kwargs):
+        raise BadRequestError(
+            "A content_filter diagnostic is not proof of a policy denial.",
+            response=httpx.Response(
+                400,
+                request=httpx.Request("POST", "https://foundry.example/chat"),
+            ),
+            body=error_body,
+        )
+
+    monkeypatch.setattr(model_client.chat.completions, "create", failed_completion)
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
+    )
+    monkeypatch.setattr("ai_governance_harness.chat.service.Client", _FakeMcpClient)
+    service = ChatService(ChatSettings(model_deployment="test-model"))
+    before = governance_events.snapshot()
+    request = ChatRequest(messages=[ChatMessage(role="user", content="Show MEM-001")])
+
+    # Act
+    with pytest.raises(ChatServiceError) as error:
+        await service.complete(request)
+    after = governance_events.snapshot()
+
+    # Assert
+    assert error.value.code == "upstream_failure"
+    assert error.value.status_code == 502
+    assert after["counts"]["deny"] == before["counts"]["deny"]
+    assert model_client.closed is True
+    assert project_client.closed is True

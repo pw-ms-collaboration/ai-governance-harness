@@ -22,6 +22,7 @@ from ai_governance_harness.governance import (
     GovernanceContext,
     LifecyclePoint,
     get_governance_engine,
+    get_governance_context,
     governance_context,
 )
 from ai_governance_harness.governance.sandbox import SandboxGuard
@@ -61,6 +62,7 @@ class BrowserSecurityMiddleware(BaseHTTPMiddleware):
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Cache-Control"] = "no-store"
         return response
 
 
@@ -158,10 +160,19 @@ def build_chat_app(
             )
         try:
             result = await chat_service.complete(payload)
-        except ChatServiceError:
+        except ChatServiceError as error:
+            public_error: dict[str, object] = {
+                "code": error.code,
+                "message": str(error),
+                "correlation_id": (
+                    get_governance_context().correlation_id or "unavailable"
+                ),
+            }
+            if error.details:
+                public_error["details"] = error.details
             return JSONResponse(
-                {"error": "The chat service could not complete the request."},
-                status_code=502,
+                {"error": public_error},
+                status_code=error.status_code,
             )
         return JSONResponse(result.model_dump())
 

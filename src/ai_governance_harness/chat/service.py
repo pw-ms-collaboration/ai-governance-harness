@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import re
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request as UrlRequest
 from urllib.request import urlopen
@@ -28,6 +30,7 @@ from ai_governance_harness.guardrails.advice_filter import (
     AdviceClassificationGuardrail,
     DisclosureAttacher,
     WholeOfWealthInvariantGuardrail,
+    advice_request_policy_data,
     tool_response_policy_data,
 )
 
@@ -39,9 +42,54 @@ SYSTEM_INSTRUCTIONS = (
     "uncertainty and keep responses concise."
 )
 
+logger = logging.getLogger(__name__)
+_SAFE_ERROR_VALUE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
+
+ChatErrorCode = Literal[
+    "chat_service_error",
+    "governance_denied",
+    "invalid_model_response",
+    "invalid_request",
+    "model_round_limit",
+    "unsafe_tool_result",
+    "upstream_failure",
+]
+
 
 class ChatServiceError(RuntimeError):
     """Raised when a chat turn cannot be completed safely."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: ChatErrorCode = "chat_service_error",
+        status_code: int = 502,
+        details: dict[str, str] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.status_code = status_code
+        self.details = dict(details or {})
+
+
+def _governance_error_details(error: GovernanceDeniedError) -> dict[str, str]:
+    """Return bounded policy metadata that is safe for a public error response."""
+    decision = error.decision
+    values = {
+        "action": error.action,
+        "lifecycle_point": (
+            decision.lifecycle_point.value if decision is not None else None
+        ),
+        "decision": decision.action if decision is not None else None,
+        "policy_name": decision.policy_name if decision is not None else None,
+        "matched_rule": decision.matched_rule if decision is not None else None,
+    }
+    return {
+        key: value
+        for key, value in values.items()
+        if value is not None and _SAFE_ERROR_VALUE.fullmatch(value)
+    }
 
 
 class ChatMessage(BaseModel):
@@ -173,23 +221,34 @@ class ChatService:
     async def complete(self, request: ChatRequest) -> ChatResponse:
         """Complete one chat turn without persisting conversation content."""
         if len(request.messages) > self._settings.max_messages:
-            raise ChatServiceError("The conversation is too long.")
+            raise ChatServiceError(
+                "The conversation is too long.",
+                code="invalid_request",
+                status_code=400,
+            )
         if any(
             len(message.content) > self._settings.max_message_length
             for message in request.messages
         ):
-            raise ChatServiceError("A message exceeds the configured length.")
-        self._governance.require_allowed(
-            LifecyclePoint.INPUT,
-            "chat.input",
-            policy_data={"message_count": len(request.messages)},
-            source="chat",
-        )
-
-        project_client = get_foundry_client()
+            raise ChatServiceError(
+                "A message exceeds the configured length.",
+                code="invalid_request",
+                status_code=400,
+            )
+        project_client = None
         model_client: _CompletionClient | None = None
         tools_used: list[str] = []
         try:
+            self._governance.require_allowed(
+                LifecyclePoint.INPUT,
+                "chat.input",
+                policy_data={
+                    "message_count": len(request.messages),
+                    **advice_request_policy_data(request.messages[-1].content),
+                },
+                source="chat",
+            )
+            project_client = get_foundry_client()
             model_client = project_client.get_openai_client()
             async with Client(self._settings.mcp_url) as mcp_client:
                 discovered = await self._mcp_reliability.call(
@@ -254,7 +313,10 @@ class ChatService:
                     assistant_message = choice.message
                     if not assistant_message.tool_calls:
                         if not assistant_message.content:
-                            raise ChatServiceError("The model returned an empty response.")
+                            raise ChatServiceError(
+                                "The model returned an empty response.",
+                                code="invalid_model_response",
+                            )
                         response = self._sanitize_response(
                             assistant_message.content
                         )
@@ -294,17 +356,20 @@ class ChatService:
                         )
                         if tool_name not in tool_by_name:
                             raise ChatServiceError(
-                                "The model selected an unknown tool."
+                                "The model selected an unknown tool.",
+                                code="invalid_model_response",
                             )
                         try:
                             arguments = json.loads(tool_call.function.arguments)
                         except json.JSONDecodeError as exc:
                             raise ChatServiceError(
-                                "The model returned invalid tool arguments."
+                                "The model returned invalid tool arguments.",
+                                code="invalid_model_response",
                             ) from exc
                         if not isinstance(arguments, dict):
                             raise ChatServiceError(
-                                "The model returned invalid tool arguments."
+                                "The model returned invalid tool arguments.",
+                                code="invalid_model_response",
                             )
 
                         async def call_tool() -> Any:
@@ -330,7 +395,10 @@ class ChatService:
                             tool_payload = result.structured_content
                         serialized = json.dumps(tool_payload, separators=(",", ":"))
                         if len(serialized) > 32_000:
-                            raise ChatServiceError("The tool result exceeded the safe limit.")
+                            raise ChatServiceError(
+                                "The tool result exceeded the safe limit.",
+                                code="unsafe_tool_result",
+                            )
                         messages.append(
                             {
                                 "role": "tool",
@@ -342,18 +410,27 @@ class ChatService:
             raise
         except GovernanceDeniedError as exc:
             raise ChatServiceError(
-                "Governance denied the requested operation."
+                "Governance policy denied the requested operation.",
+                code="governance_denied",
+                status_code=403,
+                details=_governance_error_details(exc),
             ) from exc
         except Exception as exc:
+            logger.exception("Chat service failed unexpectedly")
             raise ChatServiceError(
-                "The chat service could not complete the request."
+                "An upstream chat dependency could not complete the request.",
+                code="upstream_failure",
             ) from exc
         finally:
             if model_client is not None:
                 model_client.close()
-            project_client.close()
+            if project_client is not None:
+                project_client.close()
 
-        raise ChatServiceError("The model exceeded the allowed tool-call rounds.")
+        raise ChatServiceError(
+            "The model exceeded the allowed tool-call rounds.",
+            code="model_round_limit",
+        )
 
     def _sanitize_response(self, response: str) -> str:
         scoped = self._wealth_guardrail.sanitize_scope_claims(response)

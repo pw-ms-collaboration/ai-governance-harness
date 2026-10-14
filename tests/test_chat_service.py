@@ -153,11 +153,50 @@ async def test_given_mcp_personal_advice_when_completing_then_blocks_before_next
     request = ChatRequest(messages=[ChatMessage(role="user", content="Show MEM-001")])
 
     # Act & Assert
-    with pytest.raises(ChatServiceError, match="Governance denied"):
+    with pytest.raises(ChatServiceError, match="Governance policy denied") as error:
         await service.complete(request)
+    assert error.value.code == "governance_denied"
+    assert error.value.status_code == 403
+    assert error.value.details["matched_rule"] == "deny-personal-advice-tool-response"
     assert len(model_client.chat.completions.calls) == 1
     assert model_client.closed is True
     assert project_client.closed is True
+
+
+@pytest.mark.anyio
+async def test_given_personal_advice_request_when_completing_then_blocks_before_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    def unexpected_foundry_call():
+        raise AssertionError("Foundry must not be called for a denied input.")
+
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        unexpected_foundry_call,
+    )
+    service = ChatService(ChatSettings(model_deployment="test-model"))
+    request = ChatRequest(
+        messages=[
+            ChatMessage(
+                role="user",
+                content=(
+                    "Given this customer's account balance, give me some financial "
+                    "recommendations on how to grow their balance"
+                ),
+            )
+        ]
+    )
+
+    # Act
+    with pytest.raises(ChatServiceError) as error:
+        await service.complete(request)
+
+    # Assert
+    assert error.value.code == "governance_denied"
+    assert error.value.status_code == 403
+    assert error.value.details["action"] == "chat.input"
+    assert error.value.details["matched_rule"] == "deny-personal-advice-request"
 
 
 @pytest.mark.anyio
@@ -234,8 +273,11 @@ async def test_given_goal_hijack_when_model_selects_unknown_tool_then_fails_clos
     )
 
     # Act / Assert
-    with pytest.raises(ChatServiceError, match="Governance denied"):
+    with pytest.raises(ChatServiceError, match="Governance policy denied") as error:
         await service.complete(request)
+    assert error.value.code == "governance_denied"
+    assert error.value.status_code == 403
+    assert error.value.details["action"] == "shell.execute"
     assert _FakeMcpClient.called_tools == []
     assert project_client.closed is True
     assert model_client.closed is True

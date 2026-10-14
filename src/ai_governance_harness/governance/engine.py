@@ -48,6 +48,17 @@ _TOOLKIT_STAGE_BY_LIFECYCLE = {
 class GovernanceDeniedError(RuntimeError):
     """Raised when policy prevents an operation from executing."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        action: str | None = None,
+        decision: GovernanceDecision | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.action = action
+        self.decision = decision
+
 
 class GovernanceEngine:
     """Load one policy and normalize toolkit decisions."""
@@ -191,7 +202,9 @@ class GovernanceEngine:
         )
         if not decision.allowed or decision.action == "require_approval":
             raise GovernanceDeniedError(
-                f"Governance denied the {lifecycle_point.value} operation."
+                f"Governance denied the {lifecycle_point.value} operation.",
+                action=action,
+                decision=decision,
             )
         return decision
 

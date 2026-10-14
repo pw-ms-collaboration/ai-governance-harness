@@ -76,6 +76,45 @@ def test_policy_allows_known_tool_and_denies_unknown_action() -> None:
     assert denied.action == "deny"
 
 
+def test_given_denied_policy_when_requiring_allowed_then_exposes_decision() -> None:
+    # Arrange
+    engine = GovernanceEngine(_settings())
+
+    # Act
+    with pytest.raises(GovernanceDeniedError) as error:
+        engine.require_allowed(LifecyclePoint.PRE_TOOL, "shell.execute")
+
+    # Assert
+    assert error.value.action == "shell.execute"
+    assert error.value.decision is not None
+    assert error.value.decision.action == "deny"
+    assert error.value.decision.lifecycle_point == LifecyclePoint.PRE_TOOL
+
+
+@pytest.mark.parametrize(
+    ("status", "expected_allowed"),
+    [("passed", True), ("personal_advice_requested", False), ("unknown", False)],
+)
+def test_given_advice_request_status_when_evaluating_input_then_enforces_policy(
+    status: str,
+    expected_allowed: bool,
+) -> None:
+    # Arrange
+    engine = GovernanceEngine(_settings())
+
+    # Act
+    decision = engine.evaluate(
+        LifecyclePoint.INPUT,
+        "chat.input",
+        policy_data={"advice_request_status": status},
+    )
+
+    # Assert
+    assert decision.allowed is expected_allowed
+    if status == "personal_advice_requested":
+        assert decision.matched_rule == "deny-personal-advice-request"
+
+
 @pytest.mark.parametrize(
     "action",
     [

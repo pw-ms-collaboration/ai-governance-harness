@@ -19,6 +19,8 @@ related:
     relation: influenced-by
   - path: 0003-minimize-identity-and-governance-telemetry.md
     relation: influences
+  - path: 0009-enforce-agent-and-staff-identity-through-governance-policy-context.md
+    relation: influences
 asr_triggers:
   - kind: security
     evidence: Packaged policy defaults to deny and gateway enforcement protects direct callers.

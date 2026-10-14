@@ -268,7 +268,156 @@ flowchart LR
 
 ---
 
-## 6. Regulatory & Compliance Architecture (ASIC RG 244)
+## 6. Identity Architecture (Microsoft Entra Agent ID)
+
+The chat orchestrator is the only agent. It gets its identity from **Microsoft Entra Agent ID**, while the MCP server stays a protected resource API. Staff identity travels to the MCP boundary in validated token claims, and the shared governance policy turns those claims into allow or deny decisions. See [ADR 0008](../planning/adrs/0008-use-microsoft-entra-agent-id-for-agent-identity.md), [ADR 0009](../planning/adrs/0009-enforce-agent-and-staff-identity-through-governance-policy-context.md), and [ADR 0010](../planning/adrs/0010-use-a-local-only-mock-entra-agent-id-issuer-for-the-mvp.md).
+
+### 6.1 Target: Azure with Entra Agent ID
+
+One agent identity blueprint per environment holds the credential, a user-assigned managed identity federated credential. Two agent identities are created from it:
+
+* `member-insights-interactive` acts on behalf of signed-in staff (OBO).
+* `member-insights-reporting` acts as itself (app-only) and is limited to aggregate tools.
+
+The chat service and the reporting job get tokens through the Entra SDK for AgentID sidecar. MCP validates the token claims before the AgentMesh policy engine applies the staff role matrix. Numbered edges follow one staff chat turn; dotted edges are credential, assignment, or control relationships.
+
+![Target identity architecture on Azure with Microsoft Entra Agent ID](../images/identity-architecture-azure.png)
+
+```mermaid
+flowchart TB
+  subgraph users["Staff"]
+    B["Browser chat UI"]
+  end
+
+  subgraph entra["Microsoft Entra tenant, one set per environment"]
+    WEB["App registration: agh-chat-web<br/>client app, assignment required"]
+    BP["Agent identity blueprint: AGH Member Insights<br/>exposes access_agent, pre-authorizes agh-chat-web<br/>FIC to managed identity, inheritable Tools.Read"]
+    AI1["Agent identity: member-insights-interactive<br/>OBO only, Azure role on Foundry"]
+    AI2["Agent identity: member-insights-reporting<br/>app role Reports.Aggregate.Read"]
+    MCPAPP["App registration: agh-mcp-api<br/>scope Tools.Read, app roles Staff.* and Reports.Aggregate.Read"]
+    GRP["Security groups, fixed membership<br/>Analysts, Retention Specialists,<br/>Compliance Reviewers, Administrators"]
+    BP --> AI1
+    BP --> AI2
+    GRP -. "assigned" .-> WEB
+    GRP -. "assigned Staff.* app roles" .-> MCPAPP
+  end
+
+  subgraph azure["Azure subscription, Australia East"]
+    MI["User-assigned managed identity"]
+    subgraph chatapp["Chat Container App"]
+      CHAT["Chat service and orchestrator<br/>governance adapter: AgentMesh PolicyEngine<br/>boundary = chat, actor = interactive"]
+      SC1["Entra SDK for AgentID sidecar<br/>localhost only"]
+    end
+    subgraph job["Reporting job"]
+      REP["Reporting agent<br/>aggregate tools only"]
+      SC2["Entra SDK for AgentID sidecar<br/>localhost only"]
+    end
+    subgraph mcpapp["MCP Container App"]
+      EA["Container Apps authentication<br/>signature, tid, aud"]
+      VAL["MCP validator<br/>azp allowlist, idtyp, xms facets, scp, roles"]
+      GOV["Governance adapter: AgentMesh PolicyEngine<br/>default deny, boundary = mcp<br/>staff role matrix"]
+      GW["Shared gateway and typed tools"]
+      DATA[("Synthetic member data")]
+    end
+    FDY["Azure AI Foundry model"]
+  end
+
+  OPS["Operator kill switch<br/>disable blueprint or agent identity"]
+
+  B -->|"1. sign in through agh-chat-web<br/>user token aud = blueprint"| WEB
+  B -->|"2. /api/chat + Bearer user token"| CHAT
+  CHAT -->|"3. /Validate and token requests"| SC1
+  SC1 -->|"4. blueprint FIC + fmi_path<br/>OBO or app-only exchange"| BP
+  MI -. "federated credential" .-> BP
+  SC1 -. "managed identity token" .-> MI
+  CHAT -->|"5. inference, app-only token<br/>Azure role on this resource only"| FDY
+  CHAT -->|"6. tool call + OBO token<br/>idtyp = user, azp = interactive, roles = Staff.*"| EA
+  REP --> SC2
+  SC2 -->|"app-only exchange"| BP
+  SC2 -. "managed identity token" .-> MI
+  REP -->|"tool call + app token<br/>idtyp = app, azp = reporting<br/>roles = Reports.Aggregate.Read"| EA
+  EA --> VAL --> GOV --> GW --> DATA
+  OPS -. "stops token issuance" .-> BP
+```
+
+### 6.2 Local MVP: mock identity service
+
+Entra Agent ID roles are not available for the hackathon MVP. A local-only mock, `ai-governance-identity` on port 8002, stands in for Entra and the sidecar:
+
+* It signs tokens with an in-memory RS256 key and publishes a JWKS.
+* It serves the same sidecar endpoints and mints the same claim shapes as Entra.
+* Staff personas are chosen in the chat UI.
+
+MCP verifies the signatures, and the same governance policy applies. Foundry inference uses the developer's `az login`. The mock refuses to start when hosted or in staging or production.
+
+![Local MVP identity architecture with the mock identity service](../images/identity-architecture-local.png)
+
+```mermaid
+flowchart LR
+  subgraph dev["Developer machine, 127.0.0.1 only, environment = local"]
+    L["ai-governance-dev launcher<br/>starts identity, then MCP, then chat"]
+    B["Browser chat UI<br/>Mock identity persona switcher<br/>token kept in page memory"]
+    subgraph idsvc["ai-governance-identity :8002, mock Entra and sidecar"]
+      KEY["RS256 key generated in memory<br/>at startup, never written"]
+      SIGNIN["/mock/signin<br/>four synthetic staff personas"]
+      SIDE["/Validate<br/>/AuthorizationHeader/mcp, OBO-shaped<br/>/AuthorizationHeaderUnauthenticated/mcp, app-only"]
+      JWKS["Discovery and JWKS<br/>Entra v2 issuer shape"]
+    end
+    subgraph chat["Chat service :8080"]
+      PROXY["/api/mock-identity/signin<br/>same-origin proxy"]
+      CHAT["/api/chat<br/>orchestrator and governance adapter<br/>boundary = chat"]
+    end
+    subgraph mcp["MCP server :8001"]
+      JWT["Principal source: jwt<br/>signature, iss, aud, RS256<br/>derive actor, token_type, staff_role"]
+      GOV["Governance adapter: AgentMesh PolicyEngine<br/>default deny, boundary = mcp<br/>staff role matrix"]
+      GW["Shared gateway and typed tools"]
+      DATA[("Synthetic member data")]
+    end
+    REP["Reporting command<br/>app-only, aggregate tools"]
+    LOCAL["stdio MCP client or legacy CLI<br/>MOCK_IDENTITY_LOCAL_PERSONA<br/>unset = deny, boundary = local"]
+  end
+
+  AZ["Developer az login<br/>DefaultAzureCredential"]
+  FDY["Azure AI Foundry model, cloud"]
+  GUARD["Startup guard: mock refuses to run<br/>when hosted, staging, or production"]
+
+  L -. "starts" .-> idsvc
+  L -. "starts" .-> mcp
+  L -. "starts" .-> chat
+  B -->|"1. choose persona"| PROXY
+  PROXY -->|"2. forward"| SIGNIN
+  SIGNIN -->|"3. user token, aud = mock blueprint"| B
+  B -->|"4. /api/chat + Bearer"| CHAT
+  CHAT -->|"5. validate, get OBO-shaped MCP token"| SIDE
+  CHAT -->|"6. tool call + Bearer"| JWT
+  JWT -. "fetch and cache keys" .-> JWKS
+  JWT --> GOV --> GW --> DATA
+  CHAT -->|"inference"| FDY
+  AZ -. "developer credential" .-> CHAT
+  REP -->|"app-only token"| SIDE
+  REP -->|"tool call + Bearer"| JWT
+  LOCAL -->|"configured persona"| GOV
+  KEY -. "signs" .-> SIGNIN
+  KEY -. "signs" .-> SIDE
+  KEY -. "publishes" .-> JWKS
+  GUARD -. "enforces" .-> idsvc
+```
+
+### 6.3 Staff Role Matrix
+
+Every combination not listed is denied by default.
+
+| Caller | Aggregate tools | Member-level tools | Outreach case |
+|--------|-----------------|--------------------|---------------|
+| Analyst (OBO) | Allow | Deny | Deny |
+| Retention Specialist (OBO) | Allow | Allow | Allow, MCP elicitation still required |
+| Compliance Reviewer (OBO) | Deny | Deny | Deny |
+| Administrator (OBO) | Deny | Deny | Deny |
+| Reporting agent (app-only) | Allow | Deny | Deny |
+
+---
+
+## 7. Regulatory & Compliance Architecture (ASIC RG 244)
 
 The core compliance filter enforces the statutory boundary between General Advice and Personal Advice under Australian law:
 
@@ -286,7 +435,7 @@ flowchart TD
 
 ---
 
-## 7. Next Steps & Implementation Mapping
+## 8. Next Steps & Implementation Mapping
 
 This architecture view maps directly to the active RPI implementation phases:
 

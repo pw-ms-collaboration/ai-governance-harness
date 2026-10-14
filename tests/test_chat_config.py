@@ -17,6 +17,7 @@ def test_given_environment_when_loading_then_parses_service_settings(
     monkeypatch.setenv("FOUNDRY_AGENT_NAME", "member-wealth-insights-agent")
     monkeypatch.setenv("MCP_SERVER_URL", "http://127.0.0.1:9000/mcp")
     monkeypatch.setenv("CHAT_PORT", "8081")
+    monkeypatch.setenv("CHAT_CLASSIFIER_MAX_OUTPUT_TOKENS", "320")
 
     # Act
     settings = ChatSettings.from_environment()
@@ -26,6 +27,7 @@ def test_given_environment_when_loading_then_parses_service_settings(
     assert settings.agent_name == "member-wealth-insights-agent"
     assert settings.mcp_url == "http://127.0.0.1:9000/mcp"
     assert settings.port == 8081
+    assert settings.classifier_max_output_tokens == 320
 
 
 def test_given_prompt_agent_name_when_prompt_agent_mode_is_disabled_then_uses_local_path(

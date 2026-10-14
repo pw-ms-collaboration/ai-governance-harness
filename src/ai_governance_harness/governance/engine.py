@@ -9,6 +9,8 @@ import warnings
 from collections.abc import Mapping
 from typing import Any
 
+import yaml
+
 with warnings.catch_warnings():
     warnings.simplefilter("ignore", DeprecationWarning)
     from agentmesh.governance import PolicyEngine
@@ -25,8 +27,10 @@ from ai_governance_harness.governance.events import (
 from ai_governance_harness.governance.models import (
     GovernanceDecision,
     LifecyclePoint,
+    PolicyProvenance,
 )
 from ai_governance_harness.governance.telemetry import (
+    provenance_attributes,
     record_decision_metrics,
     tracer,
 )
@@ -67,11 +71,21 @@ class GovernanceEngine:
         self.settings = settings
         self._policy_digest = "disabled"
         self._engine: PolicyEngine | None = None
+        self._rule_provenance: dict[str, PolicyProvenance] = {}
         if settings.enabled:
             policy_bytes = settings.policy_path.read_bytes()
             self._policy_digest = hashlib.sha256(policy_bytes).hexdigest()
             engine = PolicyEngine(conflict_strategy="deny_overrides")
             policy = engine.load_yaml(policy_bytes.decode("utf-8"))
+            document = yaml.safe_load(policy_bytes)
+            for rule in document.get("rules", []):
+                if "provenance" in rule:
+                    name = rule["name"]
+                    if sum(item["name"] == name for item in document["rules"]) != 1:
+                        raise ValueError("Provenance requires unique policy rule names.")
+                    self._rule_provenance[name] = PolicyProvenance.model_validate(
+                        rule["provenance"]
+                    )
             engine.load_policy(policy)
             if not engine.list_policies():
                 raise ValueError("Governance policy did not load.")
@@ -86,6 +100,10 @@ class GovernanceEngine:
     def ready(self) -> bool:
         """Return whether required governance is ready."""
         return not self.settings.enabled or self._engine is not None
+
+    def rule_provenance(self, name: str | None) -> PolicyProvenance | None:
+        """Look up attribution from the loaded policy, not caller-supplied data."""
+        return self._rule_provenance.get(name) if name else None
 
     def evaluate(
         self,
@@ -142,6 +160,12 @@ class GovernanceEngine:
                     "governance.decision",
                     toolkit_decision.action,
                 )
+                span.set_attribute(
+                    "governance.rule.name",
+                    toolkit_decision.matched_rule or "unmatched",
+                )
+                provenance = self.rule_provenance(toolkit_decision.matched_rule)
+                span.set_attributes(provenance_attributes(provenance))
         except Exception:
             logger.exception(
                 "Governance policy evaluation failed",
@@ -164,6 +188,7 @@ class GovernanceEngine:
             lifecycle_point=lifecycle_point,
             policy_name=toolkit_decision.policy_name,
             matched_rule=toolkit_decision.matched_rule,
+            provenance=provenance,
             reason=toolkit_decision.reason,
             evaluation_ms=toolkit_decision.evaluation_ms or 0.0,
             policy_digest=self.policy_digest,
@@ -179,6 +204,10 @@ class GovernanceEngine:
                 "decision_rule": decision.matched_rule,
                 "policy_name": decision.policy_name,
                 "latency_ms": round(decision.evaluation_ms, 2),
+                **{
+                    key.replace("governance.", "").replace(".", "_"): value
+                    for key, value in provenance_attributes(decision.provenance).items()
+                },
             },
         )
         return self._record_decision(decision, action=action, source=source)

@@ -75,6 +75,22 @@ class _GoalHijackModelClient(_FakeModelClient):
         self.chat = SimpleNamespace(completions=_GoalHijackCompletions())
 
 
+class _EmptyAfterToolCompletions(_FakeCompletions):
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        if len(self.calls) == 1:
+            message = SimpleNamespace(content=None, tool_calls=[_FakeToolCall()])
+        else:
+            message = SimpleNamespace(content=None, tool_calls=None)
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+
+class _EmptyAfterToolModelClient(_FakeModelClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.chat = SimpleNamespace(completions=_EmptyAfterToolCompletions())
+
+
 class _FakeProjectClient:
     def __init__(self, model_client: _FakeModelClient) -> None:
         self.model_client = model_client
@@ -120,6 +136,12 @@ class _FakeMcpClient:
                 "provenance": {"synthetic": True},
             },
         )
+
+
+class _WrappingMcpClient(_FakeMcpClient):
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        if exc is not None:
+            raise ExceptionGroup("MCP task group failed", [exc])
 
 
 @pytest.fixture()
@@ -237,6 +259,42 @@ async def test_given_member_question_when_completing_then_calls_mcp_and_foundry(
     assert "GENERAL ADVICE WARNING" in response.message
     assert project_client.closed is True
     assert model_client.closed is True
+
+
+@pytest.mark.anyio
+async def test_given_known_error_wrapped_by_mcp_when_completing_then_preserves_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    model_client = _EmptyAfterToolModelClient()
+    project_client = _FakeProjectClient(model_client)
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.Client",
+        _WrappingMcpClient,
+    )
+    service = ChatService(
+        ChatSettings(
+            model_deployment="test-model",
+            mcp_url="http://127.0.0.1:8000/mcp",
+        )
+    )
+    request = ChatRequest(
+        messages=[ChatMessage(role="user", content="Show MEM-001")]
+    )
+
+    # Act
+    with pytest.raises(ChatServiceError) as error:
+        await service.complete(request)
+
+    # Assert
+    assert error.value.code == "invalid_model_response"
+    assert str(error.value) == "The model returned an empty response."
+    assert model_client.closed is True
+    assert project_client.closed is True
 
 
 @pytest.mark.anyio

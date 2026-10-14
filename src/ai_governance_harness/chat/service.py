@@ -92,6 +92,30 @@ def _governance_error_details(error: GovernanceDeniedError) -> dict[str, str]:
     }
 
 
+def _governance_service_error(error: GovernanceDeniedError) -> ChatServiceError:
+    """Convert a policy denial to the public chat-service error contract."""
+    return ChatServiceError(
+        "Governance policy denied the requested operation.",
+        code="governance_denied",
+        status_code=403,
+        details=_governance_error_details(error),
+    )
+
+
+def _known_service_error(error: BaseException) -> ChatServiceError | None:
+    """Find a known service error wrapped by an asynchronous task group."""
+    if isinstance(error, ChatServiceError):
+        return error
+    if isinstance(error, GovernanceDeniedError):
+        return _governance_service_error(error)
+    if isinstance(error, BaseExceptionGroup):
+        for nested_error in error.exceptions:
+            known_error = _known_service_error(nested_error)
+            if known_error is not None:
+                return known_error
+    return None
+
+
 class ChatMessage(BaseModel):
     """One bounded user or assistant message."""
 
@@ -409,13 +433,11 @@ class ChatService:
         except ChatServiceError:
             raise
         except GovernanceDeniedError as exc:
-            raise ChatServiceError(
-                "Governance policy denied the requested operation.",
-                code="governance_denied",
-                status_code=403,
-                details=_governance_error_details(exc),
-            ) from exc
+            raise _governance_service_error(exc) from exc
         except Exception as exc:
+            known_error = _known_service_error(exc)
+            if known_error is not None:
+                raise known_error from exc
             logger.exception("Chat service failed unexpectedly")
             raise ChatServiceError(
                 "An upstream chat dependency could not complete the request.",

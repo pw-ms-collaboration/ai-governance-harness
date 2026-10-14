@@ -1,4 +1,7 @@
-# AI Governance Harness
+---
+title: AI Governance Harness
+description: Local-first reference implementation and team onboarding for observable, default-deny AI agent governance.
+---
 
 **A local-first reference implementation for observable, default-deny AI agent
 governance with Azure AI Foundry, Model Context Protocol, and Microsoft Agent
@@ -24,6 +27,7 @@ exposing real member information.
 
 ## Quick Navigation
 
+* [Start with the detailed team guides](#team-documentation)
 * [See what the project demonstrates](#what-this-project-demonstrates)
 * [Tour the governance dashboard](#governance-dashboard-tour)
 * [Understand the request flow](#how-it-works)
@@ -33,6 +37,24 @@ exposing real member information.
 * [Read the architecture decisions](#architecture-decisions)
 * [Run validation](#validate-the-project)
 * [Troubleshoot common problems](#troubleshooting)
+
+## Team Documentation
+
+Use these source-grounded guides when adopting the reference in another team.
+Keep the repository's application controls separate from model-level
+guardrails configured on your Azure AI Foundry deployment.
+
+| Guide                                                            | Start here for                                                                                                                     |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| [Getting started](./docs/getting-started.md)                     | Installation, local startup, Foundry guardrail verification, assurance commands, troubleshooting, and adoption prerequisites       |
+| [Architecture and controls](./docs/architecture-and-controls.md) | Current runtime diagrams, component responsibilities, request flow, policy stages, tool contracts, limitations, and safe extension |
+| [Configuration reference](./docs/configuration.md)               | Environment variables, defaults, limits, identity prerequisites, SDK caveats, telemetry, ports, and paths                          |
+
+Additional Foundry model guardrails are configured outside this repository.
+Their assigned risks, thresholds, and blocking actions must be verified in
+Azure; the local dashboard does not inspect that configuration. See the
+[Foundry guardrails overview](https://learn.microsoft.com/en-us/azure/foundry/guardrails/guardrails-overview)
+and the [team verification steps](./docs/getting-started.md#verify-foundry-guardrails).
 
 ## Capabilities at a Glance
 
@@ -371,9 +393,11 @@ AZURE_AI_PROJECT_REGION=australiaeast
 AZURE_AI_MODEL_DEPLOYMENT_NAME=<model-deployment-name>
 ```
 
-The project client also supports a project connection string or the complete
-subscription, resource-group, and project coordinate set. Leave
-`AZURE_AI_PROJECT_CONNECTION_STRING` empty when using the project endpoint; a
+Use the project endpoint as the recommended connection path. The source also
+contains legacy connection-string and coordinate branches, but current SDKs
+may not support them; see the
+[SDK compatibility caveat](./docs/configuration.md#foundry-connection-and-identity).
+Leave `AZURE_AI_PROJECT_CONNECTION_STRING` empty when using the endpoint; a
 non-empty placeholder takes precedence over the valid endpoint.
 
 Configure the local services:
@@ -757,6 +781,7 @@ Choose unused ports in `.env` and keep the MCP URL aligned:
 MCP_PORT=8101
 CHAT_PORT=8180
 MCP_SERVER_URL=http://127.0.0.1:8101/mcp
+CHAT_ALLOWED_ORIGINS=http://127.0.0.1:8180,http://localhost:8180
 ```
 
 Restart `ai-governance-dev` after saving the file.

@@ -470,27 +470,78 @@ code {
   padding: 0.1rem 0.25rem;
 }
 
-.circuit-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.5rem;
+.section-intro,
+.health-card p,
+.health-card small {
+  color: var(--muted);
 }
 
-.circuit-card {
+.section-intro {
+  margin-top: -0.25rem;
+}
+
+.health-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 1rem 0 0.65rem;
+}
+
+.health-subheading {
+  margin: 1rem 0 0.45rem;
+  font-size: 1rem;
+}
+
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.health-card {
   border: 1px solid var(--border);
   border-radius: 0.55rem;
-  padding: 0.55rem;
+  padding: 0.7rem;
 }
 
-.circuit-card strong,
-.circuit-card span {
+.health-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.health-card p {
+  margin: 0.45rem 0;
+}
+
+.health-card small {
   display: block;
+  line-height: 1.4;
 }
 
-.circuit-card span {
-  margin-top: 0.2rem;
+.health-help {
+  margin-top: 0.8rem;
+}
+
+.health-legend {
+  margin-bottom: 0;
+}
+
+.health-legend div + div {
+  margin-top: 0.65rem;
+}
+
+.health-legend dt {
+  font-weight: 700;
+}
+
+.health-legend dd {
+  margin: 0.15rem 0 0;
   color: var(--muted);
-  text-transform: capitalize;
 }
 
 details {
@@ -577,8 +628,14 @@ footer {
 
   @media (max-width: 36rem) {
     .metric-grid,
-    .circuit-grid {
+    .health-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .health-summary,
+    .health-card-heading {
+      align-items: flex-start;
+      flex-direction: column;
     }
 
     .panel-heading,

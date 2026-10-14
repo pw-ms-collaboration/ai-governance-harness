@@ -47,7 +47,7 @@ rules:
     stage: pre_tool
     condition: "action.type == 'prepare_member_outreach_case' and data.retention_handling_status in ['review_required', 'unknown']"
     action: deny
-  - name: deny-personal-advice-request
+  - name: deny-identified-member-financial-recommendation
     description: "BU-SUPER-001 v1.0; source: superannuation-ba-policy-source.yaml; request advice boundary."
     provenance:
       layer: business-unit
@@ -55,7 +55,23 @@ rules:
       policy_version: "1.0"
       source: superannuation-ba-policy-source.yaml
     stage: pre_input
-    condition: "action.type == 'chat.input' and data.advice_request_status == 'personal_advice_requested'"
+    condition: "action.type == 'chat.input' and data.request_intent == 'financial_recommendation' and data.advice_subject == 'identified_member'"
+    action: deny
+  - name: deny-external-security-recommendation
+    stage: pre_input
+    condition: "action.type == 'chat.input' and data.request_intent == 'financial_recommendation' and data.product_scope == 'external_security'"
+    action: deny
+  - name: deny-unclassified-chat-input
+    stage: pre_input
+    condition: "action.type == 'chat.input' and data.classification_status in ['filtered', 'invalid_response', 'unavailable']"
+    action: deny
+  - name: deny-unknown-chat-intent
+    stage: pre_input
+    condition: "action.type == 'chat.input' and data.request_intent == 'unknown'"
+    action: deny
+  - name: deny-low-confidence-chat-input
+    stage: pre_input
+    condition: "action.type == 'chat.input' and data.confidence == 'low'"
     action: deny
   - name: deny-personal-advice-tool-response
     description: "BU-SUPER-001 v1.0; source: superannuation-ba-policy-source.yaml; tool-result advice boundary."
@@ -72,14 +88,18 @@ rules:
     condition: "action.type == 'agent.startup'"
     action: allow
   - name: allow-chat-input
-    description: "BU-SUPER-001 v1.0; source: superannuation-ba-policy-source.yaml; requires a passed request scan."
+    description: "BU-SUPER-001 v1.0; source: superannuation-ba-policy-source.yaml; requires classified safe intent and sufficient confidence."
     provenance:
       layer: business-unit
       policy_id: BU-SUPER-001
       policy_version: "1.0"
       source: superannuation-ba-policy-source.yaml
     stage: pre_input
-    condition: "action.type == 'chat.input' and data.advice_request_status == 'passed'"
+    condition: "action.type == 'chat.input' and data.classification_status == 'classified' and data.request_intent in ['factual_information', 'general_education', 'retention_outreach', 'other_safe'] and data.confidence in ['high', 'medium']"
+    action: allow
+  - name: allow-advice-classifier-call
+    stage: pre_input
+    condition: "action.type == 'foundry.advice_classifier'"
     action: allow
   - name: allow-model-call
     stage: pre_input
@@ -88,6 +108,10 @@ rules:
   - name: allow-model-result
     stage: post_tool
     condition: "action.type == 'foundry.chat'"
+    action: allow
+  - name: allow-advice-classifier-result
+    stage: post_tool
+    condition: "action.type == 'foundry.advice_classifier'"
     action: allow
   - name: allow-member-profile
     stage: pre_tool

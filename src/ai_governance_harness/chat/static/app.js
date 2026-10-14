@@ -14,7 +14,6 @@ const governanceOverallStatus = document.querySelector("#governance-overall-stat
 const governanceUpdateStatus = document.querySelector("#governance-update-status");
 const refreshGovernanceButton = document.querySelector("#refresh-governance");
 const pauseGovernanceButton = document.querySelector("#pause-governance");
-const demoDenyButton = document.querySelector("#demo-deny");
 const allowedCount = document.querySelector("#allowed-count");
 const deniedCount = document.querySelector("#denied-count");
 const totalCount = document.querySelector("#total-count");
@@ -23,6 +22,7 @@ const serviceStatuses = document.querySelector("#service-statuses");
 const enforcementMode = document.querySelector("#enforcement-mode");
 const sandboxStatus = document.querySelector("#sandbox-status");
 const policyDigest = document.querySelector("#policy-digest");
+const circuitHealthSummary = document.querySelector("#circuit-health-summary");
 const circuitStatuses = document.querySelector("#circuit-statuses");
 const decisionEvents = document.querySelector("#decision-events");
 const policyRules = document.querySelector("#policy-rules");
@@ -33,6 +33,45 @@ const privacyControls = document.querySelector("#privacy-controls");
 
 let history = [];
 let governancePaused = false;
+let governanceBaselineAt = null;
+let governanceRetainedLimit = 0;
+
+const circuitPresentation = {
+  foundry: {
+    label: "AI response service",
+    description: "Generates assistant responses after governance allows a request.",
+  },
+  foundry_advice_classifier: {
+    label: "Advice safety classifier",
+    description: "Classifies request intent before policy evaluates the chat input.",
+  },
+  mcp: {
+    label: "Governed data tools",
+    description: "Retrieves synthetic member and retention workflow data.",
+  },
+  mcp_observability: {
+    label: "Governance monitoring",
+    description: "Loads runtime and decision evidence for this panel.",
+  },
+};
+
+const circuitStatePresentation = {
+  closed: {
+    label: "Calls allowed",
+    badgeClass: "ready",
+    explanation: "The failure threshold has not been reached.",
+  },
+  half_open: {
+    label: "Recovery check",
+    badgeClass: "partial",
+    explanation: "A limited request is testing recovery after recent failures.",
+  },
+  open: {
+    label: "Calls paused",
+    badgeClass: "unavailable",
+    explanation: "Requests are paused briefly after repeated failures.",
+  },
+};
 
 function addMessage(role, content, policyNotice = null) {
   const item = document.createElement("li");
@@ -89,6 +128,31 @@ function chatErrorMessage(payload) {
   if (error.details?.matched_rule) {
     parts.push(`Policy rule: ${String(error.details.matched_rule)}.`);
   }
+  if (error.details?.finish_reason) {
+    parts.push(`Model stop condition: ${String(error.details.finish_reason)}.`);
+  }
+  if (error.details?.foundry_error_code) {
+    parts.push(`Foundry error: ${String(error.details.foundry_error_code)}.`);
+  }
+  if (error.details?.content_filter_stage) {
+    parts.push(`Filtered stage: ${String(error.details.content_filter_stage)}.`);
+  }
+  if (error.details?.content_filter_category) {
+    const severity = error.details.content_filter_severity
+      ? ` (${String(error.details.content_filter_severity)})`
+      : "";
+    parts.push(
+      `Foundry content filter: ${String(error.details.content_filter_category)}${severity}.`,
+    );
+  }
+  if (error.details?.required_capability) {
+    parts.push(
+      `Required client capability: ${String(error.details.required_capability)}.`,
+    );
+  }
+  if (error.details?.tool) {
+    parts.push(`Tool: ${String(error.details.tool)}.`);
+  }
   if (error.correlation_id) {
     parts.push(`Reference: ${String(error.correlation_id)}.`);
   }
@@ -116,10 +180,12 @@ function statusClass(value) {
   return normalized.replace(/[^a-z_]/g, "_");
 }
 
-function makeStatusBadge(value, prefix = "") {
+function makeStatusBadge(value, prefix = "", label = null) {
   const badge = document.createElement("span");
   badge.className = `status-badge ${statusClass(value)}`;
-  badge.textContent = `${prefix}${String(value || "unknown").replaceAll("_", " ")}`;
+  badge.textContent = label
+    ? `${prefix}${label}`
+    : `${prefix}${String(value || "unknown").replaceAll("_", " ")}`;
   return badge;
 }
 
@@ -142,24 +208,100 @@ function renderServices(services) {
   }
 }
 
-function renderCircuits(circuits) {
+function renderCircuits(circuits, services) {
   circuitStatuses.replaceChildren();
   const entries = Object.entries(circuits || {});
+  const serviceEntries = Array.isArray(services) ? services : [];
   if (!entries.length) {
+    circuitHealthSummary.replaceChildren(
+      makeStatusBadge("neutral", "", "Health unavailable"),
+      document.createTextNode(" No dependency health information is available."),
+    );
     const empty = document.createElement("p");
-    empty.textContent = "No remote circuit state is available.";
+    empty.textContent = "Dependency health has not been reported yet.";
     circuitStatuses.append(empty);
     return;
   }
+
+  const unavailableServices = serviceEntries.filter((service) => {
+    const state = String(service.status || "").toLowerCase();
+    return state === "unavailable" || state === "not_ready";
+  });
+  const partialServices = serviceEntries.filter(
+    (service) => String(service.status || "").toLowerCase() === "partial",
+  );
+  const normalizedStates = entries.map(([, state]) => String(state).toLowerCase());
+  let overall = {
+    label: "Services ready",
+    badgeClass: "ready",
+    explanation: "All reported services are available.",
+  };
+  if (unavailableServices.length) {
+    overall = {
+      label: "Some services unavailable",
+      badgeClass: "unavailable",
+      explanation: `${unavailableServices
+        .map((service) => String(service.name || "A service").toUpperCase())
+        .join(", ")} cannot currently be reached.`,
+    };
+  } else if (partialServices.length) {
+    overall = {
+      label: "Partial service health",
+      badgeClass: "partial",
+      explanation: "At least one service reported partial availability.",
+    };
+  } else if (normalizedStates.some((state) => state === "open")) {
+    overall = {
+      label: "Some calls paused",
+      badgeClass: "unavailable",
+      explanation: "Failure protection is temporarily blocking at least one dependency.",
+    };
+  } else if (normalizedStates.some((state) => state === "half_open")) {
+    overall = {
+      label: "Recovery checks active",
+      badgeClass: "partial",
+      explanation: "Failure protection is testing at least one dependency.",
+    };
+  } else if (normalizedStates.some((state) => state !== "closed")) {
+    overall = {
+      label: "Health partly unknown",
+      badgeClass: "neutral",
+      explanation: "At least one dependency reported an unfamiliar state.",
+    };
+  }
+  circuitHealthSummary.replaceChildren(
+    makeStatusBadge(overall.badgeClass, "", overall.label),
+    document.createTextNode(` ${overall.explanation}`),
+  );
+
   for (const [name, state] of entries) {
-    const card = document.createElement("div");
+    const item = document.createElement("li");
+    const headingRow = document.createElement("div");
     const heading = document.createElement("strong");
-    const value = document.createElement("span");
-    card.className = "circuit-card";
-    heading.textContent = name.replaceAll("_", " ");
-    value.textContent = String(state).replaceAll("_", " ");
-    card.append(heading, value);
-    circuitStatuses.append(card);
+    const description = document.createElement("p");
+    const technical = document.createElement("small");
+    const normalizedState = String(state || "unknown").toLowerCase();
+    const component = circuitPresentation[name] || {
+      label: name.replaceAll("_", " "),
+      description: "Supports governed chat operations.",
+    };
+    const stateView = circuitStatePresentation[normalizedState] || {
+      label: "Unknown",
+      badgeClass: "neutral",
+      explanation: "No recognized health state was reported.",
+    };
+
+    item.className = "health-card";
+    headingRow.className = "health-card-heading";
+    heading.textContent = component.label;
+    headingRow.append(
+      heading,
+      makeStatusBadge(stateView.badgeClass, "", stateView.label),
+    );
+    description.textContent = component.description;
+    technical.textContent = `${stateView.explanation} Technical circuit state: ${normalizedState.replaceAll("_", " ")}.`;
+    item.append(headingRow, description, technical);
+    circuitStatuses.append(item);
   }
 }
 
@@ -299,10 +441,35 @@ function renderGovernance(snapshot) {
 
   const events = snapshot.events || {};
   const counts = events.counts || {};
-  allowedCount.textContent = String(counts.allow || 0);
-  deniedCount.textContent = String(counts.deny || 0);
-  totalCount.textContent = String(events.total || 0);
-  retainedCount.textContent = `${events.retained || 0} / ${events.retained_limit || 0}`;
+  governanceRetainedLimit = Number(events.retained_limit || 0);
+  const recentEvents = Array.isArray(events.recent_events) ? events.recent_events : [];
+  const visibleEvents = governanceBaselineAt === null
+    ? recentEvents
+    : recentEvents.filter((event) => {
+      const occurredAt = new Date(event.occurred_at).getTime();
+      return Number.isFinite(occurredAt) && occurredAt > governanceBaselineAt;
+    });
+  const visibleCounts = governanceBaselineAt === null
+    ? counts
+    : visibleEvents.reduce(
+      (totals, event) => {
+        if (event.decision === "allow") {
+          totals.allow += 1;
+        } else if (event.decision === "deny") {
+          totals.deny += 1;
+        }
+        return totals;
+      },
+      { allow: 0, deny: 0 },
+    );
+  allowedCount.textContent = String(visibleCounts.allow || 0);
+  deniedCount.textContent = String(visibleCounts.deny || 0);
+  totalCount.textContent = String(
+    governanceBaselineAt === null ? events.total || 0 : visibleEvents.length,
+  );
+  retainedCount.textContent = `${
+    governanceBaselineAt === null ? events.retained || 0 : visibleEvents.length
+  } / ${governanceRetainedLimit}`;
 
   renderServices(snapshot.services);
   enforcementMode.textContent = String(snapshot.runtime?.enforcement || "unknown").replaceAll("_", " ");
@@ -310,8 +477,8 @@ function renderGovernance(snapshot) {
     snapshot.runtime?.sandbox?.provider || "unknown",
     snapshot.runtime?.sandbox?.status || "unknown",
   ].join(" — ").replaceAll("_", " ");
-  renderCircuits(snapshot.runtime?.circuits);
-  renderEvents(events.recent_events);
+  renderCircuits(snapshot.runtime?.circuits, snapshot.services);
+  renderEvents(visibleEvents);
   renderPolicy(snapshot.policy);
   renderEvidence(snapshot.evidence);
   renderPrivacy(snapshot.privacy);
@@ -404,10 +571,20 @@ document.querySelectorAll(".example").forEach((button) => {
 
 clearButton.addEventListener("click", () => {
   history = [];
+  governanceBaselineAt = Date.now();
   messagesElement.replaceChildren();
   addMessage(
     "assistant",
     "Conversation cleared. Ask for a synthetic customer's account profile by member ID.",
+  );
+  allowedCount.textContent = "0";
+  deniedCount.textContent = "0";
+  totalCount.textContent = "0";
+  retainedCount.textContent = `0 / ${governanceRetainedLimit}`;
+  renderEvents([]);
+  governanceUpdateStatus.textContent = (
+    "Conversation and visible governance decisions cleared. "
+    + "New decisions will appear here."
   );
   clearError();
   input.focus();
@@ -426,27 +603,6 @@ pauseGovernanceButton.addEventListener("click", () => {
     : "Automatic governance updates resumed.";
   if (!governancePaused) {
     refreshGovernance();
-  }
-});
-
-demoDenyButton.addEventListener("click", async () => {
-  demoDenyButton.disabled = true;
-  governanceUpdateStatus.textContent = "Evaluating a fixed prohibited action.";
-  try {
-    const response = await fetch("/api/governance/demo/deny", {
-      method: "POST",
-      headers: { Accept: "application/json" },
-    });
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload.error || "The default-deny demonstration failed.");
-    }
-    governanceUpdateStatus.textContent = `${payload.message} Decision: ${payload.decision}.`;
-    await refreshGovernance();
-  } catch (error) {
-    governanceUpdateStatus.textContent = error.message || "The default-deny demonstration failed.";
-  } finally {
-    demoDenyButton.disabled = false;
   }
 });
 

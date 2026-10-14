@@ -224,13 +224,17 @@ def test_given_bu_denial_when_exporting_then_spans_metrics_and_logs_have_origin(
     try:
         governance.evaluate(
             LifecyclePoint.INPUT, "chat.input", source="chat",
-            policy_data={"advice_request_status": "personal_advice_requested",
+            policy_data={"classification_status": "classified",
+                         "request_intent": "financial_recommendation",
+                         "advice_subject": "identified_member",
+                         "product_scope": "superannuation_option",
+                         "confidence": "high",
                          "prompt": "private@example.com"},
         )
         governance.evaluate(LifecyclePoint.PRE_TOOL, "shell.execute", source="chat")
         governance.record_external_denial(
             LifecyclePoint.POST_MODEL, "foundry.chat",
-            policy_name="azure-ai-foundry", matched_rule="deny-personal-advice-request",
+            policy_name="azure-ai-foundry", matched_rule="deny-identified-member-financial-recommendation",
             source="chat",
         )
 

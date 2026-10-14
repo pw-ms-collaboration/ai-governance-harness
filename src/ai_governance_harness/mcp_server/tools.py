@@ -10,6 +10,8 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Dict, List, Optional, ParamSpec, TypeVar
 
+from pydantic import TypeAdapter
+
 from ai_governance_harness.governance import (
     LifecyclePoint,
     get_governance_engine,
@@ -18,6 +20,7 @@ from ai_governance_harness.governance.sandbox import (
     ExecutionClass,
     SandboxGuard,
 )
+from ai_governance_harness.governance.retention import RetentionRecord, RetentionReview
 from ai_governance_harness.guardrails.advice_filter import tool_response_policy_data
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "synthetic"
@@ -76,6 +79,7 @@ class SuperannuationDataGateway:
         self._contributions: List[dict] = []
         self._interactions: List[dict] = []
         self._digital_activity: List[dict] = []
+        self._retention_records: dict[str, RetentionRecord] = {}
         self._load_data()
 
     def _load_data(self) -> None:
@@ -108,6 +112,27 @@ class SuperannuationDataGateway:
         with open(digital_file, "r", encoding="utf-8") as f:
             self._digital_activity = json.load(f)
 
+        retention_file = self._dir / "retention_cases.json"
+        if retention_file.exists():
+            records = TypeAdapter(list[RetentionRecord]).validate_json(
+                retention_file.read_bytes()
+            )
+            for record in records:
+                if record.member_id not in self._members:
+                    raise ValueError("Retention record refers to an unknown member.")
+                if record.member_id in self._retention_records:
+                    raise ValueError("Duplicate retention record for a member.")
+                self._retention_records[record.member_id] = record
+
+    def retention_review(self, member_id: str) -> RetentionReview:
+        """Review trusted case facts; absent case data blocks preparation."""
+        if member_id not in self._members:
+            raise MemberNotFoundError(f"Member '{member_id}' not found.")
+        record = self._retention_records.get(member_id)
+        if record is None:
+            return RetentionReview(status="unknown")
+        return record.review()
+
     @governed_read_only_tool("get_member_profile")
     def get_member_profile(self, member_id: str) -> Dict[str, Any]:
         """Retrieve unified internal superannuation profile for a member.
@@ -129,6 +154,7 @@ class SuperannuationDataGateway:
 
         return {
             "member_id": member["member_id"],
+            "retention_review": self.retention_review(member_id).model_dump(mode="json"),
             "full_name": member["full_name"],
             "age": member["age"],
             "tenure_years": member["tenure_years"],
@@ -358,6 +384,18 @@ def get_default_gateway() -> SuperannuationDataGateway:
 def get_member_profile(member_id: str) -> Dict[str, Any]:
     """MCP Tool: Return internal superannuation profile for member_id."""
     return get_default_gateway().get_member_profile(member_id)
+
+
+def require_member_outreach_eligible(member_id: str) -> RetentionReview:
+    """Enforce trusted retention facts before preparation or approval."""
+    review = get_default_gateway().retention_review(member_id)
+    get_governance_engine().require_allowed(
+        LifecyclePoint.PRE_TOOL,
+        "prepare_member_outreach_case",
+        policy_data=review.policy_data(),
+        source="gateway",
+    )
+    return review
 
 
 def get_member_disengagement_signals(member_id: str) -> Dict[str, Any]:

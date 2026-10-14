@@ -15,8 +15,8 @@ regulatory_claim: >
   It is not an APRA CPS requirement, legal interpretation, or compliance certification.
 runtime_policy: default.yaml
 rule_mappings:
-  - rule: deny-personal-advice-request
-    purpose: Deny requests classified as personal advice before model invocation.
+  - rule: deny-identified-member-financial-recommendation
+    purpose: Deny classified financial recommendations for an identified member before the answering model call.
   - rule: deny-personal-advice-tool-response
     purpose: Deny tool responses containing detected personal-advice phrasing.
 supporting_rules:
@@ -36,6 +36,7 @@ limitations:
   - The governance panel, traces and logs show attribution; metrics include layer and policy ID only.
   - This source is documentation, not an executable policy or an automatically ingested rule set.
   - Passed scans mean no configured pattern matched, not a legal classification.
+  - Request intent is now classified through Foundry before input policy evaluation and requires Azure access.
   - Final chat-response sanitisation is a separate guardrail, not either denial rule.
   - Missing or unknown scan status fails closed without a matched BU denial rule.
   - Editing this source does not change enforcement; runtime rules need explicit updates and tests.

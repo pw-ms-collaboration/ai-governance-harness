@@ -21,6 +21,7 @@ def test_synthetic_dataset_structure():
         "contributions.json",
         "interactions.json",
         "digital_activity.json",
+        "retention_cases.json",
     }
     assert set(dataset.keys()) == expected_files
 
@@ -65,6 +66,7 @@ def test_generate_synthetic_dataset_writes_files(tmp_path: Path):
     assert (out_dir / "contributions.json").exists()
     assert (out_dir / "interactions.json").exists()
     assert (out_dir / "digital_activity.json").exists()
+    assert (out_dir / "retention_cases.json").exists()
 
     with open(out_dir / "members.json", "r", encoding="utf-8") as f:
         data = json.load(f)

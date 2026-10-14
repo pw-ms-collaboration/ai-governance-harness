@@ -1,0 +1,23 @@
+"""Synthetic identifiers only; these do not represent Entra resources."""
+
+TENANT_ID = "00000000-0000-4000-8000-000000000001"
+CHAT_CLIENT_ID = "00000000-0000-4000-8000-000000000002"
+BLUEPRINT_ID = "00000000-0000-4000-8000-000000000003"
+MCP_API_ID = "00000000-0000-4000-8000-000000000004"
+INTERACTIVE_ID = "00000000-0000-4000-8000-000000000005"
+REPORTING_ID = "00000000-0000-4000-8000-000000000006"
+REPORTING_OBJECT_ID = "00000000-0000-4000-8000-000000000007"
+STAFF_ROLES = {
+    "Staff.Analyst": "analyst",
+    "Staff.RetentionSpecialist": "retention_specialist",
+    "Staff.ComplianceReviewer": "compliance_reviewer",
+    "Staff.Administrator": "administrator",
+}
+PERSONAS = {
+    "analyst": "00000000-0000-4000-8000-000000000011",
+    "retention_specialist": "00000000-0000-4000-8000-000000000012",
+    "compliance_reviewer": "00000000-0000-4000-8000-000000000013",
+    "administrator": "00000000-0000-4000-8000-000000000014",
+}
+USER_LIFETIME = 3600
+MCP_LIFETIME = 600

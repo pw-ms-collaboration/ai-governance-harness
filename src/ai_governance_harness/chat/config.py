@@ -7,7 +7,9 @@ from typing import Self
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from ai_governance_harness.identity.config import require_loopback_url
+from ai_governance_harness.mock_identity_guard import require_mock_identity_allowed
 
 load_dotenv()
 
@@ -21,6 +23,8 @@ class ChatSettings(BaseModel):
     port: int = Field(default=8080, ge=1, le=65535)
     mcp_url: str = "http://127.0.0.1:8001/mcp"
     model_deployment: str
+    sidecar_url: str
+    interactive_agent_id: str
     allowed_origins: tuple[str, ...] = (
         "http://127.0.0.1:8080",
         "http://localhost:8080",
@@ -31,7 +35,7 @@ class ChatSettings(BaseModel):
     max_output_tokens: int = Field(default=1_200, ge=100, le=4_000)
     max_request_body_size: int = Field(default=65_536, ge=1_024, le=1_048_576)
 
-    @field_validator("host", "model_deployment")
+    @field_validator("host", "model_deployment", "interactive_agent_id")
     @classmethod
     def validate_non_empty(cls, value: str) -> str:
         """Reject empty host and model values."""
@@ -60,6 +64,14 @@ class ChatSettings(BaseModel):
             raise ValueError("CHAT_ALLOWED_ORIGINS must contain explicit origins.")
         return origins
 
+    @model_validator(mode="after")
+    def validate_mock_identity(self) -> Self:
+        """The MVP trusts only an explicitly enabled loopback mock sidecar."""
+        require_loopback_url(self.sidecar_url)
+        require_loopback_url(self.mcp_url)
+        require_mock_identity_allowed("chat", bind_host=self.host)
+        return self
+
     @classmethod
     def from_environment(cls) -> Self:
         """Load chat settings from environment variables."""
@@ -74,6 +86,8 @@ class ChatSettings(BaseModel):
             port=int(os.getenv("CHAT_PORT", "8080")),
             mcp_url=os.getenv("MCP_SERVER_URL", "http://127.0.0.1:8001/mcp"),
             model_deployment=os.getenv("AZURE_AI_MODEL_DEPLOYMENT_NAME", ""),
+            sidecar_url=os.getenv("AGENT_ID_SIDECAR_URL", ""),
+            interactive_agent_id=os.getenv("AGENT_ID_INTERACTIVE_ID", ""),
             allowed_origins=origins,
             max_messages=int(os.getenv("CHAT_MAX_MESSAGES", "20")),
             max_message_length=int(os.getenv("CHAT_MAX_MESSAGE_LENGTH", "4000")),

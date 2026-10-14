@@ -8,9 +8,12 @@ from pydantic import ValidationError
 import uvicorn
 
 from ai_governance_harness.governance import (
+    GovernanceContext,
     LifecyclePoint,
     get_governance_engine,
+    governance_context,
 )
+from ai_governance_harness.mock_identity_guard import resolve_local_persona
 from ai_governance_harness.mcp_server.config import ServerSettings
 from ai_governance_harness.mcp_server.http_app import build_http_app
 from ai_governance_harness.mcp_server.server import mcp
@@ -37,7 +40,12 @@ def run_server(settings: ServerSettings) -> None:
     emit_audit_event("mcp.readiness", outcome="ready", settings=settings)
     try:
         if settings.transport == "stdio":
-            mcp.run("stdio")
+            with governance_context(GovernanceContext(
+                boundary="local",
+                environment=settings.environment,
+                staff_role=resolve_local_persona(),
+            )):
+                mcp.run("stdio")
             return
 
         uvicorn.run(

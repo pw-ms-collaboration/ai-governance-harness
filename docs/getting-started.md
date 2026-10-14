@@ -134,19 +134,21 @@ az account show --query "{tenantId:tenantId, subscriptionId:id}" -o table
 ai-governance-dev
 ```
 
-The launcher checks for occupied ports, starts MCP, waits for readiness,
-starts chat, waits for readiness, and opens the browser at
-<http://127.0.0.1:8080>. Press `Ctrl+C` to stop both child processes.
+The launcher checks the local mock guard and occupied ports, starts the mock
+issuer, waits for its health endpoint, starts MCP and waits for JWKS readiness,
+then starts chat and opens <http://127.0.0.1:8080>. Press `Ctrl+C` to stop all
+three child processes.
 
 > [!WARNING]
 > `ai-governance-dev` is a local-development launcher. It sets
 > `MCP_HOSTED=false`, forces Streamable HTTP, and derives `MCP_SERVER_URL`
 > using the configured MCP host and port with the fixed `/mcp` path. Do not
-> use it as a hosted deployment entrypoint or expose its unauthenticated local
-> services to an untrusted network.
+> use it as a hosted deployment entrypoint. The mock issuer is an intentional
+> local authentication simulation and must remain on loopback.
 
-For separate processes, run `ai-governance-mcp` and `ai-governance-chat` in
-separate activated terminals. On macOS or Linux, the
+For separate processes, run `ai-governance-identity`, `ai-governance-mcp`, then
+`ai-governance-chat` in separate activated terminals using the local mock
+settings in [.env.example](../.env.example). On macOS or Linux, the
 [Makefile](../Makefile) also provides `make install` and `make run`.
 
 ## Verify the First Run
@@ -156,10 +158,12 @@ Readiness probes with the default ports:
 ```sh
 curl --fail http://127.0.0.1:8001/health/ready
 curl --fail http://127.0.0.1:8080/health/ready
+curl --fail http://127.0.0.1:8002/healthz
 ```
 
 Readiness is not proof of a successful model call or of the deployed Foundry
-guardrails. In the chat UI, ask `Show me the profile for MEM-001.` to exercise
+guardrails. In the chat UI, sign in as the local mock Retention Specialist,
+then ask `Show me the profile for MEM-001.` to exercise
 the model, MCP transport, typed tool, shared gateway, and output controls.
 Use the governance panel's default-deny demonstration to observe a denial
 without executing a prohibited operation.
@@ -167,8 +171,15 @@ without executing a prohibited operation.
 A deterministic local smoke test, which does not call Foundry:
 
 ```sh
+export MOCK_IDENTITY_ENABLED=true
+export MOCK_IDENTITY_LOCAL_PERSONA=retention_specialist
 python -m ai_governance_harness.cli profile MEM-001
 ```
+
+PowerShell users should set these with `$env:NAME = "value"`. An unset local
+mock persona denies data tools. See the [persona matrix and reporting
+instructions](../README.md#use-the-chat-ui) for analyst aggregate access and
+the roles that deny all data tools.
 
 ## Foundry Model Guardrails
 

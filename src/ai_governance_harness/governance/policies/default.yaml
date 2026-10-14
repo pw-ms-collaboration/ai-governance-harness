@@ -30,25 +30,29 @@ rules:
     stage: post_tool
     condition: "action.type == 'foundry.chat'"
     action: allow
-  - name: allow-member-profile
+  - name: allow-chat-tools
     stage: pre_tool
-    condition: "action.type == 'get_member_profile'"
+    condition: "governance.boundary == 'chat' and governance.actor == 'interactive' and action.type in ['get_member_profile', 'get_member_disengagement_signals', 'get_cohort_churn_analytics', 'get_fum_outflow_summary', 'prepare_member_outreach_case']"
     action: allow
-  - name: allow-member-signals
+  - name: allow-mcp-analyst-aggregates
     stage: pre_tool
-    condition: "action.type == 'get_member_disengagement_signals'"
+    condition: "governance.boundary == 'mcp' and governance.actor == 'interactive' and governance.token_type == 'user' and governance.staff_role == 'analyst' and action.type in ['get_cohort_churn_analytics', 'get_fum_outflow_summary']"
     action: allow
-  - name: allow-cohort-analytics
+  - name: allow-mcp-retention-tools
     stage: pre_tool
-    condition: "action.type == 'get_cohort_churn_analytics'"
+    condition: "governance.boundary == 'mcp' and governance.actor == 'interactive' and governance.token_type == 'user' and governance.staff_role == 'retention_specialist' and action.type in ['get_member_profile', 'get_member_disengagement_signals', 'get_cohort_churn_analytics', 'get_fum_outflow_summary', 'prepare_member_outreach_case']"
     action: allow
-  - name: allow-fum-summary
+  - name: allow-reporting-aggregates
     stage: pre_tool
-    condition: "action.type == 'get_fum_outflow_summary'"
+    condition: "governance.boundary == 'mcp' and governance.actor == 'reporting' and governance.token_type == 'app' and action.type in ['get_cohort_churn_analytics', 'get_fum_outflow_summary']"
     action: allow
-  - name: allow-approved-outreach-case
+  - name: allow-local-analyst-aggregates
     stage: pre_tool
-    condition: "action.type == 'prepare_member_outreach_case'"
+    condition: "governance.boundary == 'local' and governance.staff_role == 'analyst' and action.type in ['get_cohort_churn_analytics', 'get_fum_outflow_summary']"
+    action: allow
+  - name: allow-local-retention-tools
+    stage: pre_tool
+    condition: "governance.boundary == 'local' and governance.staff_role == 'retention_specialist' and action.type in ['get_member_profile', 'get_member_disengagement_signals', 'get_cohort_churn_analytics', 'get_fum_outflow_summary', 'prepare_member_outreach_case']"
     action: allow
   - name: allow-member-profile-result
     stage: post_tool

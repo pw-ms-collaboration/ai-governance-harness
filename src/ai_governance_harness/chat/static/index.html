@@ -3,12 +3,9 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Customer insights chat for bank business analysts using synthetic data">
+    <meta name="description" content="Role-governed member and aggregate insights using synthetic data and local mock identity">
     <title>Business Analyst Insights Chat</title>
-    <link rel="stylesheet" href="/static/app.css?v=policy-notice">
-    <meta name="description" content="Chat with synthetic superannuation governance data">
-    <title>AI Governance Chat</title>
-    <link rel="stylesheet" href="/static/app.css?v=3">
+    <link rel="stylesheet" href="/static/app.css?v=identity-policy">
   </head>
   <body>
     <a class="skip-link" href="#chat-input">Skip to message input</a>
@@ -17,7 +14,7 @@
       <div>
         <p class="eyebrow">AI governance harness</p>
         <h1>Customer insights for business analysts</h1>
-        <p class="subtitle">Foundry-powered account profile answers from synthetic customer data.</p>
+        <p class="subtitle">Foundry-powered member and aggregate insights, governed by your local mock role.</p>
       </div>
       <div class="connection" aria-live="polite">
         <span class="status-dot" aria-hidden="true"></span>
@@ -27,16 +24,35 @@
 
     <main class="app-shell">
       <section class="intro" aria-labelledby="intro-title">
+        <div class="mock-identity">
+          <label for="mock-persona">Mock identity</label>
+          <select id="mock-persona" aria-describedby="identity-help identity-status">
+            <option value="">Choose a persona</option>
+            <option value="analyst">Analyst</option>
+            <option value="retention_specialist">Retention Specialist</option>
+            <option value="compliance_reviewer">Compliance Reviewer</option>
+            <option value="administrator">Administrator</option>
+          </select>
+          <button id="identity-signin" type="button">Sign in (mock)</button>
+          <p id="identity-help">Local simulation, not Microsoft Entra. Changing persona clears the conversation.</p>
+          <p id="identity-status" role="status" aria-live="polite">Choose a mock identity before sending a message.</p>
+        </div>
         <h2 id="intro-title">Ask a factual question</h2>
         <p>
           Look up a synthetic customer's account profile by member ID, such as
           <code>MEM-001</code>, <code>MEM-002</code>, or <code>MEM-003</code>.
-          Responses show account balance, phase, and option allocation only.
-          Other customer information is not available.
+          Member profiles, churn signals and aggregate insights require the
+          appropriate role. Responses are factual information, not financial advice.
         </p>
         <div class="examples" role="group" aria-label="Example questions">
           <button type="button" class="example" data-question="Show me the account profile for MEM-001.">
             Profile MEM-001
+          </button>
+          <button type="button" class="example" data-question="What are the churn signals for MEM-002?">
+            Churn signals
+          </button>
+          <button type="button" class="example" data-question="Summarize the cohort churn risk and FUM at risk.">
+            Cohort summary
           </button>
         </div>
       </section>
@@ -51,7 +67,7 @@
             <li class="message assistant">
               <article>
                 <h3>Assistant</h3>
-                <p>Hello. Ask me for a synthetic customer's account profile by member ID, such as MEM-001.</p>
+                <p>Hello. Choose a mock persona, then ask about a synthetic member, churn signals, cohort risk, or FUM outflow.</p>
               </article>
             </li>
           </ol>
@@ -72,7 +88,7 @@
               <p id="input-help">Press Ctrl+Enter or use Send.</p>
               <p id="character-count">0 / 4000</p>
             </div>
-            <button id="send-button" type="submit">Send message</button>
+            <button id="send-button" type="submit" disabled>Send message</button>
           </form>
         </section>
 
@@ -88,6 +104,7 @@
             Privacy-safe decisions from the chat and MCP processes. Raw prompts,
             member data, arguments, results, and identity claims are never shown.
           </p>
+          <p id="identity-mode" class="status-badge neutral">Identity mode loading</p>
 
           <div
             class="panel-controls"
@@ -152,6 +169,7 @@
                   <tr>
                     <th scope="col">Time</th>
                     <th scope="col">Source</th>
+                    <th scope="col">Identity (mock locally)</th>
                     <th scope="col">Lifecycle</th>
                     <th scope="col">Action</th>
                     <th scope="col">Decision</th>
@@ -206,6 +224,6 @@
     <footer>
       <p>Synthetic demonstration data only. External assets are not tracked or verified.</p>
     </footer>
-    <script src="/static/app.js?v=policy-notice" defer></script>
+    <script src="/static/app.js?v=identity-policy" type="module"></script>
   </body>
 </html>

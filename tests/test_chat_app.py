@@ -12,13 +12,24 @@ from ai_governance_harness.chat.app import STATIC_DIR, build_chat_app
 from ai_governance_harness.chat.config import ChatSettings
 from ai_governance_harness.chat.service import ChatRequest, ChatResponse, ChatService
 from ai_governance_harness.chat.service import ChatServiceError
+from ai_governance_harness.identity.constants import INTERACTIVE_ID
+from ai_governance_harness.identity.sidecar import SidecarClient
+
+pytestmark = pytest.mark.usefixtures("mock_chat_environment")
+
+
+@pytest.fixture(autouse=True)
+def authenticated_sidecar(monkeypatch, caller_identity):
+    async def validate(self, headers):
+        return caller_identity
+    monkeypatch.setattr(SidecarClient, "validate", validate)
 
 
 class _FakeChatService:
     def __init__(self) -> None:
         self.requests: list[ChatRequest] = []
 
-    async def complete(self, request: ChatRequest) -> ChatResponse:
+    async def complete(self, request: ChatRequest, caller) -> ChatResponse:
         self.requests.append(request)
         return ChatResponse(message="Grounded response", tools_used=["get_member_profile"])
 
@@ -38,7 +49,7 @@ class _FailingChatService(_FakeChatService):
         super().__init__()
         self._error = error
 
-    async def complete(self, request: ChatRequest) -> ChatResponse:
+    async def complete(self, request: ChatRequest, caller) -> ChatResponse:
         self.requests.append(request)
         raise self._error
 
@@ -57,7 +68,7 @@ class _StructureParser(HTMLParser):
 
 
 def _settings() -> ChatSettings:
-    return ChatSettings(model_deployment="test-model")
+    return ChatSettings(model_deployment="test-model", sidecar_url="http://127.0.0.1:8002", interactive_agent_id=INTERACTIVE_ID)
 
 
 def test_given_valid_chat_request_when_posting_then_returns_response() -> None:
@@ -258,6 +269,9 @@ def test_static_ui_has_required_accessible_structure() -> None:
 
     # Assert
     assert any(tag == "html" and attrs.get("lang") == "en" for tag, attrs in tags)
+    assert sum(tag == "title" for tag, _ in tags) == 1
+    assert sum(tag == "link" and attrs.get("rel") == "stylesheet" for tag, attrs in tags) == 1
+    assert any(tag == "script" and attrs.get("type") == "module" for tag, attrs in tags)
     assert any(tag == "main" for tag, _ in tags)
     assert any(
         tag == "label" and attrs.get("for") == "chat-input"
@@ -286,6 +300,31 @@ def test_static_ui_has_required_accessible_structure() -> None:
         for tag, attrs in tags
     )
     assert Path(STATIC_DIR / "app.js").is_file()
+    assert any(tag == "label" and attrs.get("for") == "mock-persona" for tag, attrs in tags)
+    assert any(attrs.get("id") == "identity-status" and attrs.get("aria-live") == "polite" for _, attrs in tags)
+    options = {attrs.get("value") for tag, attrs in tags if tag == "option"}
+    assert {"", "analyst", "retention_specialist", "compliance_reviewer", "administrator"} <= options
+    assert any(attrs.get("id") == "send-button" and "disabled" in attrs for _, attrs in tags)
+
+
+def test_given_identity_ui_when_inspecting_then_no_storage_or_cross_origin():
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    for forbidden in ("localStorage", "sessionStorage", "indexedDB", "document.cookie", ":8002", "http://", "https://"):
+        assert forbidden not in script
+    client = TestClient(build_chat_app(_settings(), _FakeChatService()))
+    assert client.get("/").headers["Content-Security-Policy"] == (
+        "default-src 'self'; script-src 'self'; style-src 'self'; "
+        "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
+    )
+
+
+def test_given_guarded_mock_when_building_snapshot_then_mode_is_truthful(monkeypatch):
+    from ai_governance_harness.governance import GovernanceEngine, GovernanceSettings
+    from ai_governance_harness.governance.snapshot import build_governance_snapshot
+    engine = GovernanceEngine(GovernanceSettings(environment="test"))
+    assert build_governance_snapshot(engine, source="chat")["identity"]["mode"] == "mock"
+    monkeypatch.setenv("MOCK_IDENTITY_ENABLED", "false")
+    assert build_governance_snapshot(engine, source="chat")["identity"]["mode"] == "none"
 
 
 def test_governance_snapshot_returns_sanitized_service_view() -> None:

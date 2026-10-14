@@ -1,0 +1,47 @@
+{
+  "task_id": "entra-agent-id-mvp",
+  "task_slug": "entra-agent-id-mvp",
+  "parent_task": null,
+  "mode": "manual",
+  "active_phase": "Implement",
+  "status": "active",
+  "session_status": "stopped",
+  "artifact_paths": {
+    "research": ".copilot-tracking/research/2026-10-14/entra-agent-id-architecture-research.md",
+    "plan": ".copilot-tracking/plans/2026-10-14/entra-agent-id-mvp-plan.md",
+    "critique": ".copilot-tracking/reviews/plans/2026-10-14/entra-agent-id-mvp-plan-critique.md",
+    "changes": ".copilot-tracking/changes/2026-10-14/entra-agent-id-mvp-changes.md",
+    "review": null
+  },
+  "confirmed_decisions": [
+    {
+      "decision": "Implementation authorization",
+      "status": "current",
+      "evidence": "2026-10-14 standalone /rpi-implement: full P01-P07 in order, P01 pytest gate, focused tests, no weakening default deny or privacy. Review advancement not requested."
+    },
+    {
+      "decision": "Planning critique execution",
+      "status": "Complete",
+      "evidence": "Single standard critique consumed; historical Revise; PC-001-PC-010 folded into supplied plan and confirmed by user."
+    },
+    {
+      "decision": "Implementation execution",
+      "status": "Complete",
+      "evidence": "P01-P07 checked; 267 tests passed; lint, strict policy, evidence, doctor, build, SBOM and audit passed. Real browser matrix used deterministic inference with real issuer/chat/MCP. Actual launcher, report, stdio persona and staging guard verified. Manual Review remains pending."
+    }
+  ],
+  "blockers": [],
+  "next_action": {"phase": "Review", "action": "Main integration complete, 298 tests passed; dev stack stopped and environment repaired. Await explicit /rpi-review."},
+  "prioritized_follow_ups": [],
+  "main_integration": {
+    "base": "f6e494b",
+    "committed_tip": "aac4888",
+    "decision": "Preserve approved MVP tool matrix and retain compatible upstream privacy and guardrail improvements.",
+    "validation": "298 tests; lint, policy, evidence, build, SBOM and audit passed",
+    "local_work": "Restored and reconciled, uncommitted and unstaged",
+    "recovery_branch": "backup/entra-agent-id-before-main-20261014-1546",
+    "recovery_stash": "93e088b493502c0e961d37196ed5b5575e3a17a6",
+    "services": "Stopped with user approval; environment repaired",
+    "pushed": false
+  }
+}

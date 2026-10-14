@@ -385,8 +385,10 @@ can stop it before completion.
    adding the bounded serialized result to the next model request. A tool
    error becomes a generic error payload, not raw internal exception text.
 9. When the model produces final text, scope claims are rewritten, prohibited
-   advice phrasing is replaced by a factual fallback, and disclosures are
-   attached. `chat.output` passes output policy before the response is sent.
+   advice phrasing is replaced by a factual fallback, and the UI displays
+   persistent disclosures. `chat.output` passes output policy before the
+   response is sent. Provider guardrail denials and scope refusals are recorded
+   as governance decisions with the current caller's bounded identity labels.
 10. Clients are closed at the end of the turn. Application transcripts are
     not persisted; governance events retain only allowed control metadata.
 
@@ -400,6 +402,13 @@ A direct MCP caller skips the chat model loop but still reaches the same
 typed adapter, governed gateway, result scan, and policy. stdio skips HTTP
 security checks and relies on the client/process access boundary; reserve
 stdout for protocol traffic and use stderr for diagnostics.
+
+In the local mock MVP, HTTP MCP verifies signed agent tokens and applies the
+staff-role matrix. Token-less stdio and CLI callers must explicitly configure
+`MOCK_IDENTITY_LOCAL_PERSONA` behind the same local-only guard; unset means
+deny. Chat retains all five governed tools, while member-profile payloads are
+restricted before reaching the model. See the [local mock role
+matrix](../README.md#use-the-chat-ui). Hosted Entra validation is still deferred.
 
 The deterministic CLI uses the gateway directly in its own process. It
 receives gateway pre/post enforcement and its own domain-formatting checks,

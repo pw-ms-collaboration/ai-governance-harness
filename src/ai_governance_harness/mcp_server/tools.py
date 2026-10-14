@@ -149,6 +149,9 @@ class SuperannuationDataGateway:
     @governed_read_only_tool("get_member_disengagement_signals")
     def get_member_disengagement_signals(self, member_id: str) -> Dict[str, Any]:
         """Analyze contribution drops, digital inactivity, and closure inquiries for a member."""
+        return self._compute_disengagement_signals(member_id)
+
+    def _compute_disengagement_signals(self, member_id: str) -> Dict[str, Any]:
         member = self._members.get(member_id)
         if not member:
             raise MemberNotFoundError(f"Member '{member_id}' not found.")
@@ -269,7 +272,7 @@ class SuperannuationDataGateway:
         digital_inactive_members: List[str] = []
 
         for m_id in self._members.keys():
-            signals = self.get_member_disengagement_signals(m_id)
+            signals = self._compute_disengagement_signals(m_id)
             if signals["immediate_outreach_required"]:
                 closure_inquiry_members.append(m_id)
             if signals["contribution_analysis"]["drop_detected"]:
@@ -313,7 +316,7 @@ class SuperannuationDataGateway:
         risk_by_phase: Dict[str, float] = {}
 
         for m_id, acc in self._accounts.items():
-            signals = self.get_member_disengagement_signals(m_id)
+            signals = self._compute_disengagement_signals(m_id)
             bal = acc.get("balance", 0.0)
             phase = acc.get("phase", "Accumulation")
 

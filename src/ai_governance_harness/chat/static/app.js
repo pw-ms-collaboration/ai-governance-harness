@@ -30,9 +30,15 @@ const policyCaption = document.querySelector("#policy-caption");
 const defaultAction = document.querySelector("#default-action");
 const evidenceControls = document.querySelector("#evidence-controls");
 const privacyControls = document.querySelector("#privacy-controls");
+const personaSelector = document.querySelector("#mock-persona");
+const signInButton = document.querySelector("#identity-signin");
+const identityStatus = document.querySelector("#identity-status");
+const identityMode = document.querySelector("#identity-mode");
 
 let history = [];
 let governancePaused = false;
+let accessToken = null;
+let busy = false;
 
 function addMessage(role, content, policyNotice = null) {
   const item = document.createElement("li");
@@ -60,8 +66,12 @@ function addMessage(role, content, policyNotice = null) {
 }
 
 function setBusy(isBusy) {
+  busy = isBusy;
   input.disabled = isBusy;
-  sendButton.disabled = isBusy;
+  sendButton.disabled = isBusy || !accessToken;
+  personaSelector.disabled = isBusy;
+  signInButton.disabled = isBusy;
+  clearButton.disabled = isBusy;
   activityStatus.textContent = isBusy ? "Thinking and checking governance tools" : "";
   activityStatus.classList.toggle("busy", isBusy);
 }
@@ -197,6 +207,8 @@ function renderEvents(events) {
         : occurredAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
     );
     appendTableCell(row, event.source || "unknown");
+    appendTableCell(row, [event.boundary, event.actor, event.token_type, event.staff_role]
+      .filter(Boolean).join(" / ") || "No identity");
     appendTableCell(row, event.lifecycle_point || "unknown");
     appendTableCell(row, event.action || "unknown", { code: true });
 
@@ -292,6 +304,7 @@ function renderGovernance(snapshot) {
   retainedCount.textContent = `${events.retained || 0} / ${events.retained_limit || 0}`;
 
   renderServices(snapshot.services);
+  identityMode.textContent = snapshot.identity?.label || "Identity mode unavailable";
   enforcementMode.textContent = String(snapshot.runtime?.enforcement || "unknown").replaceAll("_", " ");
   sandboxStatus.textContent = [
     snapshot.runtime?.sandbox?.provider || "unknown",
@@ -330,6 +343,12 @@ async function refreshGovernance({ announce = false } = {}) {
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   clearError();
+  if (busy) return;
+  if (!accessToken) {
+    showError("Choose a mock persona and sign in before sending.");
+    personaSelector.focus();
+    return;
+  }
   const content = input.value.trim();
   if (!content) {
     showError("Enter a message before sending.");
@@ -347,11 +366,18 @@ form.addEventListener("submit", async (event) => {
   try {
     const response = await fetch("/api/chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      headers: {
+        "Content-Type": "application/json", Accept: "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
       body: JSON.stringify({ messages: history }),
     });
     const payload = await response.json();
     if (!response.ok) {
+      if (response.status === 401) {
+        accessToken = null;
+        identityStatus.textContent = "Your mock sign-in expired. Sign in again.";
+      }
       throw new Error(chatErrorMessage(payload));
     }
     addMessage("assistant", payload.message, payload.policy_notice);
@@ -367,6 +393,56 @@ form.addEventListener("submit", async (event) => {
     setBusy(false);
     refreshGovernance();
     input.focus();
+  }
+});
+
+function clearIdentityConversation() {
+  accessToken = null;
+  history = [];
+  messagesElement.replaceChildren();
+  input.value = "";
+  characterCount.textContent = "0 / 4000";
+  clearError();
+  setBusy(false);
+}
+
+personaSelector.addEventListener("change", () => {
+  clearIdentityConversation();
+  identityStatus.textContent = "Persona changed. Sign in to start a new conversation.";
+});
+
+signInButton.addEventListener("click", async () => {
+  if (busy) return;
+  clearIdentityConversation();
+  const persona = personaSelector.value;
+  if (!persona) {
+    showError("Choose a mock persona first.");
+    personaSelector.focus();
+    return;
+  }
+  setBusy(true);
+  identityStatus.textContent = "Signing in with mock identity...";
+  try {
+    const response = await fetch("/api/mock-identity/signin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ persona }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(chatErrorMessage(payload));
+    if (typeof payload.access_token !== "string" || payload.token_type !== "Bearer"
+        || payload.persona !== persona) {
+      throw new Error("The identity service returned an invalid sign-in response.");
+    }
+    accessToken = payload.access_token;
+    const label = personaSelector.selectedOptions[0].textContent;
+    identityStatus.textContent = `Signed in as ${label} (mock identity).`;
+  } catch (error) {
+    accessToken = null;
+    identityStatus.textContent = "Mock sign-in failed. Try signing in again.";
+    showError(error.message || "The identity service could not be reached.");
+  } finally {
+    setBusy(false);
   }
 });
 
@@ -394,7 +470,7 @@ clearButton.addEventListener("click", () => {
   messagesElement.replaceChildren();
   addMessage(
     "assistant",
-    "Conversation cleared. Ask for a synthetic customer's account profile by member ID.",
+    "Conversation cleared. Ask about a synthetic member, churn risk, or FUM outflow permitted by your role.",
   );
   clearError();
   input.focus();

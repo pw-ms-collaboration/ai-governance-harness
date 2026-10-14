@@ -6,6 +6,9 @@ import pytest
 from pydantic import ValidationError
 
 from ai_governance_harness.chat.config import ChatSettings
+from ai_governance_harness.identity.constants import INTERACTIVE_ID
+
+pytestmark = pytest.mark.usefixtures("mock_chat_environment")
 
 
 def test_given_environment_when_loading_then_parses_service_settings(
@@ -36,4 +39,4 @@ def test_given_environment_when_loading_then_parses_service_settings(
 def test_given_unsafe_mcp_url_when_constructing_then_rejects_url(url: str) -> None:
     # Act & Assert
     with pytest.raises(ValidationError, match="MCP_SERVER_URL"):
-        ChatSettings(model_deployment="model", mcp_url=url)
+        ChatSettings(model_deployment="model", mcp_url=url, sidecar_url="http://127.0.0.1:8002", interactive_agent_id=INTERACTIVE_ID)

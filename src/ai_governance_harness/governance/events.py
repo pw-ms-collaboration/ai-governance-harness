@@ -11,6 +11,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from ai_governance_harness.governance.models import GovernanceDecision
+from ai_governance_harness.governance.context import (
+    Actor, Boundary, GovernanceContext, StaffRole, TokenType,
+)
 
 MAX_RETAINED_EVENTS = 200
 _SAFE_ACTION = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
@@ -35,6 +38,10 @@ class GovernanceEvent(BaseModel):
     policy_digest: str = Field(min_length=8, max_length=64)
     enforcement_mode: str = Field(max_length=16)
     evaluation_ms: float = Field(ge=0)
+    boundary: Boundary | None = None
+    actor: Actor | None = None
+    token_type: TokenType | None = None
+    staff_role: StaffRole | None = None
 
 
 class GovernanceEventStore:
@@ -53,6 +60,7 @@ class GovernanceEventStore:
         *,
         action: str,
         source: EventSource,
+        context: GovernanceContext | None = None,
     ) -> GovernanceEvent:
         """Record only bounded fields that cannot carry request content."""
         safe_action = action if _SAFE_ACTION.fullmatch(action) else "unrecognized-action"
@@ -71,6 +79,7 @@ class GovernanceEventStore:
                 policy_digest=decision.policy_digest,
                 enforcement_mode=decision.enforcement_mode,
                 evaluation_ms=round(decision.evaluation_ms, 3),
+                **(context.identity_attributes() if context else {}),
             )
             self._events.append(event)
             self._total_counts[decision.action] += 1

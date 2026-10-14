@@ -10,6 +10,8 @@ from mcp import Client, types
 from ai_governance_harness.mcp_server import tools as gateway_tools
 from ai_governance_harness.mcp_server.server import mcp
 
+pytestmark = pytest.mark.usefixtures("mcp_caller")
+
 
 @pytest.fixture()
 def anyio_backend() -> str:

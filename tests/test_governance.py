@@ -91,6 +91,30 @@ def test_given_denied_policy_when_requiring_allowed_then_exposes_decision() -> N
     assert error.value.decision.lifecycle_point == LifecyclePoint.PRE_TOOL
 
 
+@pytest.mark.parametrize("enabled", [True, False])
+def test_given_external_denial_when_recording_then_enforces_and_counts_it(
+    enabled: bool,
+) -> None:
+    # Arrange
+    engine = GovernanceEngine(_settings(enabled=enabled))
+
+    # Act
+    decision = engine.record_external_denial(
+        LifecyclePoint.POST_MODEL,
+        "foundry.chat",
+        policy_name="azure-ai-foundry",
+        matched_rule="content_filter",
+        source="chat",
+    )
+    snapshot = governance_events.snapshot()
+
+    # Assert
+    assert decision.allowed is False
+    assert decision.enforcement_mode == "enforce"
+    assert snapshot["counts"]["deny"] == 1
+    assert snapshot["recent_events"][0]["policy_name"] == "azure-ai-foundry"
+
+
 @pytest.mark.parametrize(
     ("status", "expected_allowed"),
     [("passed", True), ("personal_advice_requested", False), ("unknown", False)],

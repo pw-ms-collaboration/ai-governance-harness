@@ -64,19 +64,19 @@ def build_http_app(settings: ServerSettings) -> Starlette:
             (
                 settings.resource_url,
                 settings.auth_tenant_id,
-                settings.auth_required_scope,
+                settings.auth_required_scope or settings.auth_required_role,
             )
         ):
             return JSONResponse({"error": "Not configured."}, status_code=404)
         issuer = f"https://login.microsoftonline.com/{settings.auth_tenant_id}/v2.0"
-        return JSONResponse(
-            {
-                "resource": settings.resource_url,
-                "authorization_servers": [issuer],
-                "bearer_methods_supported": ["header"],
-                "scopes_supported": [settings.auth_required_scope],
-            }
-        )
+        metadata = {
+            "resource": settings.resource_url,
+            "authorization_servers": [issuer],
+            "bearer_methods_supported": ["header"],
+        }
+        if settings.auth_required_scope:
+            metadata["scopes_supported"] = [settings.auth_required_scope]
+        return JSONResponse(metadata)
 
     app = mcp.streamable_http_app(
         streamable_http_path=settings.mcp_path,

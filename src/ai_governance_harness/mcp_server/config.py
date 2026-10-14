@@ -50,6 +50,7 @@ class ServerSettings(BaseModel):
     auth_tenant_id: str | None = None
     auth_audience: str | None = None
     auth_required_scope: str | None = None
+    auth_required_role: str | None = None
     resource_url: str | None = None
     max_request_body_size: int = Field(default=1_048_576, ge=1, le=4_194_304)
     rate_limit_capacity: int = Field(default=60, ge=1, le=10_000)
@@ -105,16 +106,14 @@ class ServerSettings(BaseModel):
             SovereigntyGuardrail().validate_region(self.region)
         except SovereigntyViolationError as exc:
             raise ValueError(str(exc)) from exc
-        if not all(
-            (
-                self.auth_tenant_id,
-                self.auth_audience,
-                self.auth_required_scope,
-                self.resource_url,
-            )
-        ):
+        permission_count = sum(
+            bool(permission)
+            for permission in (self.auth_required_scope, self.auth_required_role)
+        )
+        if not all((self.auth_tenant_id, self.auth_audience, self.resource_url)) or permission_count != 1:
             raise ValueError(
-                "Hosted MCP mode requires tenant, audience, scope, and resource URL settings."
+                "Hosted MCP mode requires tenant, audience, exactly one required scope "
+                "or application role, and resource URL settings."
             )
         return self
 
@@ -140,6 +139,7 @@ class ServerSettings(BaseModel):
             auth_tenant_id=os.getenv("MCP_AUTH_TENANT_ID") or os.getenv("AZURE_TENANT_ID"),
             auth_audience=os.getenv("MCP_AUTH_AUDIENCE"),
             auth_required_scope=os.getenv("MCP_AUTH_REQUIRED_SCOPE"),
+            auth_required_role=os.getenv("MCP_AUTH_REQUIRED_ROLE"),
             resource_url=os.getenv("MCP_RESOURCE_URL"),
             max_request_body_size=int(
                 os.getenv("MCP_MAX_REQUEST_BODY_SIZE", "1048576")

@@ -159,10 +159,21 @@ def _validate_platform_principal(
     ):
         return None, "invalid_audience"
 
-    scope_values = claims.get("scp", set())
-    required_scope = settings.auth_required_scope or ""
-    if not any(required_scope in value.split() for value in scope_values):
-        return None, "missing_scope"
+    if settings.auth_required_role:
+        if not _contains_claim(
+            claims,
+            (
+                "roles",
+                "http://schemas.microsoft.com/ws/2008/06/identity/claims/role",
+            ),
+            settings.auth_required_role,
+        ):
+            return None, "missing_role"
+    else:
+        scope_values = claims.get("scp", set())
+        required_scope = settings.auth_required_scope or ""
+        if not any(required_scope in value.split() for value in scope_values):
+            return None, "missing_scope"
 
     principal_key = hashlib.sha256(principal_id.encode("utf-8")).hexdigest()
     return principal_key, "authenticated"

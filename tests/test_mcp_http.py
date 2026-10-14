@@ -83,15 +83,18 @@ def _principal_headers(
     *,
     tenant: str = "tenant-123",
     audience: str = "api://mcp-server",
-    scope: str = "Mcp.Tools.Read",
+    scope: str | None = "Mcp.Tools.Read",
+    role: str | None = None,
 ) -> dict[str, str]:
-    principal = {
-        "claims": [
-            {"typ": "tid", "val": tenant},
-            {"typ": "aud", "val": audience},
-            {"typ": "scp", "val": scope},
-        ]
-    }
+    claims = [
+        {"typ": "tid", "val": tenant},
+        {"typ": "aud", "val": audience},
+    ]
+    if scope is not None:
+        claims.append({"typ": "scp", "val": scope})
+    if role is not None:
+        claims.append({"typ": "roles", "val": role})
+    principal = {"claims": claims}
     encoded = base64.b64encode(json.dumps(principal).encode("utf-8")).decode("ascii")
     return {
         "X-MS-CLIENT-PRINCIPAL-IDP": "aad",
@@ -208,6 +211,58 @@ def test_given_missing_required_scope_when_posting_then_returns_401() -> None:
 
     # Act
     response = client.post("/mcp", headers=headers, json={})
+
+    # Assert
+    assert response.status_code == 401
+
+
+def test_given_required_application_role_when_getting_governance_then_authenticates() -> None:
+    # Arrange
+    settings = _hosted_settings(
+        auth_required_scope=None,
+        auth_required_role="Mcp.Tools.Invoke",
+    )
+    client = TestClient(build_http_app(settings))
+
+    # Act
+    response = client.get(
+        "/governance/snapshot",
+        headers=_principal_headers(scope=None, role="Mcp.Tools.Invoke"),
+    )
+
+    # Assert
+    assert response.status_code == 200
+
+
+def test_given_application_role_mode_when_getting_resource_metadata_then_omits_scopes() -> None:
+    # Arrange
+    settings = _hosted_settings(
+        auth_required_scope=None,
+        auth_required_role="Mcp.Tools.Invoke",
+    )
+    client = TestClient(build_http_app(settings))
+
+    # Act
+    response = client.get("/.well-known/oauth-protected-resource/mcp")
+
+    # Assert
+    assert response.status_code == 200
+    assert "scopes_supported" not in response.json()
+
+
+def test_given_scope_only_when_application_role_required_then_returns_401() -> None:
+    # Arrange
+    settings = _hosted_settings(
+        auth_required_scope=None,
+        auth_required_role="Mcp.Tools.Invoke",
+    )
+    client = TestClient(build_http_app(settings))
+
+    # Act
+    response = client.get(
+        "/governance/snapshot",
+        headers=_principal_headers(),
+    )
 
     # Assert
     assert response.status_code == 401

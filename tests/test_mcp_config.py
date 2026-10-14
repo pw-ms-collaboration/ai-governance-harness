@@ -21,6 +21,7 @@ def test_given_no_environment_when_loading_settings_then_uses_local_stdio_defaul
         "MCP_ALLOWED_ORIGINS",
         "MCP_HOSTED",
         "MCP_JSON_RESPONSE",
+        "MCP_AUTH_REQUIRED_ROLE",
         "AZURE_AI_PROJECT_REGION",
         "AZURE_REGION",
     ):
@@ -63,6 +64,27 @@ def test_given_disallowed_hosted_region_when_loading_then_rejects_region(
     # Act & Assert
     with pytest.raises(ValidationError, match="Sovereignty Violation"):
         ServerSettings.from_environment()
+
+
+def test_given_hosted_application_role_when_loading_settings_then_accepts_role(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    monkeypatch.setenv("MCP_HOSTED", "true")
+    monkeypatch.setenv("MCP_TRANSPORT", "streamable-http")
+    monkeypatch.setenv("AZURE_AI_PROJECT_REGION", "australiaeast")
+    monkeypatch.setenv("MCP_AUTH_TENANT_ID", "tenant-123")
+    monkeypatch.setenv("MCP_AUTH_AUDIENCE", "api://mcp-server")
+    monkeypatch.delenv("MCP_AUTH_REQUIRED_SCOPE", raising=False)
+    monkeypatch.setenv("MCP_AUTH_REQUIRED_ROLE", "Mcp.Tools.Invoke")
+    monkeypatch.setenv("MCP_RESOURCE_URL", "https://mcp.example/mcp")
+
+    # Act
+    settings = ServerSettings.from_environment()
+
+    # Assert
+    assert settings.auth_required_scope is None
+    assert settings.auth_required_role == "Mcp.Tools.Invoke"
 
 
 def test_given_valid_http_environment_when_loading_then_parses_values(

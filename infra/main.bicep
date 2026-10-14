@@ -52,8 +52,8 @@ param mcpApiClientId string
 @description('Allowed token audience for the MCP API.')
 param mcpApiAudience string
 
-@description('Required delegated scope expected by the MCP service.')
-param mcpRequiredScope string
+@description('Required application role expected by the MCP service.')
+param mcpRequiredRole string
 
 @description('Foundry agent identity client ID allowed to call the MCP backend.')
 param foundryAgentIdentityClientId string
@@ -77,7 +77,7 @@ var apimApiPath = '${resourcePrefix}-mcp'
 var tenantId = tenant().tenantId
 var issuer = '${environment().authentication.loginEndpoint}${tenantId}/v2.0'
 var apimMcpUrl = '${apim.properties.gatewayUrl}/${apimApiPath}/mcp'
-var image = '${registry.outputs.loginServer}/ai-governance-harness:${imageTag}'
+var image = '${registry.properties.loginServer}/ai-governance-harness:${imageTag}'
 var tags = {
   application: 'ai-governance-harness'
   environment: 'hackathon'
@@ -104,24 +104,20 @@ module foundryWorkloadIdentity 'br/public:avm/res/managed-identity/user-assigned
   }
 }
 
-module registry 'br/public:avm/res/container-registry/registry:0.13.1' = {
-  name: 'containerRegistry'
-  params: {
-    name: registryName
-    location: location
-    acrSku: 'Basic'
-    acrAdminUserEnabled: false
-    roleAssignments: shouldCreateRoleAssignments
-      ? [
-          {
-            principalId: registryPullIdentity.outputs.principalId
-            roleDefinitionIdOrName: 'AcrPull'
-            principalType: 'ServicePrincipal'
-          }
-        ]
-      : []
-    enableTelemetry: false
-    tags: tags
+resource registry 'Microsoft.ContainerRegistry/registries@2025-06-01-preview' existing = {
+  name: registryName
+}
+
+resource registryPullRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (shouldCreateRoleAssignments) {
+  name: guid(registry.id, pullIdentityName, 'AcrPull')
+  scope: registry
+  properties: {
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      '7f951dda-4ed3-4680-a7ca-43fe172d538d'
+    )
+    principalId: registryPullIdentity.outputs.principalId
+    principalType: 'ServicePrincipal'
   }
 }
 
@@ -192,7 +188,7 @@ module mcpApp 'br/public:avm/res/app/container-app:0.23.0' = {
     }
     registries: [
       {
-        server: registry.outputs.loginServer
+        server: registry.properties.loginServer
         identity: registryPullIdentity.outputs.resourceId
       }
     ]
@@ -253,7 +249,7 @@ module mcpApp 'br/public:avm/res/app/container-app:0.23.0' = {
           { name: 'AZURE_AI_PROJECT_REGION', value: location }
           { name: 'MCP_AUTH_TENANT_ID', value: tenantId }
           { name: 'MCP_AUTH_AUDIENCE', value: mcpApiAudience }
-          { name: 'MCP_AUTH_REQUIRED_SCOPE', value: mcpRequiredScope }
+          { name: 'MCP_AUTH_REQUIRED_ROLE', value: mcpRequiredRole }
           { name: 'MCP_RESOURCE_URL', value: apimMcpUrl }
           { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', secretRef: 'appinsights-connection' }
         ]
@@ -262,6 +258,7 @@ module mcpApp 'br/public:avm/res/app/container-app:0.23.0' = {
     enableTelemetry: false
     tags: tags
   }
+  dependsOn: shouldCreateRoleAssignments ? [registryPullRoleAssignment] : []
 }
 
 module chatApp 'br/public:avm/res/app/container-app:0.23.0' = {
@@ -288,7 +285,7 @@ module chatApp 'br/public:avm/res/app/container-app:0.23.0' = {
     }
     registries: [
       {
-        server: registry.outputs.loginServer
+        server: registry.properties.loginServer
         identity: registryPullIdentity.outputs.resourceId
       }
     ]
@@ -362,6 +359,7 @@ module chatApp 'br/public:avm/res/app/container-app:0.23.0' = {
     enableTelemetry: false
     tags: tags
   }
+  dependsOn: shouldCreateRoleAssignments ? [registryPullRoleAssignment] : []
 }
 
 resource mcpApi 'Microsoft.ApiManagement/service/apis@2025-09-01-preview' = {
@@ -417,7 +415,7 @@ resource mcpApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2025-09-01-
 }
 
 @description('ACR login server for image publication and Container Apps pull configuration.')
-output registryLoginServer string = registry.outputs.loginServer
+output registryLoginServer string = registry.properties.loginServer
 
 @description('Public chat endpoint; Entra authentication is required.')
 output chatEndpoint string = 'https://${chatApp.outputs.fqdn}'

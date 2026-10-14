@@ -65,6 +65,27 @@ class _FakeModelClient:
         self.closed = True
 
 
+class _FakeAgentResponses:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return SimpleNamespace(
+            id="response-1",
+            status="completed",
+            output_text="The synthetic profile was retrieved.",
+            output=[SimpleNamespace(type="mcp_call", name="get_member_profile")],
+            incomplete_details=None,
+        )
+
+
+class _FakeAgentModelClient(_FakeModelClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.responses = _FakeAgentResponses()
+
+
 class _GoalHijackCompletions:
     def create(self, **kwargs):
         tool_call = _FakeToolCall()
@@ -141,6 +162,51 @@ class _FakeMcpClient:
                 "provenance": {"synthetic": True},
             },
         )
+
+
+@pytest.mark.anyio
+async def test_given_agent_name_when_completing_then_invokes_agent_reference_without_direct_mcp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    model_client = _FakeAgentModelClient()
+    project_client = _FakeProjectClient(model_client)
+
+    def unexpected_mcp_client(url: str):
+        raise AssertionError(f"Agent route must not connect directly to MCP: {url}")
+
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.Client",
+        unexpected_mcp_client,
+    )
+    service = ChatService(
+        ChatSettings(
+            model_deployment="test-model",
+            agent_name="member-wealth-insights-agent",
+        )
+    )
+    request = ChatRequest(
+        messages=[ChatMessage(role="user", content="Show MEM-001")]
+    )
+
+    # Act
+    response = await service.complete(request)
+
+    # Assert
+    assert model_client.responses.calls[0]["extra_body"] == {
+        "agent_reference": {
+            "name": "member-wealth-insights-agent",
+            "type": "agent_reference",
+        }
+    }
+    assert response.tools_used == ["get_member_profile"]
+    assert "GENERAL ADVICE WARNING" in response.message
+    assert model_client.closed is True
+    assert project_client.closed is True
 
 
 class _WrappingMcpClient(_FakeMcpClient):

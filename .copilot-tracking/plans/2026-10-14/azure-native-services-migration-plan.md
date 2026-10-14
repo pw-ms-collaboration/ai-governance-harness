@@ -639,6 +639,7 @@ Dependencies:
 * Give implementation tasks checkable acceptance conditions and verification methods.
 * Keep the existing chat UI in front of a backend Foundry Prompt Agent; retain `ChatService` as the UI/API façade.
 * Use the Azure target configured in `.env` for read-only P01 preflight; do not provision or change Azure resources.
+* Scope the MVP to a three-day hackathon and target a demo by end of day on 2026-10-14; reuse existing Azure resources where practical and defer production-grade networking/audit hardening.
 * Do not change application source or deploy Azure resources as part of this planning task.
 
 ### Planning Decisions and Feedback
@@ -649,7 +650,8 @@ Dependencies:
 | D2 | Keep the current chat UI/API façade in front of a Foundry Prompt Agent with a distinct Entra Agent ID; retain direct Chat Completions only as rollback until the authenticated route passes. | Confirmed direction | User/platform owner | User clarified that the chat UI is in front of the Prompt Agent. A separate workload managed identity serves application-to-Foundry access where supported; tenant protocol and identity support remain verification gates. | User confirmation, workshop architecture, current Foundry client and chat service | Gates `P01-T01`, `P02-T01`, and `P02-T02`; no cutover before an authenticated synthetic vertical slice passes. |
 | D3 | Reuse the existing Australia East Application Insights/Log Analytics workspace for operational telemetry with table-specific retention; keep durable business-audit policy separate. | Confirmed direction | User/platform owner; business data owner and security/compliance owner for audit policy | The user approved operational reuse. The component reports 90 days; workspace default is 30 days; core Application Insights tables report 90 days. Workload access/privacy configuration remains to be reviewed. Product NFR `NFR-007` leaves durable business-audit requirements unspecified. | User approval and read-only Application Insights, workspace, and table-retention queries; product requirements and telemetry ADR | Gates `P01-T03` and `P04-T02`; operational telemetry is not durable compliance audit evidence. |
 | D4 | Select the Azure subscription, Foundry project, and region for read-only feature and deployment-baseline verification. | Resolved | User/platform owner | The user pointed to `.env` as the target configuration. Its tenant/subscription matched the Azure CLI context and identified the Foundry project, resource group, and `australiaeast` region. | `.env` target plus read-only Azure Resource Manager and deployment-list queries | Environment selection is complete; P01-T01 Foundry Agent/Gateway feature support and P01-T02 hosted baseline remain unverified or absent. |
-| D5 | Select how APIM reaches the MCP backend: dedicated VNet-connected APIM, in-place VNet integration of the existing shared APIM, or Entra-protected external ACA ingress. | Input requested | User/platform owner | Existing APIM has no VNet and serves `echo-api`; the target group has no VNet. In-place network changes can affect existing traffic; a dedicated APIM adds cost; external ingress relaxes the private-backend target. | Read-only APIM and resource-group inventory; existing MCP deployment plan and migration plan | Gates P01-T02, P03-T01, and P04 infrastructure. Do not author/apply network-sensitive Bicep until selected. |
+| D5 | For the hackathon MVP, reuse the existing APIM and use Entra-protected external ACA ingress; defer VNet/private networking. | Confirmed direction | User/platform owner | User approved the MVP topology to meet the end-of-day demo. It is protected public ingress, not private connectivity; synthetic data only, document any direct-backend bypass of APIM controls, and do not claim sole-gateway enforcement unless verified. | User approval, hackathon deadline, and read-only APIM/ACA inventory | Permits minimal Bicep authoring and preview for P01-T02/P03/P04; no Azure apply without separate authorization. |
+| D6 | Use the existing local chat/MCP harness as the end-of-day demonstration and defer Azure-hosted Prompt Agent/APIM/ACA integration until after the demo. | Proposed | User/platform owner | Both local health endpoints report ready. This demonstrates the synthetic chat/tool/governance panel, but the local chat path uses direct Foundry Chat Completions and does not demonstrate Prompt Agent, APIM, or ACA. | Read-only local `/health/ready` checks; current chat service and deployment inventory | If approved, rescope today's demo and keep Azure Bicep as a post-demo release; if not, retain current cloud blockers and don't claim the diagram is running. |
 
 ### Planning Participation
 
@@ -660,15 +662,15 @@ Dependencies:
 
 | Field | Record |
 |---|---|
-| Planning execution and readiness | Partial; Foundry documents support MCP tools through SDK/REST, and Bicep supports the project/APIM resource layers. The installed SDK lacks MCP tool models, the existing prompt agent has no tools, APIM's MCP API schema is preview, ACA is absent, and APIM/ACA network topology D5 is unresolved. |
-| Blockers | Resolve D5 topology; select supported SDK upgrade or REST bootstrap; validate APIM MCP preview/API version and identity/approval behavior; complete ACA baseline; verify telemetry permissions/privacy. Durable audit requirements remain separate owner work. |
+| Planning execution and readiness | Partial; D5 MVP topology is approved and D6 EOD demo scope awaits user approval. Local chat/MCP is healthy; Azure-hosted Prompt Agent/APIM/ACA remains incomplete. |
+| Blockers | D6 demo-scope approval; if Azure-hosted demo is required, select SDK upgrade or REST bootstrap, validate APIM MCP preview/API and identity/approval behavior, and create minimal ACA baseline. Durable audit and VNet isolation are deferred. |
 | Latest critique | Not run. |
 | Relevant research | Not activated; supplied architecture, prior planning artifacts, and repository code establish the current design delta. |
 | Plan | `.copilot-tracking/plans/2026-10-14/azure-native-services-migration-plan.md` |
 | Changes-record role | `.copilot-tracking/changes/2026-10-14/azure-native-services-migration-changes.md` will record implementation evidence if this plan proceeds. |
 | Continuation owner | User, standalone planning. |
-| Required gates or confirmations | Resolve D5; confirm a supported way to attach MCP tools to the existing Prompt Agent and route them through the approved gateway; complete inherited ACA baseline; review telemetry permissions/privacy filtering before configuring the workload writer. |
-| Next action | Await the network topology choice before authoring Bicep. Then build and run `what-if` only; do not apply until explicitly authorized. |
+| Required gates or confirmations | Approve or revise D6; do not apply Azure resources without separate explicit authorization. |
+| Next action | Await D6. If local demo is accepted, prepare its truthful demo boundary; if Azure hosting is required, resume Bicep preview and document the schedule risk. |
 
 ## Goals
 

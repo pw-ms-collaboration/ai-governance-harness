@@ -80,6 +80,31 @@ function chatErrorMessage(payload) {
   if (error.details?.matched_rule) {
     parts.push(`Policy rule: ${String(error.details.matched_rule)}.`);
   }
+  if (error.details?.finish_reason) {
+    parts.push(`Model stop condition: ${String(error.details.finish_reason)}.`);
+  }
+  if (error.details?.foundry_error_code) {
+    parts.push(`Foundry error: ${String(error.details.foundry_error_code)}.`);
+  }
+  if (error.details?.content_filter_stage) {
+    parts.push(`Filtered stage: ${String(error.details.content_filter_stage)}.`);
+  }
+  if (error.details?.content_filter_category) {
+    const severity = error.details.content_filter_severity
+      ? ` (${String(error.details.content_filter_severity)})`
+      : "";
+    parts.push(
+      `Foundry content filter: ${String(error.details.content_filter_category)}${severity}.`,
+    );
+  }
+  if (error.details?.required_capability) {
+    parts.push(
+      `Required client capability: ${String(error.details.required_capability)}.`,
+    );
+  }
+  if (error.details?.tool) {
+    parts.push(`Tool: ${String(error.details.tool)}.`);
+  }
   if (error.correlation_id) {
     parts.push(`Reference: ${String(error.correlation_id)}.`);
   }

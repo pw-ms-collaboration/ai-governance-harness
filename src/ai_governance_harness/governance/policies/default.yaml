@@ -62,7 +62,7 @@ rules:
     stage: pre_tool
     condition: "action.type == 'get_fum_outflow_summary'"
     action: allow
-  - name: allow-approved-outreach-case
+  - name: allow-eligible-outreach-case
     stage: pre_tool
     condition: "action.type == 'prepare_member_outreach_case' and data.retention_handling_status == 'routine_permitted'"
     action: allow

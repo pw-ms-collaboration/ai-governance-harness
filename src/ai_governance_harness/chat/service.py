@@ -11,7 +11,7 @@ from urllib.request import urlopen
 from typing import Any, Literal, Protocol
 
 import anyio
-from mcp import Client
+from mcp import Client, types
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from ai_governance_harness.chat.config import ChatSettings
@@ -45,12 +45,26 @@ SYSTEM_INSTRUCTIONS = (
 
 logger = logging.getLogger(__name__)
 _SAFE_ERROR_VALUE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
+_EMPTY_RESPONSE_RECOVERY_INSTRUCTION = (
+    "The previous model response was empty. Answer the user's request using the "
+    "available conversation and tool results. Return a concise text response."
+)
+_OUTREACH_APPROVAL_HEADING = "Approval required for "
+_APPROVE_RESPONSES = frozenset(
+    {"approve", "approved", "yes", "yes approve", "yes, approve"}
+)
+_DECLINE_RESPONSES = frozenset(
+    {"cancel", "decline", "declined", "do not approve", "no"}
+)
 
 ChatErrorCode = Literal[
     "chat_service_error",
+    "client_capability_required",
     "governance_denied",
     "invalid_model_response",
     "invalid_request",
+    "model_content_filtered",
+    "model_output_limit",
     "model_round_limit",
     "unsafe_tool_result",
     "upstream_failure",
@@ -103,17 +117,186 @@ def _governance_service_error(error: GovernanceDeniedError) -> ChatServiceError:
     )
 
 
+def _foundry_filter_service_error(
+    error: BaseException,
+) -> ChatServiceError | None:
+    """Normalize Azure content-filter HTTP errors without exposing content."""
+    body = getattr(error, "body", None)
+    if not isinstance(body, dict):
+        return None
+    payload = body.get("error", body)
+    if not isinstance(payload, dict):
+        return None
+
+    details: dict[str, str] = {}
+    code = payload.get("code")
+    if isinstance(code, str) and _SAFE_ERROR_VALUE.fullmatch(code):
+        details["foundry_error_code"] = code
+    parameter = payload.get("param")
+    if isinstance(parameter, str) and _SAFE_ERROR_VALUE.fullmatch(parameter):
+        details["content_filter_stage"] = parameter
+
+    inner = payload.get("innererror", payload.get("inner_error"))
+    if isinstance(inner, dict):
+        inner_code = inner.get("code")
+        if (
+            isinstance(inner_code, str)
+            and _SAFE_ERROR_VALUE.fullmatch(inner_code)
+        ):
+            details["foundry_inner_error_code"] = inner_code
+        filter_results = inner.get(
+            "content_filter_result",
+            inner.get("content_filter_results"),
+        )
+        if isinstance(filter_results, dict):
+            for category, result in filter_results.items():
+                if not isinstance(result, dict):
+                    continue
+                if not (result.get("filtered") or result.get("detected")):
+                    continue
+                details["content_filter_category"] = str(category)
+                severity = result.get("severity")
+                if severity is not None:
+                    details["content_filter_severity"] = str(severity)
+                break
+
+    recognized_codes = {
+        details.get("foundry_error_code", "").lower(),
+        details.get("foundry_inner_error_code", "").lower(),
+    }
+    if (
+        "content_filter" not in recognized_codes
+        and "responsibleaipolicyviolation" not in recognized_codes
+        and "content_filter_category" not in details
+    ):
+        return None
+    return ChatServiceError(
+        "Azure AI Foundry blocked the model request or response under a "
+        "configured content filter.",
+        code="model_content_filtered",
+        status_code=422,
+        details=details,
+    )
+
+
+def _mcp_capability_service_error(
+    error: BaseException,
+) -> ChatServiceError | None:
+    """Normalize the known MCP form-elicitation capability failure."""
+    message = str(error)
+    if (
+        "did not declare the form elicitation capability" not in message
+        or "_resolve_outreach_approval" not in message
+    ):
+        return None
+    return ChatServiceError(
+        "Preparing an outreach case requires interactive approval, but browser "
+        "chat does not support MCP form elicitation.",
+        code="client_capability_required",
+        status_code=409,
+        details={
+            "required_capability": "form_elicitation",
+            "tool": "prepare_member_outreach_case",
+            "resolution": "use_elicitation_capable_mcp_client",
+        },
+    )
+
+
 def _known_service_error(error: BaseException) -> ChatServiceError | None:
     """Find a known service error wrapped by an asynchronous task group."""
     if isinstance(error, ChatServiceError):
         return error
     if isinstance(error, GovernanceDeniedError):
         return _governance_service_error(error)
+    foundry_filter_error = _foundry_filter_service_error(error)
+    if foundry_filter_error is not None:
+        return foundry_filter_error
+    mcp_capability_error = _mcp_capability_service_error(error)
+    if mcp_capability_error is not None:
+        return mcp_capability_error
     if isinstance(error, BaseExceptionGroup):
         for nested_error in error.exceptions:
             known_error = _known_service_error(nested_error)
             if known_error is not None:
                 return known_error
+    return None
+
+
+def _is_empty_model_content(content: str | None) -> bool:
+    """Detect blank text and JSON values that contain no user-facing answer."""
+    if content is None or not content.strip():
+        return True
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError:
+        return False
+    return parsed is None or parsed == "" or parsed == {} or parsed == []
+
+
+def _empty_model_response_details(
+    completion: Any,
+    choice: Any,
+) -> dict[str, str]:
+    """Return non-content diagnostics for an empty model response."""
+    details: dict[str, str] = {}
+    finish_reason = getattr(choice, "finish_reason", None)
+    if finish_reason is not None:
+        details["finish_reason"] = str(finish_reason)
+
+    usage = getattr(completion, "usage", None)
+    completion_tokens = getattr(usage, "completion_tokens", None)
+    if completion_tokens is not None:
+        details["completion_tokens"] = str(completion_tokens)
+
+    token_details = getattr(usage, "completion_tokens_details", None)
+    reasoning_tokens = getattr(token_details, "reasoning_tokens", None)
+    if reasoning_tokens is not None:
+        details["reasoning_tokens"] = str(reasoning_tokens)
+
+    filter_results = getattr(choice, "content_filter_results", None)
+    if filter_results is None:
+        model_extra = getattr(choice, "model_extra", None) or {}
+        filter_results = model_extra.get("content_filter_results")
+    if hasattr(filter_results, "model_dump"):
+        filter_results = filter_results.model_dump()
+    if isinstance(filter_results, dict):
+        for category, result in filter_results.items():
+            if hasattr(result, "model_dump"):
+                result = result.model_dump()
+            if not isinstance(result, dict) or not result.get("filtered"):
+                continue
+            details["content_filter_category"] = str(category)
+            severity = result.get("severity")
+            if severity is not None:
+                details["content_filter_severity"] = str(severity)
+            break
+    return details
+
+
+def _model_stop_error(
+    completion: Any,
+    choice: Any,
+    *,
+    recovery_attempted: bool,
+) -> ChatServiceError | None:
+    """Convert explicit Foundry stop conditions into stable public errors."""
+    details = _empty_model_response_details(completion, choice)
+    finish_reason = details.get("finish_reason")
+    if finish_reason == "content_filter":
+        return ChatServiceError(
+            "Azure AI Foundry blocked the model response under a configured "
+            "content filter.",
+            code="model_content_filtered",
+            status_code=422,
+            details=details,
+        )
+    if finish_reason == "length" and recovery_attempted:
+        return ChatServiceError(
+            "The model reached its configured output limit before returning "
+            "an answer.",
+            code="model_output_limit",
+            details=details,
+        )
     return None
 
 
@@ -177,11 +360,117 @@ def _active_advice_request_text(messages: list[ChatMessage]) -> str:
     return f"{previous_user.content}\n{latest.content}"
 
 
+def _outreach_approval_prompt(member_id: str) -> str:
+    """Return the bounded browser-chat approval question."""
+    return (
+        f"{_OUTREACH_APPROVAL_HEADING}{member_id}\n\n"
+        "This member is eligible for a read-only synthetic retention outreach "
+        "case. The case may include disengagement signals, but it will not send "
+        "a message, notify the member, persist a case, or perform external "
+        "contact.\n\nReply **Approve** to prepare the case or **Decline** to stop."
+    )
+
+
+def _pending_outreach_approval(
+    messages: list[ChatMessage],
+) -> tuple[str, bool | None] | None:
+    """Read an explicit response to the immediately preceding approval prompt."""
+    if len(messages) < 2 or messages[-2].role != "assistant":
+        return None
+    previous = messages[-2].content
+    if not previous.startswith(_OUTREACH_APPROVAL_HEADING):
+        return None
+    member_match = re.match(
+        rf"^{re.escape(_OUTREACH_APPROVAL_HEADING)}(MEM-\d{{3}})\b",
+        previous,
+    )
+    if member_match is None:
+        return None
+
+    response = re.sub(r"\s+", " ", messages[-1].content.strip().lower())
+    if response in _APPROVE_RESPONSES:
+        decision: bool | None = True
+    elif response in _DECLINE_RESPONSES:
+        decision = False
+    else:
+        decision = None
+    return member_match.group(1), decision
+
+
 class ChatResponse(BaseModel):
     """Sanitized response returned to the browser."""
 
     message: str
     tools_used: list[str]
+
+
+class _MemberAccountResult(BaseModel):
+    """Validated account fields used by deterministic profile rendering."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    account_id: str = Field(pattern=r"^ACC-\d{3}$")
+    balance: float = Field(ge=0)
+    phase: str = Field(min_length=1, max_length=64)
+    option_allocation: dict[str, float]
+
+
+class _MemberProfileResult(BaseModel):
+    """Validated profile fields used by deterministic profile rendering."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    member_id: str = Field(pattern=r"^MEM-\d{3}$")
+    full_name: str = Field(min_length=1, max_length=100)
+    age: int = Field(ge=16, le=120)
+    tenure_years: float = Field(ge=0)
+    risk_profile: str = Field(min_length=1, max_length=64)
+    communication_preference: str = Field(min_length=1, max_length=32)
+    account: _MemberAccountResult
+    has_closure_inquiry: bool
+
+
+def _format_member_profile(payload: Any) -> str:
+    """Render a validated synthetic profile without another model call."""
+    try:
+        profile = _MemberProfileResult.model_validate(payload)
+    except ValidationError:
+        raise ChatServiceError(
+            "The tool returned an invalid member profile.",
+            code="unsafe_tool_result",
+        ) from None
+
+    allocation = ", ".join(
+        f"{option}: {share:.0%}"
+        for option, share in profile.account.option_allocation.items()
+    )
+    if not allocation:
+        allocation = "Not recorded"
+    return "\n".join(
+        [
+            (
+                f"The synthetic profile for {profile.member_id} was retrieved "
+                "from internal fund records."
+            ),
+            "",
+            f"- Name: {profile.full_name}",
+            f"- Age: {profile.age}",
+            f"- Fund tenure: {profile.tenure_years:g} years",
+            f"- Risk profile: {profile.risk_profile}",
+            (
+                "- Communication preference: "
+                f"{profile.communication_preference}"
+            ),
+            f"- Account: {profile.account.account_id}",
+            f"- Balance: ${profile.account.balance:,.2f}",
+            f"- Phase: {profile.account.phase}",
+            f"- Investment allocation: {allocation}",
+            (
+                "- Closure inquiry recorded: "
+                f"{'Yes' if profile.has_closure_inquiry else 'No'}"
+            ),
+        ]
+    )
 
 
 class _CompletionClient(Protocol):
@@ -286,6 +575,7 @@ class ChatService:
         project_client = None
         model_client: _CompletionClient | None = None
         tools_used: list[str] = []
+        pending_approval = _pending_outreach_approval(request.messages)
         try:
             self._governance.require_allowed(
                 LifecyclePoint.INPUT,
@@ -300,7 +590,21 @@ class ChatService:
             )
             project_client = get_foundry_client()
             model_client = project_client.get_openai_client()
-            async with Client(self._settings.mcp_url) as mcp_client:
+
+            async def resolve_elicitation(_context: Any, _params: Any):
+                if pending_approval is not None and pending_approval[1] is True:
+                    return types.ElicitResult(
+                        action="accept",
+                        content={"approved": True},
+                    )
+                if pending_approval is not None and pending_approval[1] is False:
+                    return types.ElicitResult(action="decline")
+                return types.ElicitResult(action="cancel")
+
+            async with Client(
+                self._settings.mcp_url,
+                elicitation_callback=resolve_elicitation,
+            ) as mcp_client:
                 discovered = await self._mcp_reliability.call(
                     mcp_client.list_tools,
                 )
@@ -323,8 +627,39 @@ class ChatService:
                         for message in request.messages
                     ],
                 ]
+                if pending_approval is not None:
+                    member_id, decision = pending_approval
+                    if decision is None:
+                        return self._finalize_response(
+                            _outreach_approval_prompt(member_id),
+                            tools_used,
+                        )
+                    if decision is False:
+                        return self._finalize_response(
+                            (
+                                f"Understood. Preparation of the outreach case "
+                                f"for {member_id} was declined. No operation "
+                                "was executed."
+                            ),
+                            tools_used,
+                        )
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                f"The user explicitly approved preparation of "
+                                f"the read-only outreach case for {member_id}. "
+                                "Call prepare_member_outreach_case for that "
+                                "member now."
+                            ),
+                        }
+                    )
+                empty_response_retried = False
+                model_attempt = 0
+                model_attempt_limit = self._settings.max_tool_rounds + 1
 
-                for _ in range(self._settings.max_tool_rounds + 1):
+                while model_attempt < model_attempt_limit:
+                    model_attempt += 1
                     self._governance.require_allowed(
                         LifecyclePoint.PRE_MODEL,
                         "foundry.chat",
@@ -336,15 +671,27 @@ class ChatService:
                     )
 
                     async def request_completion() -> Any:
+                        completion_options: dict[str, Any] = {
+                            "model": self._settings.model_deployment,
+                            "messages": messages,
+                            "tools": model_tools,
+                            "tool_choice": (
+                                "none" if empty_response_retried else "auto"
+                            ),
+                            "parallel_tool_calls": False,
+                            "max_completion_tokens": (
+                                self._settings.max_output_tokens
+                            ),
+                            "store": False,
+                        }
+                        if empty_response_retried:
+                            completion_options.update(
+                                reasoning_effort="minimal",
+                                verbosity="low",
+                            )
                         return await anyio.to_thread.run_sync(
                             lambda: model_client.chat.completions.create(
-                                model=self._settings.model_deployment,
-                                messages=messages,
-                                tools=model_tools,
-                                tool_choice="auto",
-                                parallel_tool_calls=False,
-                                max_completion_tokens=self._settings.max_output_tokens,
-                                store=False,
+                                **completion_options,
                             )
                         )
 
@@ -362,26 +709,37 @@ class ChatService:
                     choice = completion.choices[0]
                     assistant_message = choice.message
                     if not assistant_message.tool_calls:
-                        if not assistant_message.content:
+                        if _is_empty_model_content(assistant_message.content):
+                            stop_error = _model_stop_error(
+                                completion,
+                                choice,
+                                recovery_attempted=empty_response_retried,
+                            )
+                            if stop_error is not None:
+                                raise stop_error
+                            if not empty_response_retried:
+                                empty_response_retried = True
+                                model_attempt_limit += 1
+                                messages.append(
+                                    {
+                                        "role": "system",
+                                        "content": (
+                                            _EMPTY_RESPONSE_RECOVERY_INSTRUCTION
+                                        ),
+                                    }
+                                )
+                                continue
                             raise ChatServiceError(
                                 "The model returned an empty response.",
                                 code="invalid_model_response",
+                                details=_empty_model_response_details(
+                                    completion,
+                                    choice,
+                                ),
                             )
-                        response = self._sanitize_response(
-                            assistant_message.content
-                        )
-                        self._governance.require_allowed(
-                            LifecyclePoint.OUTPUT,
-                            "chat.output",
-                            policy_data={
-                                "response_length": len(response),
-                                "tool_count": len(tools_used),
-                            },
-                            source="chat",
-                        )
-                        return ChatResponse(
-                            message=response,
-                            tools_used=list(dict.fromkeys(tools_used)),
+                        return self._finalize_response(
+                            assistant_message.content,
+                            tools_used,
                         )
 
                     messages.append(
@@ -491,6 +849,14 @@ class ChatService:
                                     details=_governance_error_details(exc),
                                 ) from exc
                             raise
+                        if (
+                            tool_name == "prepare_member_outreach_case"
+                            and pending_approval != (member_id, True)
+                        ):
+                            return self._finalize_response(
+                                _outreach_approval_prompt(member_id),
+                                tools_used,
+                            )
 
                         async def call_tool() -> Any:
                             return await mcp_client.call_tool(tool_name, arguments)
@@ -506,6 +872,16 @@ class ChatService:
                             source="chat",
                         )
                         tools_used.append(tool_name)
+                        if (
+                            tool_name == "get_member_profile"
+                            and not result.is_error
+                        ):
+                            return self._finalize_response(
+                                _format_member_profile(
+                                    result.structured_content
+                                ),
+                                tools_used,
+                            )
                         tool_payload: Any
                         if result.is_error:
                             tool_payload = {
@@ -554,3 +930,22 @@ class ChatService:
         scoped = self._wealth_guardrail.sanitize_scope_claims(response)
         safe, _ = self._advice_guardrail.enforce_advice_boundaries(scoped)
         return DisclosureAttacher.attach_disclosures(safe)
+
+    def _finalize_response(
+        self,
+        response: str,
+        tools_used: list[str],
+    ) -> ChatResponse:
+        """Apply output guardrails and record the final governance decision."""
+        sanitized = self._sanitize_response(response)
+        unique_tools = list(dict.fromkeys(tools_used))
+        self._governance.require_allowed(
+            LifecyclePoint.OUTPUT,
+            "chat.output",
+            policy_data={
+                "response_length": len(sanitized),
+                "tool_count": len(unique_tools),
+            },
+            source="chat",
+        )
+        return ChatResponse(message=sanitized, tools_used=unique_tools)

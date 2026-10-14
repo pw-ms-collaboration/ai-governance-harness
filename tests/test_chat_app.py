@@ -147,6 +147,49 @@ def test_given_governance_denial_when_posting_then_returns_policy_error() -> Non
     }
 
 
+def test_given_foundry_filter_when_posting_then_returns_stop_details() -> None:
+    # Arrange
+    service = _FailingChatService(
+        ChatServiceError(
+            "Azure AI Foundry blocked the model response under a configured "
+            "content filter.",
+            code="model_content_filtered",
+            status_code=422,
+            details={
+                "finish_reason": "content_filter",
+                "content_filter_category": (
+                    "personally_identifiable_information"
+                ),
+                "content_filter_severity": "medium",
+            },
+        )
+    )
+    client = TestClient(build_chat_app(_settings(), service))
+
+    # Act
+    response = client.post(
+        "/api/chat",
+        headers={"X-Correlation-ID": "filter-test"},
+        json={"messages": [{"role": "user", "content": "Show MEM-001"}]},
+    )
+
+    # Assert
+    assert response.status_code == 422
+    assert response.json()["error"] == {
+        "code": "model_content_filtered",
+        "message": (
+            "Azure AI Foundry blocked the model response under a configured "
+            "content filter."
+        ),
+        "correlation_id": "filter-test",
+        "details": {
+            "finish_reason": "content_filter",
+            "content_filter_category": "personally_identifiable_information",
+            "content_filter_severity": "medium",
+        },
+    }
+
+
 def test_given_personal_advice_request_when_posting_then_policy_denies_input() -> None:
     # Arrange
     client = TestClient(build_chat_app(_settings()))

@@ -181,9 +181,12 @@ requires a server-to-client request channel for form elicitation. Streaming
 responses are enabled by default with `MCP_JSON_RESPONSE=false`; setting it to
 `true` disables that back-channel, so approval tools fail closed.
 
-The browser chat does not yet provide a universal approval interface. Calling
-this tool through a client without MCP elicitation support therefore returns a
-sanitized tool error rather than bypassing approval.
+Browser chat presents approval conversationally. After eligibility succeeds,
+the assistant asks the user to reply **Approve** or **Decline** for the named
+member. Only an explicit approval in the immediately following turn is supplied
+to the MCP form resolver. Ambiguous answers repeat the question, and declines
+stop normally without executing the outreach tool. Approval is scoped to the
+member named in the preceding assistant prompt and is never inferred.
 
 ### Retention eligibility and specialist referral
 
@@ -581,6 +584,27 @@ Governance denials return HTTP 403 and bounded policy metadata. Invalid requests
 return HTTP 400. Model, MCP, or other upstream failures return HTTP 502 with a
 different stable error code. Responses never include raw prompts, tool
 arguments, tool results, credentials, or internal exception text.
+Foundry response stops are differentiated from repository governance denials.
+A content-filter stop returns HTTP 422 with `model_content_filtered` and bounded
+details for the model `finish_reason`, filter category and severity when
+available. A repeated output-budget stop returns `model_output_limit`. The
+browser displays these stop conditions and the request reference without
+displaying filtered model content.
+MCP clients that do not support form elicitation still receive the protocol's
+capability failure. Browser chat declares the capability and supplies a form
+response only after the explicit conversational approval described above.
+After a successful tool call, blank model output and empty JSON containers such
+as `{}` receive one bounded recovery request using the already-governed
+conversation and tool result. Recovery disables additional tool selection and
+uses minimal reasoning with low verbosity so the bounded completion budget is
+reserved for a user-facing answer. If recovery is also empty, chat returns
+`invalid_model_response` rather than fabricating an answer or retrying
+indefinitely.
+Member profile responses take a narrower path: after the structured profile
+passes tool and output governance, chat validates and renders it
+deterministically. The synthetic name and account identifier are not sent back
+through the hosted model, avoiding an Azure PII content-filter stop and
+eliminating unnecessary post-tool model decisions for a factual profile lookup.
 The browser, static assets, and API responses use `Cache-Control: no-store` so
 the UI error contract and governance table cannot drift behind the running
 service after an update.

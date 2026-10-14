@@ -103,23 +103,58 @@ class PrivacySafeJsonFormatter(logging.Formatter):
         return json.dumps(payload, separators=(",", ":"), sort_keys=True)
 
 
-def configure_telemetry(settings: ServerSettings) -> None:
-    """Configure structured logs and optional Azure Monitor export."""
+def configure_azure_export(
+    *,
+    service_name: str,
+    environment: str,
+    region: str | None = None,
+    manual_only: bool = False,
+) -> None:
+    """Export existing instruments when an Insights connection is configured.
+
+    Manual-only export avoids automatically instrumenting model and HTTP clients
+    in the chat process. It exports explicit spans and metrics, not root logs.
+    """
     connection_string = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
     if connection_string:
         resource = Resource.create(
             {
-                "service.name": SERVICE_NAME,
+                "service.name": service_name,
                 "service.version": SERVICE_VERSION,
-                "deployment.environment": settings.environment,
-                "cloud.region": settings.region or "local",
+                "deployment.environment": environment,
+                "cloud.region": region or "local",
             }
         )
         configure_azure_monitor(
             connection_string=connection_string,
             resource=resource,
-            logger_name=SERVICE_NAME,
+            logger_name=service_name,
+            instrumentation_options=(
+                {
+                    name: {"enabled": False}
+                    for name in (
+                        "azure_sdk", "django", "fastapi", "flask", "httpx",
+                        "httpx2", "psycopg2", "requests", "urllib", "urllib3",
+                    )
+                }
+                if manual_only
+                else {}
+            ),
+            **(
+                {"disable_logging": True, "enable_live_metrics": False}
+                if manual_only
+                else {}
+            ),
         )
+
+
+def configure_telemetry(settings: ServerSettings) -> None:
+    """Configure structured logs and optional Azure Monitor export."""
+    configure_azure_export(
+        service_name=SERVICE_NAME,
+        environment=settings.environment,
+        region=settings.region,
+    )
 
     handler = logging.StreamHandler()
     if settings.transport == "streamable-http":

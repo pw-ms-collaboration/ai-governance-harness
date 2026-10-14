@@ -12,6 +12,7 @@ from typing import Any, Literal, Protocol
 
 import anyio
 from mcp import Client
+from openai import APIStatusError
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ai_governance_harness.chat.config import ChatSettings
@@ -28,32 +29,62 @@ from ai_governance_harness.governance.snapshot import (
 )
 from ai_governance_harness.guardrails.advice_filter import (
     AdviceClassificationGuardrail,
-    DisclosureAttacher,
     WholeOfWealthInvariantGuardrail,
     advice_request_policy_data,
     tool_response_policy_data,
 )
 
 SYSTEM_INSTRUCTIONS = (
-    "You are an internal superannuation information assistant working only with "
-    "synthetic in-fund data. Use the available tools for every member, cohort, "
-    "risk, or FUM fact. Never invent tool results. Do not provide personal "
-    "financial product advice or claim visibility into external assets. Explain "
-    "uncertainty and keep responses concise."
+    "You are an internal assistant for bank business analysts working only with "
+    "synthetic customer account data. The only tool you can use is "
+    "get_member_profile, which returns member details (name, tenure, risk "
+    "profile, communication preference), account balance, phase, and investment "
+    "option allocation. Use it for every profile fact and never invent tool results. "
+    "Share only those profile fields. If asked for an email, phone number, or "
+    "contact details, call get_member_profile and share the communication "
+    "preference, stating that the record holds no email address or phone number. "
+    "For any other customer information, "
+    "including contributions, digital activity, interactions, churn signals, or "
+    "cohort and FUM analytics, reply exactly: Sorry, I can’t assist "
+    "with this request. I can only provide factual information and general "
+    "guidance based on a member’s internal superannuation records, including "
+    "their account profile, contributions, engagement activity, and recorded "
+    "disengagement signals. Do not give personal financial advice to customers "
+    "or recommend actions for them, and do not claim visibility into external "
+    "assets. Keep responses concise."
 )
 
-logger = logging.getLogger(__name__)
-_SAFE_ERROR_VALUE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
+SCOPE_REFUSAL_PREFIX = "Sorry, I can't assist with this request"
+SCOPE_REFUSAL_MESSAGE = (
+    "Sorry, I can’t assist with this request. I can only provide factual information "
+    "and general guidance based on a member’s internal superannuation records, "
+    "including their account profile, contributions, engagement activity, and "
+    "recorded disengagement signals"
+)
 
-ChatErrorCode = Literal[
-    "chat_service_error",
-    "governance_denied",
-    "invalid_model_response",
-    "invalid_request",
-    "model_round_limit",
-    "unsafe_tool_result",
-    "upstream_failure",
-]
+ALLOWED_CHAT_TOOLS = frozenset({"get_member_profile"})
+PROFILE_FIELDS = (
+    "member_id",
+    "full_name",
+    "tenure_years",
+    "risk_profile",
+    "communication_preference",
+    "account",
+    "provenance",
+)
+
+
+def _is_scope_refusal(message: str) -> bool:
+    """Detect the fixed out-of-scope refusal, tolerating typographic apostrophes."""
+    normalized = message.replace("\u2019", "'").strip()
+    return normalized.startswith(SCOPE_REFUSAL_PREFIX)
+
+
+def _restrict_tool_payload(tool_name: str, payload: Any) -> Any:
+    """Reduce a member profile to permitted fields before the model sees it."""
+    if tool_name != "get_member_profile" or not isinstance(payload, dict):
+        return payload
+    return {key: payload[key] for key in PROFILE_FIELDS if key in payload}
 
 
 class ChatServiceError(RuntimeError):
@@ -116,6 +147,26 @@ def _known_service_error(error: BaseException) -> ChatServiceError | None:
     return None
 
 
+def _foundry_guardrail_code(error: APIStatusError) -> str | None:
+    """Recognize explicit policy-denial codes without inspecting error messages."""
+    codes = [error.code]
+    if isinstance(error.body, dict):
+        details = error.body.get("error", error.body)
+        if isinstance(details, dict):
+            codes.append(details.get("code"))
+            inner_error = details.get("innererror")
+            if isinstance(inner_error, dict):
+                codes.append(inner_error.get("code"))
+    for code in codes:
+        if isinstance(code, str) and code.lower() in {
+            "content_filter",
+            "content_policy_violation",
+            "responsibleaipolicyviolation",
+        }:
+            return "content_filter"
+    return None
+
+
 class ChatMessage(BaseModel):
     """One bounded user or assistant message."""
 
@@ -153,27 +204,14 @@ class ChatRequest(BaseModel):
         return value
 
 
-def _active_advice_request_text(messages: list[ChatMessage]) -> str:
-    """Include prior user intent when the latest turn only supplies a member ID."""
-    latest = messages[-1]
-    if (
-        latest.role != "user"
-        or len(latest.content) > 80
-        or re.search(r"\bMEM-\d{3}\b", latest.content, re.IGNORECASE) is None
-    ):
-        return latest.content
+class PolicyNotice(BaseModel):
+    """Governance outcome shown beside a refused request. Contains no prompt content."""
 
-    previous_user = next(
-        (
-            message
-            for message in reversed(messages[:-1])
-            if message.role == "user"
-        ),
-        None,
-    )
-    if previous_user is None:
-        return latest.content
-    return f"{previous_user.content}\n{latest.content}"
+    model_config = ConfigDict(extra="forbid")
+
+    decision: str
+    policy_name: str | None = None
+    rule: str | None = None
 
 
 class ChatResponse(BaseModel):
@@ -181,6 +219,7 @@ class ChatResponse(BaseModel):
 
     message: str
     tools_used: list[str]
+    policy_notice: PolicyNotice | None = None
 
 
 class _CompletionClient(Protocol):
@@ -303,7 +342,10 @@ class ChatService:
                 discovered = await self._mcp_reliability.call(
                     mcp_client.list_tools,
                 )
-                tool_by_name = {tool.name: tool for tool in discovered.tools}
+                allowed_tools = [
+                    tool for tool in discovered.tools if tool.name in ALLOWED_CHAT_TOOLS
+                ]
+                tool_by_name = {tool.name: tool for tool in allowed_tools}
                 model_tools = [
                     {
                         "type": "function",
@@ -313,7 +355,7 @@ class ChatService:
                             "parameters": tool.input_schema,
                         },
                     }
-                    for tool in discovered.tools
+                    for tool in allowed_tools
                 ]
                 messages: list[dict[str, Any]] = [
                     {"role": "system", "content": SYSTEM_INSTRUCTIONS},
@@ -334,22 +376,47 @@ class ChatService:
                         source="chat",
                     )
 
-                    async def request_completion() -> Any:
-                        return await anyio.to_thread.run_sync(
-                            lambda: model_client.chat.completions.create(
-                                model=self._settings.model_deployment,
-                                messages=messages,
-                                tools=model_tools,
-                                tool_choice="auto",
-                                parallel_tool_calls=False,
-                                max_completion_tokens=self._settings.max_output_tokens,
-                                store=False,
+                    async def request_completion() -> tuple[Any, str | None]:
+                        try:
+                            completion = await anyio.to_thread.run_sync(
+                                lambda: model_client.chat.completions.create(
+                                    model=self._settings.model_deployment,
+                                    messages=messages,
+                                    tools=model_tools,
+                                    tool_choice="auto",
+                                    parallel_tool_calls=False,
+                                    max_completion_tokens=self._settings.max_output_tokens,
+                                    store=False,
+                                )
                             )
-                        )
+                        except APIStatusError as exc:
+                            guardrail_code = _foundry_guardrail_code(exc)
+                            if guardrail_code is None:
+                                raise
+                            return None, guardrail_code
+                        return completion, None
 
-                    completion = await self._foundry_reliability.call(
+                    completion, guardrail_code = await self._foundry_reliability.call(
                         request_completion,
                     )
+                    if guardrail_code is None and any(
+                        getattr(choice, "finish_reason", None) == "content_filter"
+                        for choice in completion.choices
+                    ):
+                        guardrail_code = "content_filter"
+                    if guardrail_code is not None:
+                        decision = self._governance.record_external_denial(
+                            LifecyclePoint.POST_MODEL,
+                            "foundry.chat",
+                            policy_name="azure-ai-foundry",
+                            matched_rule=guardrail_code,
+                            source="chat",
+                        )
+                        raise GovernanceDeniedError(
+                            "Azure AI Foundry guardrail denied the request.",
+                            action="foundry.chat",
+                            decision=decision,
+                        )
                     self._governance.require_allowed(
                         LifecyclePoint.POST_MODEL,
                         "foundry.chat",
@@ -369,6 +436,8 @@ class ChatService:
                         response = self._sanitize_response(
                             assistant_message.content
                         )
+                        if _is_scope_refusal(response):
+                            response = SCOPE_REFUSAL_MESSAGE
                         self._governance.require_allowed(
                             LifecyclePoint.OUTPUT,
                             "chat.output",
@@ -378,9 +447,23 @@ class ChatService:
                             },
                             source="chat",
                         )
+                        policy_notice = None
+                        if _is_scope_refusal(response):
+                            # Recorded, not enforced: the refusal is already the safe outcome.
+                            refusal = self._governance.evaluate(
+                                LifecyclePoint.OUTPUT,
+                                "chat.scope_refusal",
+                                source="chat",
+                            )
+                            policy_notice = PolicyNotice(
+                                decision=refusal.action,
+                                policy_name=refusal.policy_name,
+                                rule=refusal.matched_rule,
+                            )
                         return ChatResponse(
                             message=response,
                             tools_used=list(dict.fromkeys(tools_used)),
+                            policy_notice=policy_notice,
                         )
 
                     messages.append(
@@ -441,7 +524,10 @@ class ChatService:
                                 "error": "The requested tool could not complete the call."
                             }
                         else:
-                            tool_payload = result.structured_content
+                            tool_payload = _restrict_tool_payload(
+                                tool_name,
+                                result.structured_content,
+                            )
                         serialized = json.dumps(tool_payload, separators=(",", ":"))
                         if len(serialized) > 32_000:
                             raise ChatServiceError(
@@ -482,4 +568,4 @@ class ChatService:
     def _sanitize_response(self, response: str) -> str:
         scoped = self._wealth_guardrail.sanitize_scope_claims(response)
         safe, _ = self._advice_guardrail.enforce_advice_boundaries(scoped)
-        return DisclosureAttacher.attach_disclosures(safe)
+        return safe

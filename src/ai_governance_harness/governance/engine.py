@@ -208,6 +208,27 @@ class GovernanceEngine:
             )
         return decision
 
+    def record_external_denial(
+        self,
+        lifecycle_point: LifecyclePoint,
+        action: str,
+        *,
+        policy_name: str,
+        matched_rule: str,
+        source: EventSource = "system",
+    ) -> GovernanceDecision:
+        """Record an enforced provider denial independently of local policy."""
+        decision = GovernanceDecision(
+            allowed=False,
+            action="deny",
+            lifecycle_point=lifecycle_point,
+            policy_name=policy_name,
+            matched_rule=matched_rule,
+            policy_digest=self.policy_digest,
+            enforcement_mode="enforce",
+        )
+        return self._record_decision(decision, action=action, source=source)
+
     @staticmethod
     def _record_decision(
         decision: GovernanceDecision,

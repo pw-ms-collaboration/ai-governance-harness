@@ -123,6 +123,10 @@ rules:
     stage: pre_output
     condition: "action.type == 'chat.output'"
     action: allow
+  - name: deny-out-of-scope-request
+    stage: pre_output
+    condition: "action.type == 'chat.scope_refusal'"
+    action: deny
   - name: allow-agent-shutdown
     stage: pre_output
     condition: "action.type == 'agent.shutdown'"

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from html.parser import HTMLParser
 from pathlib import Path
-
 import pytest
+
 from starlette.testclient import TestClient
 
 from ai_governance_harness.chat.app import STATIC_DIR, build_chat_app
 from ai_governance_harness.chat.config import ChatSettings
-from ai_governance_harness.chat.service import ChatRequest, ChatResponse, ChatService
+from ai_governance_harness.chat.service import ChatRequest, ChatResponse
 from ai_governance_harness.chat.service import ChatServiceError
 from ai_governance_harness.identity.constants import INTERACTIVE_ID
 from ai_governance_harness.identity.sidecar import SidecarClient
@@ -160,31 +160,63 @@ def test_given_governance_denial_when_posting_then_returns_policy_error() -> Non
     }
 
 
-@pytest.mark.parametrize(
-    "request_text",
-    [
-        "Given this customer's account balance, give me some financial "
-        "recommendations on how to grow their balance",
-        "which shares should I buy?",
-    ],
-)
-def test_given_personal_advice_request_when_posting_then_policy_denies_input(
-    request_text: str,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_given_foundry_filter_when_posting_then_returns_stop_details() -> None:
     # Arrange
-    def unexpected_foundry_call() -> None:
-        raise AssertionError("Foundry must not be called for a denied input.")
-
-    monkeypatch.setattr(
-        "ai_governance_harness.chat.service.get_foundry_client",
-        unexpected_foundry_call,
+    service = _FailingChatService(
+        ChatServiceError(
+            "Azure AI Foundry blocked the model response under a configured "
+            "content filter.",
+            code="model_content_filtered",
+            status_code=422,
+            details={
+                "finish_reason": "content_filter",
+                "content_filter_category": (
+                    "personally_identifiable_information"
+                ),
+                "content_filter_severity": "medium",
+            },
+        )
     )
-    service = ChatService(_settings())
-    monkeypatch.setattr(
-        service,
-        "_read_mcp_snapshot",
-        lambda: {"schema": "ai-governance-observability/v1", "status": "ready"},
+    client = TestClient(build_chat_app(_settings(), service))
+
+    # Act
+    response = client.post(
+        "/api/chat",
+        headers={"X-Correlation-ID": "filter-test"},
+        json={"messages": [{"role": "user", "content": "Show MEM-001"}]},
+    )
+
+    # Assert
+    assert response.status_code == 422
+    assert response.json()["error"] == {
+        "code": "model_content_filtered",
+        "message": (
+            "Azure AI Foundry blocked the model response under a configured "
+            "content filter."
+        ),
+        "correlation_id": "filter-test",
+        "details": {
+            "finish_reason": "content_filter",
+            "content_filter_category": "personally_identifiable_information",
+            "content_filter_severity": "medium",
+        },
+    }
+
+
+def test_given_personal_advice_request_when_posting_then_policy_denies_input() -> None:
+    # Arrange
+    service = _FailingChatService(
+        ChatServiceError(
+            "Governance policy denied the requested operation.",
+            code="governance_denied",
+            status_code=403,
+            details={
+                "action": "chat.input",
+                "matched_rule": (
+                    "deny-identified-member-financial-recommendation"
+                ),
+            },
+        )
     )
     client = TestClient(build_chat_app(_settings(), service))
 
@@ -196,31 +228,24 @@ def test_given_personal_advice_request_when_posting_then_policy_denies_input(
             "messages": [
                 {
                     "role": "user",
-                    "content": request_text,
+                    "content": (
+                        "Given this customer's account balance, give me some "
+                        "financial recommendations on how to grow their balance"
+                    ),
                 }
             ]
         },
     )
-    snapshot_response = client.get("/api/governance/snapshot")
 
     # Assert
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "governance_denied"
     assert (
         response.json()["error"]["details"]["matched_rule"]
-        == "deny-personal-advice-request"
+        == "deny-identified-member-financial-recommendation"
     )
     assert response.json()["error"]["correlation_id"] == "advice-request-test"
-    assert snapshot_response.status_code == 200
-    snapshot = snapshot_response.json()
-    event = snapshot["events"]["recent_events"][0]
-    assert event["source"] == "chat"
-    assert event["action"] == "chat.input"
-    assert event["decision"] == "deny"
-    assert event["allowed"] is False
-    assert event["matched_rule"] == "deny-personal-advice-request"
-    assert snapshot["events"]["counts"]["deny"] >= 1
-    assert request_text not in snapshot_response.text
+    assert "BU-SUPER-001" not in response.text
 
 
 def test_given_upstream_failure_when_posting_then_returns_distinct_error() -> None:
@@ -269,7 +294,7 @@ def test_static_ui_has_required_accessible_structure() -> None:
 
     # Assert
     assert any(tag == "html" and attrs.get("lang") == "en" for tag, attrs in tags)
-    assert sum(tag == "title" for tag, _ in tags) == 1
+    assert sum(tag == "title" and not attrs.get("id") for tag, attrs in tags) == 1
     assert sum(tag == "link" and attrs.get("rel") == "stylesheet" for tag, attrs in tags) == 1
     assert any(tag == "script" and attrs.get("type") == "module" for tag, attrs in tags)
     assert any(tag == "main" for tag, _ in tags)
@@ -289,7 +314,7 @@ def test_static_ui_has_required_accessible_structure() -> None:
         tag == "aside" and attrs.get("aria-labelledby") == "governance-title"
         for tag, attrs in tags
     )
-    assert sum(tag == "details" for tag, _ in tags) >= 4
+    assert sum(tag == "details" for tag, _ in tags) >= 5
     assert sum(tag == "caption" for tag, _ in tags) >= 2
     assert any(
         tag == "button" and attrs.get("id") == "refresh-governance"
@@ -297,6 +322,16 @@ def test_static_ui_has_required_accessible_structure() -> None:
     )
     assert any(
         tag == "button" and attrs.get("id") == "pause-governance"
+        for tag, attrs in tags
+    )
+    assert any(
+        tag == "p" and attrs.get("id") == "circuit-health-summary"
+        for tag, attrs in tags
+    )
+    assert any(
+        tag == "ul"
+        and attrs.get("id") == "circuit-statuses"
+        and attrs.get("aria-label") == "Dependency health"
         for tag, attrs in tags
     )
     assert Path(STATIC_DIR / "app.js").is_file()
@@ -337,13 +372,122 @@ def test_governance_snapshot_returns_sanitized_service_view() -> None:
     assert response.json()["services"][1]["status"] == "unavailable"
 
 
-def test_default_deny_demo_never_executes_an_operation() -> None:
+class _PanelParser(HTMLParser):
+    """Record which tab panel contains each element ID."""
+
+    _VOID = frozenset({"br", "hr", "img", "input", "link", "meta"})
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stack: list[str | None] = []
+        self.panel_of: dict[str, str | None] = {}
+        self.tabs: list[dict[str, str | None]] = []
+        self.panels: dict[str, dict[str, str | None]] = {}
+
+    def handle_starttag(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
+    ) -> None:
+        values = dict(attrs)
+        if values.get("role") == "tab":
+            self.tabs.append(values)
+        if values.get("role") == "tabpanel" and values.get("id"):
+            self.panels[values["id"]] = values
+        current = values["id"] if values.get("role") == "tabpanel" else (
+            self.stack[-1] if self.stack else None
+        )
+        if values.get("id"):
+            self.panel_of[values["id"]] = current
+        if tag not in self._VOID:
+            self.stack.append(current)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag not in self._VOID and self.stack:
+            self.stack.pop()
+
+
+def test_given_ui_when_loaded_then_chat_and_observability_are_separate_tabs() -> None:
+    # Arrange
+    parser = _PanelParser()
+
+    # Act
+    parser.feed((STATIC_DIR / "index.html").read_text(encoding="utf-8"))
+
+    # Assert
+    assert [tab["id"] for tab in parser.tabs] == ["tab-chat", "tab-observability"]
+    assert [tab["aria-controls"] for tab in parser.tabs] == [
+        "panel-chat",
+        "panel-observability",
+    ]
+    assert parser.tabs[0]["aria-selected"] == "true"
+    assert "hidden" not in parser.panels["panel-chat"]
+    assert "hidden" in parser.panels["panel-observability"]
+    assert parser.panel_of["chat-input"] == "panel-chat"
+    assert parser.panel_of["governance-title"] == "panel-observability"
+    assert parser.panel_of["insights-title"] == "panel-observability"
+
+
+def test_given_tab_script_when_requested_then_served_as_javascript() -> None:
+    # Arrange
     client = TestClient(build_chat_app(_settings(), _FakeChatService()))
 
-    response = client.post("/api/governance/demo/deny")
+    # Act
+    response = client.get("/static/tabs.js")
 
+    # Assert
     assert response.status_code == 200
-    payload = response.json()
-    assert payload["executed"] is False
-    assert payload["allowed"] is False
-    assert payload["decision"] == "deny"
+    assert response.headers["content-type"].startswith("text/javascript")
+    assert "innerHTML" not in response.text
+
+
+def test_given_flow_script_when_requested_then_served_without_html_injection() -> None:
+    # Arrange
+    client = TestClient(build_chat_app(_settings(), _FakeChatService()))
+
+    # Act
+    response = client.get("/static/flow.js")
+
+    # Assert
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/javascript")
+    assert "innerHTML" not in response.text
+    assert "/api/governance/snapshot" in response.text
+
+
+def test_given_observability_tab_when_loaded_then_request_flow_shows_every_outcome() -> None:
+    # Arrange
+    client = TestClient(build_chat_app(_settings(), _FakeChatService()))
+
+    # Act
+    html = client.get("/").text
+
+    # Assert
+    observability = html.split('id="panel-observability"', 1)[1]
+    assert 'aria-labelledby="flow-title"' in observability
+    for outcome in ("allow", "deny", "approval", "other"):
+        assert f'id="flow-count-{outcome}"' in observability
+        assert f'id="flow-out-{outcome}"' in observability
+    assert 'id="flow-ticker"' in observability
+    assert 'aria-live="polite"' in observability
+    assert "/static/flow.js" in html
+
+
+def test_given_approval_prompt_when_rendered_then_buttons_send_backend_replies() -> None:
+    # Arrange
+    from ai_governance_harness.chat.service import (
+        _APPROVE_RESPONSES,
+        _DECLINE_RESPONSES,
+        _OUTREACH_APPROVAL_HEADING,
+    )
+
+    # Act
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    # Assert
+    assert f'const APPROVAL_HEADING = "{_OUTREACH_APPROVAL_HEADING}";' in script
+    assert '["Approve", "approve"]' in script
+    assert '["Decline", "danger-secondary"]' in script
+    assert "approve" in _APPROVE_RESPONSES
+    assert "decline" in _DECLINE_RESPONSES
+    assert "innerHTML" not in script

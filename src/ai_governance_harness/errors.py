@@ -12,6 +12,10 @@ ChatErrorCode = Literal[
     "upstream_failure",
     "authentication_required",
     "identity_unavailable",
+    "client_capability_required",
+    "classification_unavailable",
+    "model_content_filtered",
+    "model_output_limit",
 ]
 
 

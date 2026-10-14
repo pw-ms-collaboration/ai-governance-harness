@@ -18,6 +18,7 @@ def test_given_environment_when_loading_then_parses_service_settings(
     monkeypatch.setenv("AZURE_AI_MODEL_DEPLOYMENT_NAME", "model-name")
     monkeypatch.setenv("MCP_SERVER_URL", "http://127.0.0.1:9000/mcp")
     monkeypatch.setenv("CHAT_PORT", "8081")
+    monkeypatch.setenv("CHAT_CLASSIFIER_MAX_OUTPUT_TOKENS", "320")
 
     # Act
     settings = ChatSettings.from_environment()
@@ -26,6 +27,7 @@ def test_given_environment_when_loading_then_parses_service_settings(
     assert settings.model_deployment == "model-name"
     assert settings.mcp_url == "http://127.0.0.1:9000/mcp"
     assert settings.port == 8081
+    assert settings.classifier_max_output_tokens == 320
 
 
 @pytest.mark.parametrize(

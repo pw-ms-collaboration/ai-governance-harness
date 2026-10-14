@@ -77,18 +77,27 @@ def test_given_all_identity_combinations_when_evaluating_then_exact_matrix() -> 
             token_type=token_type,
             staff_role=role,
         )
-        result = engine.evaluate(LifecyclePoint.PRE_TOOL, tool, context=context)
+        result = engine.evaluate(
+            LifecyclePoint.PRE_TOOL, tool, context=context,
+            policy_data={"retention_handling_status": "routine_permitted"},
+        )
         assert result.allowed == expected, (context, tool, result)
+        if tool == "prepare_member_outreach_case":
+            for status in (None, "unknown", "specialist_required", "duplicate_open"):
+                assert not engine.evaluate(
+                    LifecyclePoint.PRE_TOOL, tool, context=context,
+                    policy_data={"retention_handling_status": status},
+                ).allowed
 
 
 def test_given_bad_policy_snapshots_when_evaluating_each_allow_rule_then_deny() -> None:
     engine = GovernanceEngine(GovernanceSettings(environment="test"))
     rules = yaml.safe_load(DEFAULT_POLICY_PATH.read_text(encoding="utf-8"))["rules"]
     for rule in rules:
-        if rule["stage"] != "pre_tool":
+        if rule["stage"] != "pre_tool" or rule["action"] != "allow":
             continue
         values = dict(re.findall(r"governance\.(\w+) == '([^']+)'", rule["condition"]))
-        tool = re.search(r"action.type in \['([^']+)'", rule["condition"])[1]
+        tool = re.search(r"action.type (?:in \[|== )'([^']+)'", rule["condition"])[1]
         for field in values:
             for bad in (
                 [],
@@ -109,12 +118,14 @@ def test_given_bad_policy_snapshots_when_evaluating_each_allow_rule_then_deny() 
                     LifecyclePoint.PRE_TOOL,
                     tool,
                     context=BadSnapshot(),
+                    policy_data={"retention_handling_status": "routine_permitted"},
                 ).allowed, (rule["name"], field, bad)
             snapshot = {key: value for key, value in values.items() if key != field}
             assert not engine.evaluate(
                 LifecyclePoint.PRE_TOOL,
                 tool,
                 context=BadSnapshot(),
+                policy_data={"retention_handling_status": "routine_permitted"},
             ).allowed
 
 

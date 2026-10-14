@@ -13,6 +13,7 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route
 
 from ai_governance_harness.chat.config import ChatSettings
+from ai_governance_harness.chat.insights import InsightsHistory, InsightsUnavailableError
 from ai_governance_harness.chat.service import (
     ChatRequest,
     ChatService,
@@ -20,7 +21,6 @@ from ai_governance_harness.chat.service import (
 )
 from ai_governance_harness.governance import (
     GovernanceContext,
-    LifecyclePoint,
     get_governance_engine,
     get_governance_context,
     governance_context,
@@ -79,6 +79,37 @@ def build_chat_app(
         settings.sidecar_url,
         timeout=get_governance_engine().settings.operation_timeout_seconds,
     )
+    insights = InsightsHistory(settings.application_insights_app_id)
+    pricing = {
+        "currency": settings.token_price_currency,
+        "input_per_million": settings.token_price_input_per_million,
+        "cached_input_per_million": settings.token_price_cached_input_per_million,
+        "output_per_million": settings.token_price_output_per_million,
+        "model": settings.model_deployment,
+    }
+
+    async def insights_history(request: Request) -> JSONResponse:
+        if settings.host not in {"127.0.0.1", "localhost", "::1"}:
+            return JSONResponse(
+                {"error": "Azure history is available only with a loopback chat binding."},
+                status_code=403,
+            )
+        host = request.url.hostname
+        if host not in {"127.0.0.1", "localhost", "::1", "testserver"}:
+            return JSONResponse({"error": "History host is not allowed."}, status_code=403)
+        try:
+            hours = int(request.query_params.get("hours", "1"))
+            if hours not in (1, 4, 24):
+                raise ValueError
+        except ValueError:
+            return JSONResponse({"error": "Select a 1, 4, or 24 hour range."}, status_code=400)
+        try:
+            snapshot = await insights.snapshot(hours)
+        except InsightsUnavailableError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=503)
+        return JSONResponse(
+            {**snapshot, "pricing": pricing}, headers={"Cache-Control": "no-store"}
+        )
 
     async def index(_: Request) -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html", media_type="text/html")
@@ -91,6 +122,15 @@ def build_chat_app(
             STATIC_DIR / "app.js",
             media_type="text/javascript",
         )
+
+    async def insights_javascript(_: Request) -> FileResponse:
+        return FileResponse(STATIC_DIR / "insights.js", media_type="text/javascript")
+
+    async def tabs_javascript(_: Request) -> FileResponse:
+        return FileResponse(STATIC_DIR / "tabs.js", media_type="text/javascript")
+
+    async def flow_javascript(_: Request) -> FileResponse:
+        return FileResponse(STATIC_DIR / "flow.js", media_type="text/javascript")
 
     async def liveness(_: Request) -> JSONResponse:
         return JSONResponse({"status": "live"})
@@ -126,27 +166,6 @@ def build_chat_app(
 
     async def governance_snapshot(_: Request) -> JSONResponse:
         return JSONResponse(await chat_service.governance_snapshot())
-
-    async def demonstrate_default_deny(_: Request) -> JSONResponse:
-        decision = get_governance_engine().evaluate(
-            LifecyclePoint.PRE_TOOL,
-            "demo.prohibited_action",
-            policy_data={"inert_demonstration": True},
-            source="demo",
-        )
-        return JSONResponse(
-            {
-                "executed": False,
-                "decision": decision.action,
-                "allowed": decision.allowed,
-                "lifecycle_point": decision.lifecycle_point.value,
-                "matched_rule": decision.matched_rule,
-                "message": (
-                    "A fixed prohibited action was evaluated. "
-                    "No operation was executed."
-                ),
-            }
-        )
 
     def service_error(error: ChatServiceError) -> JSONResponse:
         public_error: dict[str, object] = {
@@ -211,17 +230,16 @@ def build_chat_app(
             Route("/", index, methods=["GET"]),
             Route("/static/app.css", stylesheet, methods=["GET"]),
             Route("/static/app.js", javascript, methods=["GET"]),
+            Route("/static/insights.js", insights_javascript, methods=["GET"]),
+            Route("/static/tabs.js", tabs_javascript, methods=["GET"]),
+            Route("/static/flow.js", flow_javascript, methods=["GET"]),
             Route("/api/chat", chat, methods=["POST"]),
             Route("/api/mock-identity/signin", signin, methods=["POST"]),
+            Route("/api/observability/history", insights_history, methods=["GET"]),
             Route(
                 "/api/governance/snapshot",
                 governance_snapshot,
                 methods=["GET"],
-            ),
-            Route(
-                "/api/governance/demo/deny",
-                demonstrate_default_deny,
-                methods=["POST"],
             ),
             Route("/health/live", liveness, methods=["GET"]),
             Route("/health/ready", readiness, methods=["GET"]),

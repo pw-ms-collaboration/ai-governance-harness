@@ -64,6 +64,10 @@ _ALLOWED_EVENT_ATTRIBUTES = {
     "outcome",
     "policy_digest",
     "policy_name",
+    "policy_layer",
+    "policy_id",
+    "policy_version",
+    "policy_source",
     "tool_name",
 }
 

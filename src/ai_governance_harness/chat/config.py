@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from typing import Self
 from urllib.parse import urlparse
+from uuid import UUID
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -25,6 +26,7 @@ class ChatSettings(BaseModel):
     model_deployment: str
     sidecar_url: str
     interactive_agent_id: str
+    application_insights_app_id: UUID | None = None
     allowed_origins: tuple[str, ...] = (
         "http://127.0.0.1:8080",
         "http://localhost:8080",
@@ -33,7 +35,13 @@ class ChatSettings(BaseModel):
     max_message_length: int = Field(default=4_000, ge=100, le=20_000)
     max_tool_rounds: int = Field(default=4, ge=1, le=8)
     max_output_tokens: int = Field(default=1_200, ge=100, le=4_000)
+    classifier_max_output_tokens: int = Field(default=400, ge=100, le=800)
     max_request_body_size: int = Field(default=65_536, ge=1_024, le=1_048_576)
+    # Foundry reports token usage, not cost; these list prices drive estimates only.
+    token_price_currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
+    token_price_input_per_million: float = Field(default=1.25, ge=0, le=1_000)
+    token_price_cached_input_per_million: float = Field(default=0.125, ge=0, le=1_000)
+    token_price_output_per_million: float = Field(default=10.0, ge=0, le=1_000)
 
     @field_validator("host", "model_deployment", "interactive_agent_id")
     @classmethod
@@ -81,6 +89,7 @@ class ChatSettings(BaseModel):
             if origins_value
             else cls.model_fields["allowed_origins"].default
         )
+        app_id = os.getenv("APPLICATIONINSIGHTS_APP_ID", "").strip()
         return cls(
             host=os.getenv("CHAT_HOST", "127.0.0.1"),
             port=int(os.getenv("CHAT_PORT", "8080")),
@@ -88,12 +97,26 @@ class ChatSettings(BaseModel):
             model_deployment=os.getenv("AZURE_AI_MODEL_DEPLOYMENT_NAME", ""),
             sidecar_url=os.getenv("AGENT_ID_SIDECAR_URL", ""),
             interactive_agent_id=os.getenv("AGENT_ID_INTERACTIVE_ID", ""),
+            application_insights_app_id=UUID(app_id) if app_id else None,
             allowed_origins=origins,
             max_messages=int(os.getenv("CHAT_MAX_MESSAGES", "20")),
             max_message_length=int(os.getenv("CHAT_MAX_MESSAGE_LENGTH", "4000")),
             max_tool_rounds=int(os.getenv("CHAT_MAX_TOOL_ROUNDS", "4")),
             max_output_tokens=int(os.getenv("CHAT_MAX_OUTPUT_TOKENS", "1200")),
+            classifier_max_output_tokens=int(
+                os.getenv("CHAT_CLASSIFIER_MAX_OUTPUT_TOKENS", "400")
+            ),
             max_request_body_size=int(
                 os.getenv("CHAT_MAX_REQUEST_BODY_SIZE", "65536")
+            ),
+            token_price_currency=os.getenv("GENAI_PRICE_CURRENCY", "USD"),
+            token_price_input_per_million=float(
+                os.getenv("GENAI_PRICE_INPUT_PER_1M", "1.25")
+            ),
+            token_price_cached_input_per_million=float(
+                os.getenv("GENAI_PRICE_CACHED_INPUT_PER_1M", "0.125")
+            ),
+            token_price_output_per_million=float(
+                os.getenv("GENAI_PRICE_OUTPUT_PER_1M", "10.0")
             ),
         )

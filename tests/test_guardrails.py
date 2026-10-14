@@ -9,7 +9,6 @@ from ai_governance_harness.guardrails import (
     PersonalAdviceViolationError,
 )
 from ai_governance_harness.guardrails.advice_filter import (
-    advice_request_policy_data,
     tool_response_policy_data,
 )
 
@@ -71,48 +70,6 @@ def test_advice_classification_allows_factual_information():
     for sample in factual_samples:
         violations = guard.scan_for_personal_advice(sample)
         assert len(violations) == 0, f"False positive advice violation in: {sample}"
-
-
-@pytest.mark.parametrize(
-    ("request_text", "expected_status"),
-    [
-        (
-            "Given this customer's account balance, give me some financial "
-            "recommendations on how to grow their balance",
-            "personal_advice_requested",
-        ),
-        (
-            "What investment option should member MEM-001 choose?",
-            "personal_advice_requested",
-        ),
-        ("which shares should I buy?", "personal_advice_requested"),
-        ("WHICH SHARES SHOULD I BUY?", "personal_advice_requested"),
-        ("Which stocks should I buy?", "personal_advice_requested"),
-        ("Which ETF should I purchase?", "personal_advice_requested"),
-        ("What investment option should I choose?", "personal_advice_requested"),
-        ("Which funds should we invest in?", "personal_advice_requested"),
-        ("Which\nshares\tshould I buy?", "personal_advice_requested"),
-        (
-            "What general factors can affect superannuation investment growth?",
-            "passed",
-        ),
-        ("Which shares do I currently hold?", "passed"),
-        ("What are the risks of buying shares?", "passed"),
-        ("What investment options are available in the fund?", "passed"),
-        ("Which shares can I buy through the fund?", "passed"),
-        ("What factors should I consider before buying shares?", "passed"),
-        ("Show me the profile for MEM-001.", "passed"),
-    ],
-)
-def test_given_advice_request_when_classifying_then_returns_only_metadata(
-    request_text: str,
-    expected_status: str,
-) -> None:
-    # Act
-    result = advice_request_policy_data(request_text)
-
-    # Assert
-    assert result == {"advice_request_status": expected_status}
 
 
 def test_advice_classification_enforces_fallback_or_exception():

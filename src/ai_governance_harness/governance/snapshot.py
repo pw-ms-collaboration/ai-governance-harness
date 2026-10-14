@@ -41,6 +41,11 @@ def _policy_summary(engine: GovernanceEngine) -> dict[str, Any]:
                     "stage": str(rule.get("stage", ""))[:32],
                     "action": str(rule.get("action", ""))[:32],
                     "condition": str(rule.get("condition", ""))[:1024],
+                    "provenance": (
+                        provenance.model_dump()
+                        if (provenance := engine.rule_provenance(rule.get("name")))
+                        else None
+                    ),
                 }
             )
     return {

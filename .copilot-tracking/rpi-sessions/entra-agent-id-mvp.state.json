@@ -31,17 +31,18 @@
     }
   ],
   "blockers": [],
-  "next_action": {"phase": "Review", "action": "Main integration complete, 298 tests passed; dev stack stopped and environment repaired. Await explicit /rpi-review."},
+  "next_action": {"phase": "Review", "action": "October 15 main integration validated: 428 tests passed; role matrix, OBO approval and observability verified. Await explicit /rpi-review."},
   "prioritized_follow_ups": [],
   "main_integration": {
-    "base": "f6e494b",
-    "committed_tip": "aac4888",
+    "base": "ef8cef1",
+    "feature_parent": "60a6cf0",
+    "operation": "merge",
     "decision": "Preserve approved MVP tool matrix and retain compatible upstream privacy and guardrail improvements.",
-    "validation": "298 tests; lint, policy, evidence, build, SBOM and audit passed",
-    "local_work": "Restored and reconciled, uncommitted and unstaged",
-    "recovery_branch": "backup/entra-agent-id-before-main-20261014-1546",
-    "recovery_stash": "93e088b493502c0e961d37196ed5b5575e3a17a6",
-    "services": "Stopped with user approval; environment repaired",
+    "validation": "428 tests; lint, policy, evidence, build and audit passed; browser identity matrix, approval and observability passed with deterministic inference",
+    "local_work": "Pre-existing untracked PR drafts preserved separately",
+    "recovery_branch": "backup/entra-agent-id-before-main-20261015",
+    "recovery_stash": "7530bf3fe0c5a3cfbade8aef81d551bf7a9e170f",
+    "services": "User-owned dev stack left running; isolated verification stack cleaned up",
     "pushed": false
   }
 }

@@ -52,6 +52,35 @@ async def test_given_server_when_listing_tools_then_exposes_exact_read_only_surf
         "prepare_member_outreach_case",
     }
     assert all(tool.annotations and tool.annotations.read_only_hint for tool in result.tools)
+    tools = {tool.name: tool for tool in result.tools}
+    expected_browser_exposure = {
+        "get_member_profile": True,
+        "get_member_disengagement_signals": True,
+        "get_cohort_churn_analytics": True,
+        "get_fum_outflow_summary": True,
+        "prepare_member_outreach_case": True,
+    }
+    for name, enabled in expected_browser_exposure.items():
+        harness_meta = tools[name].meta["ai_governance_harness"]
+        assert harness_meta["browser_chat"]["enabled"] is enabled
+        assert harness_meta["intent"]
+        assert isinstance(harness_meta["requires_approval"], bool)
+
+    assert (
+        tools["prepare_member_outreach_case"]
+        .meta["ai_governance_harness"]["requires_approval"]
+        is True
+    )
+
+    assert "Do not use this tool to prepare" in tools[
+        "get_member_profile"
+    ].description
+    assert "prepare, open, create, or start" in tools[
+        "prepare_member_outreach_case"
+    ].description
+    assert "Do not substitute a profile response" in tools[
+        "prepare_member_outreach_case"
+    ].description
 
 
 @pytest.mark.anyio
@@ -314,3 +343,77 @@ async def test_given_client_without_elicitation_when_preparing_case_then_fails_c
         "did not declare the form elicitation capability" in message
         for message in _exception_messages(exc_info.value)
     )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("member_id", "expected_message"),
+    [
+        ("MEM-003", "Refer to the complaints team"),
+        ("MEM-004", "Continue existing case CASE-004"),
+        ("MEM-005", "Refer to the hardship team"),
+        ("MEM-006", "account is closed or the exit is completed"),
+    ],
+)
+async def test_given_blocking_case_when_preparing_then_denies_before_approval(
+    monkeypatch: pytest.MonkeyPatch, member_id: str, expected_message: str,
+) -> None:
+    # Arrange
+    async def unexpected_approval(_context, _params):
+        pytest.fail("Blocked outreach must not ask for approval.")
+
+    def unexpected_signals(*args: object):
+        pytest.fail("Blocked outreach must not fetch preparation signals.")
+
+    monkeypatch.setattr(
+        gateway_tools, "get_member_disengagement_signals", unexpected_signals,
+    )
+
+    # Act
+    async with Client(mcp, elicitation_callback=unexpected_approval) as client:
+        result = await client.call_tool(
+            "prepare_member_outreach_case", {"member_id": member_id},
+        )
+
+    # Assert
+    assert result.is_error is True
+    assert expected_message in result.content[0].text
+    assert not result.structured_content
+
+
+@pytest.mark.anyio
+async def test_given_clearance_changes_during_approval_when_preparing_then_rechecks() -> None:
+    # Arrange
+    gateway = gateway_tools.get_default_gateway()
+
+    async def approve(_context, _params):
+        gateway._retention_records.pop("MEM-002")
+        return types.ElicitResult(action="accept", content={"approved": True})
+
+    # Act
+    async with Client(mcp, elicitation_callback=approve) as client:
+        result = await client.call_tool(
+            "prepare_member_outreach_case", {"member_id": "MEM-002"},
+        )
+
+    # Assert
+    assert result.is_error is True
+    assert "eligibility is not confirmed" in result.content[0].text
+
+
+@pytest.mark.anyio
+async def test_given_cleared_specialist_case_when_approved_then_prepares_read_only_case() -> None:
+    # Arrange
+    async def approve(_context, _params):
+        return types.ElicitResult(action="accept", content={"approved": True})
+
+    # Act
+    async with Client(mcp, elicitation_callback=approve) as client:
+        result = await client.call_tool(
+            "prepare_member_outreach_case", {"member_id": "MEM-007"},
+        )
+
+    # Assert
+    assert result.is_error is False
+    assert result.structured_content["case_persisted"] is False
+    assert result.structured_content["external_action_executed"] is False

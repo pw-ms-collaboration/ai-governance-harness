@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Role-governed member and aggregate insights using synthetic data and local mock identity">
     <title>Business Analyst Insights Chat</title>
-    <link rel="stylesheet" href="/static/app.css?v=identity-policy">
+    <link rel="stylesheet" href="/static/app.css?v=identity-insights">
   </head>
   <body>
     <a class="skip-link" href="#chat-input">Skip to message input</a>
@@ -22,7 +22,19 @@
       </div>
     </header>
 
+    <nav class="view-tabs" aria-label="Application views">
+      <div role="tablist" aria-label="Application views">
+        <button type="button" role="tab" id="tab-chat" aria-controls="panel-chat" aria-selected="true">
+          Chat
+        </button>
+        <button type="button" role="tab" id="tab-observability" aria-controls="panel-observability" aria-selected="false" tabindex="-1">
+          Observability
+        </button>
+      </div>
+    </nav>
+
     <main class="app-shell">
+      <div id="panel-chat" class="view-panel" role="tabpanel" aria-labelledby="tab-chat">
       <section class="intro" aria-labelledby="intro-title">
         <div class="mock-identity">
           <label for="mock-persona">Mock identity</label>
@@ -91,7 +103,99 @@
             <button id="send-button" type="submit" disabled>Send message</button>
           </form>
         </section>
+      </div>
+      </div>
 
+      <div id="panel-observability" class="view-panel observability-view" role="tabpanel" aria-labelledby="tab-observability" hidden>
+        <section class="flow-panel" aria-labelledby="flow-title">
+          <div class="flow-heading">
+            <div>
+              <p class="flow-eyebrow">Live decision stream</p>
+              <h2 id="flow-title">Request flow</h2>
+            </div>
+            <div class="flow-controls" role="group" aria-label="Request flow controls">
+              <span id="flow-status" class="flow-status">Connecting</span>
+              <button type="button" id="flow-pause" aria-pressed="false">Pause</button>
+              <button type="button" id="flow-replay">Replay recent</button>
+            </div>
+          </div>
+          <p class="flow-intro">
+            Each live policy decision moves from its source, through the policy gate, to its outcome.
+            Policy allowed is not human approval. Only decision metadata is shown.
+          </p>
+          <div class="flow-stage">
+            <svg id="flow-svg" viewBox="0 0 1000 340" role="img" aria-labelledby="flow-svg-title">
+              <title id="flow-svg-title">Request flow from chat, gateway and MCP sources through the policy gate to outcomes</title>
+              <defs>
+                <radialGradient id="flow-gate-glow">
+                  <stop offset="0%" stop-color="#58a6ff" stop-opacity="0.45" />
+                  <stop offset="100%" stop-color="#58a6ff" stop-opacity="0" />
+                </radialGradient>
+              </defs>
+              <g class="flow-paths" aria-hidden="true">
+                <path id="flow-in-chat" d="M195 70 C 320 70, 330 170, 440 170" />
+                <path id="flow-in-gateway" d="M195 170 L 440 170" />
+                <path id="flow-in-mcp" d="M195 270 C 320 270, 330 170, 440 170" />
+                <path id="flow-out-allow" d="M560 170 C 670 170, 670 55, 780 55" />
+                <path id="flow-out-deny" d="M560 170 C 670 170, 670 135, 780 135" />
+                <path id="flow-out-approval" d="M560 170 C 670 170, 670 215, 780 215" />
+                <path id="flow-out-other" d="M560 170 C 670 170, 670 295, 780 295" />
+              </g>
+              <g class="flow-node flow-source" aria-hidden="true">
+                <rect x="25" y="42" width="170" height="56" rx="10" />
+                <text x="110" y="67">Chat</text>
+                <text class="flow-node-sub" x="110" y="86">user requests</text>
+              </g>
+              <g class="flow-node flow-source" aria-hidden="true">
+                <rect x="25" y="142" width="170" height="56" rx="10" />
+                <text x="110" y="167">Gateway</text>
+                <text class="flow-node-sub" x="110" y="186">tool gateway</text>
+              </g>
+              <g class="flow-node flow-source" aria-hidden="true">
+                <rect x="25" y="242" width="170" height="56" rx="10" />
+                <text x="110" y="267">MCP</text>
+                <text class="flow-node-sub" x="110" y="286">tool calls</text>
+              </g>
+              <g id="flow-gate" class="flow-gate" aria-hidden="true">
+                <circle cx="500" cy="170" r="92" fill="url(#flow-gate-glow)" />
+                <path d="M500 112 L552 132 L552 178 C552 206 530 226 500 238 C470 226 448 206 448 178 L448 132 Z" />
+                <text x="500" y="168">Policy</text>
+                <text x="500" y="188">gate</text>
+                <text id="flow-gate-stage" class="flow-gate-stage" x="500" y="268"></text>
+              </g>
+              <g id="flow-node-allow" class="flow-node flow-outcome flow-allow" aria-hidden="true">
+                <rect x="780" y="27" width="200" height="56" rx="10" />
+                <text class="flow-outcome-label" x="795" y="51">Policy allowed</text>
+                <text id="flow-count-allow" class="flow-count" x="965" y="64">0</text>
+              </g>
+              <g id="flow-node-deny" class="flow-node flow-outcome flow-deny" aria-hidden="true">
+                <rect x="780" y="107" width="200" height="56" rx="10" />
+                <text class="flow-outcome-label" x="795" y="131">Policy denied</text>
+                <text id="flow-count-deny" class="flow-count" x="965" y="144">0</text>
+              </g>
+              <g id="flow-node-approval" class="flow-node flow-outcome flow-approval" aria-hidden="true">
+                <rect x="780" y="187" width="200" height="56" rx="10" />
+                <text class="flow-outcome-label" x="795" y="211">Approval required</text>
+                <text id="flow-count-approval" class="flow-count" x="965" y="224">0</text>
+              </g>
+              <g id="flow-node-other" class="flow-node flow-outcome flow-other" aria-hidden="true">
+                <rect x="780" y="267" width="200" height="56" rx="10" />
+                <text class="flow-outcome-label" x="795" y="291">Warn / log / other</text>
+                <text id="flow-count-other" class="flow-count" x="965" y="304">0</text>
+              </g>
+              <g id="flow-particles" aria-hidden="true"></g>
+            </svg>
+          </div>
+          <ul class="flow-legend" aria-label="Outcome legend">
+            <li><span class="flow-key flow-allow" aria-hidden="true">●</span> Policy allowed (circle)</li>
+            <li><span class="flow-key flow-deny" aria-hidden="true">■</span> Policy denied (square)</li>
+            <li><span class="flow-key flow-approval" aria-hidden="true">◆</span> Approval required (diamond)</li>
+            <li><span class="flow-key flow-other" aria-hidden="true">▲</span> Warn, log, transform or escalate (triangle)</li>
+          </ul>
+          <p id="flow-announcer" class="visually-hidden" role="status" aria-live="polite"></p>
+          <h3 class="flow-ticker-title" id="flow-ticker-title">Latest decisions</h3>
+          <ol id="flow-ticker" class="flow-ticker" aria-labelledby="flow-ticker-title"></ol>
+        </section>
         <aside class="governance-panel" aria-labelledby="governance-title">
           <div class="panel-heading">
             <div>
@@ -114,9 +218,6 @@
             <button id="refresh-governance" type="button">Refresh</button>
             <button id="pause-governance" type="button" class="secondary" aria-pressed="false">
               Pause updates
-            </button>
-            <button id="demo-deny" type="button" class="danger-secondary">
-              Demonstrate default deny
             </button>
           </div>
           <p id="governance-update-status" class="activity" role="status" aria-live="polite"></p>
@@ -141,7 +242,9 @@
           </dl>
 
           <section class="runtime-summary" aria-labelledby="runtime-title">
-            <h3 id="runtime-title">Runtime posture</h3>
+            <h3 id="runtime-title">System health</h3>
+            <p class="section-intro">Current availability of the services used by governed chat.</p>
+            <p id="circuit-health-summary" class="health-summary">Checking service health...</p>
             <ul id="service-statuses" class="status-list"></ul>
             <dl class="compact-definition">
               <div>
@@ -157,7 +260,26 @@
                 <dd><code id="policy-digest">Unknown</code></dd>
               </div>
             </dl>
-            <div id="circuit-statuses" class="circuit-grid"></div>
+            <h4 class="health-subheading">Failure protection</h4>
+            <p class="section-intro">These safeguards show whether calls are allowed. They do not independently prove that a remote service is reachable.</p>
+            <ul id="circuit-statuses" class="health-grid" aria-label="Dependency health"></ul>
+            <details class="health-help">
+              <summary>What do these failure-protection statuses mean?</summary>
+              <dl class="health-legend">
+                <div>
+                  <dt>Calls allowed</dt>
+                  <dd>The circuit is closed because the repeated-failure threshold has not been reached.</dd>
+                </div>
+                <div>
+                  <dt>Recovery check</dt>
+                  <dd>The circuit is half-open and is testing a limited request.</dd>
+                </div>
+                <div>
+                  <dt>Calls paused</dt>
+                  <dd>The circuit is open after repeated failures and pauses calls briefly.</dd>
+                </div>
+              </dl>
+            </details>
           </section>
 
           <details open>
@@ -173,8 +295,8 @@
                     <th scope="col">Lifecycle</th>
                     <th scope="col">Action</th>
                     <th scope="col">Decision</th>
-                    <th scope="col">Policy</th>
                     <th scope="col">Matched rule</th>
+                    <th scope="col">Policy origin</th>
                     <th scope="col">Latency</th>
                   </tr>
                 </thead>
@@ -197,6 +319,7 @@
                     <th scope="col">Stage</th>
                     <th scope="col">Rule</th>
                     <th scope="col">Outcome</th>
+                    <th scope="col">Policy origin</th>
                     <th scope="col">Condition</th>
                   </tr>
                 </thead>
@@ -218,12 +341,240 @@
             <ul id="privacy-controls" class="privacy-list"></ul>
           </details>
         </aside>
+      <section class="insights-panel" aria-labelledby="insights-title">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Azure Monitor history</p>
+            <h2 id="insights-title">Application Insights telemetry</h2>
+          </div>
+          <span id="insights-state" class="status-badge neutral">Not loaded</span>
+        </div>
+        <p>
+          What happened across chat and MCP? Review exported governance metrics,
+          OTel spans, and allowlisted audit events. Azure ingestion is delayed;
+          this history is separate from the live control plane above.
+        </p>
+        <div class="panel-controls">
+          <label for="insights-range">History window</label>
+          <select id="insights-range">
+            <option value="1">Last hour</option>
+            <option value="4">Last 4 hours</option>
+            <option value="24">Last 24 hours</option>
+          </select>
+          <button id="refresh-insights" type="button">Load Azure history</button>
+        </div>
+        <p id="insights-status" role="status" aria-live="polite">
+          Load history on demand. Server results are cached for 60 seconds.
+        </p>
+        <div id="insights-data" hidden>
+          <p class="insights-notice">Policy allowed means execution was permitted, not that a human approved it. Approval required is a separate outcome. This is a Sentinel-style presentation, not a Microsoft Sentinel integration.</p>
+          <dl id="insights-kpis" class="metric-grid insights-kpis" aria-label="Azure policy decision totals"></dl>
+          <div class="insights-visuals">
+            <section class="insights-chart" aria-labelledby="distribution-title">
+              <h3 id="distribution-title">Decision distribution</h3>
+              <p>How many evaluations were allowed, denied, or required approval?</p>
+              <div id="insights-distribution"></div>
+              <p id="insights-distribution-note"></p>
+            </section>
+            <section class="insights-chart" aria-labelledby="trend-title">
+              <h3 id="trend-title">Decision timeline</h3>
+              <p>When did policy evaluations occur? Counts reflect Azure export time buckets.</p>
+              <div id="insights-trend"></div>
+              <details>
+                <summary>Timeline values (accessible table)</summary>
+                <div class="table-scroll" tabindex="0" role="region" aria-label="Decision timeline values">
+                  <table>
+                    <caption>Recorded time buckets; gaps indicate no exported data, not zero activity</caption>
+                    <thead><tr><th scope="col">Bucket</th><th scope="col">Allowed</th><th scope="col">Denied</th><th scope="col">Approval required</th></tr></thead>
+                    <tbody id="insights-trend-values"></tbody>
+                  </table>
+                </div>
+              </details>
+            </section>
+          </div>
+          <section class="genai-panel hotspot-panel" aria-labelledby="hotspot-title">
+            <div class="genai-heading">
+              <div>
+                <p class="flow-eyebrow">Policy hotspots</p>
+                <h3 id="hotspot-title">Most triggered blocking rules</h3>
+              </div>
+              <span class="genai-privacy">Rule names only, no inputs</span>
+            </div>
+            <p class="genai-intro">Which policy rules denied requests or held them for approval most often, and at which lifecycle stage? Counts come from exported decision metrics, so they are not sampled.</p>
+            <dl id="hotspot-kpis" class="genai-kpis hotspot-kpis" aria-label="Policy hotspot totals"></dl>
+            <div class="hotspot-body">
+              <div>
+                <h4 id="hotspot-rank-title">Blocking rules ranked</h4>
+                <ol id="hotspot-rules" class="hotspot-rules" aria-labelledby="hotspot-rank-title"></ol>
+              </div>
+              <div>
+                <h4 id="hotspot-stage-title">Decisions by lifecycle stage</h4>
+                <div class="table-scroll" tabindex="0" role="region" aria-labelledby="hotspot-stage-title">
+                  <table class="hotspot-stages">
+                    <caption>Darker cells mean more decisions for that outcome</caption>
+                    <thead><tr><th scope="col">Stage</th><th scope="col">Allowed</th><th scope="col">Denied</th><th scope="col">Approval</th></tr></thead>
+                    <tbody id="hotspot-stage-rows"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </section>
+          <section class="genai-panel policy-log" aria-labelledby="policy-feed-title">
+            <div class="genai-heading">
+              <div>
+                <p class="flow-eyebrow">Policy decision log</p>
+                <h3 id="policy-feed-title">Policy activity</h3>
+              </div>
+              <span id="policy-feed-count" class="genai-privacy">No data</span>
+            </div>
+            <p class="genai-intro">Which rule made each recent decision, at which stage, and in which agent run? Rows come from retained traces, so sampling and the 100-span limit mean this is not a complete audit trail. Use Policy hotspots for exact totals.</p>
+            <div class="policy-log-toolbar" role="group" aria-label="Filter policy decisions">
+              <label for="policy-feed-filter">Show</label>
+              <select id="policy-feed-filter">
+                <option value="all">All decisions</option>
+                <option value="blocked">Denied and approval only</option>
+                <option value="deny">Denied only</option>
+                <option value="require_approval">Approval required only</option>
+                <option value="allow">Allowed only</option>
+              </select>
+              <label for="policy-feed-service">Service</label>
+              <select id="policy-feed-service">
+                <option value="all">Chat and MCP</option>
+                <option value="ai-governance-harness-chat">Chat</option>
+                <option value="ai-governance-harness-mcp">MCP</option>
+              </select>
+            </div>
+            <div class="table-scroll policy-log-scroll" tabindex="0" role="region" aria-labelledby="policy-feed-title">
+              <table class="policy-log-table">
+                <caption>Newest first. Select a run to open it in GenAI agent traces.</caption>
+                <thead><tr>
+                  <th scope="col">Time</th><th scope="col">Outcome</th><th scope="col">Rule</th>
+                  <th scope="col">Stage</th><th scope="col">Service</th><th scope="col">Duration</th>
+                  <th scope="col">Agent run</th>
+                </tr></thead>
+                <tbody id="insights-policy-feed"></tbody>
+              </table>
+            </div>
+          </section>
+          <section class="genai-panel" aria-labelledby="genai-title">
+            <div class="genai-heading">
+              <div>
+                <p class="flow-eyebrow">OpenTelemetry GenAI semantic conventions</p>
+                <h3 id="genai-title">GenAI agent traces</h3>
+              </div>
+              <span class="genai-privacy">No prompts or responses recorded</span>
+            </div>
+            <p class="genai-intro">How did each agent run flow from the model to MCP tools and policy checks? Pick a run to see where the time went. Conventions are in Development status and may change.</p>
+            <dl id="genai-kpis" class="genai-kpis" aria-label="GenAI usage totals"></dl>
+            <div class="genai-body">
+              <div class="genai-runs-column">
+                <h4 id="genai-runs-title">Agent runs</h4>
+                <ul id="genai-runs" class="genai-runs" aria-labelledby="genai-runs-title"></ul>
+              </div>
+              <div class="genai-detail">
+                <h4>Run breakdown</h4>
+                <div id="genai-run-summary" class="genai-run-summary"></div>
+                <div class="genai-toolbar">
+                  <div class="genai-legend" aria-hidden="true">
+                    <span class="layer-agent">Agent</span><span class="layer-inference">Model inference</span>
+                    <span class="layer-tool">Tool</span><span class="layer-mcp">MCP</span>
+                    <span class="legend-marker outcome-allow">Policy allowed</span>
+                    <span class="legend-marker outcome-deny">Policy denied</span>
+                    <span class="legend-marker outcome-require_approval">Approval required</span>
+                  </div>
+                  <label class="genai-toggle"><input id="genai-show-policy" type="checkbox"> Show policy checks as rows</label>
+                </div>
+                <div id="genai-waterfall" class="genai-waterfall"></div>
+              </div>
+            </div>
+          </section>
+          <section class="genai-panel token-panel" aria-labelledby="token-title">
+            <div class="genai-heading">
+              <div>
+                <p class="flow-eyebrow">Token usage and estimated cost</p>
+                <h3 id="token-title">Tokenomics</h3>
+              </div>
+              <span id="token-estimate-badge" class="genai-privacy">Estimate</span>
+            </div>
+            <p class="genai-intro">How many Foundry tokens did the agent use, where did they go, and roughly what did they cost? Foundry reports token counts on every response; it does not report cost, so cost is estimated from the configured price per million tokens.</p>
+            <dl id="token-kpis" class="genai-kpis token-kpis" aria-label="Token usage and cost totals"></dl>
+            <div class="token-body">
+              <div class="token-charts">
+                <h4 id="token-trend-title">Tokens over time</h4>
+                <div id="token-trend" class="token-trend"></div>
+                <h4 id="token-split-title">Where the estimated cost went</h4>
+                <div id="token-split" class="token-split"></div>
+              </div>
+              <div>
+                <h4 id="token-runs-title">Costliest agent runs</h4>
+                <div class="table-scroll policy-log-scroll" tabindex="0" role="region" aria-labelledby="token-runs-title">
+                  <table class="policy-log-table token-runs-table">
+                    <caption>Per-run values come from retained traces and include the advice classifier call.</caption>
+                    <thead><tr>
+                      <th scope="col">Time</th><th scope="col">Model calls</th><th scope="col">Input</th>
+                      <th scope="col">Output</th><th scope="col">Reasoning</th><th scope="col">Est. cost</th>
+                      <th scope="col">Agent run</th>
+                    </tr></thead>
+                    <tbody id="token-runs"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+            <p id="token-pricing-note" class="genai-intro token-note"></p>
+          </section>
+          <h3>Governance outcomes and mean evaluation duration</h3>
+          <div class="table-scroll" role="region" aria-label="Azure governance metrics" tabindex="0">
+            <table>
+              <caption>Exported aggregate values for the selected window; absent metrics show No data</caption>
+              <thead><tr>
+                <th scope="col">Service</th><th scope="col">Allowed</th>
+                <th scope="col">Denied</th><th scope="col">Approval required</th>
+                <th scope="col">Mean evaluation</th><th scope="col">Tool calls</th>
+                <th scope="col">Input tokens</th><th scope="col">Output tokens</th>
+              </tr></thead>
+              <tbody id="insights-metrics"></tbody>
+            </table>
+          </div>
+          <details open>
+            <summary>Recent OTel spans</summary>
+            <p>At most 100 known application spans, potentially sampled. Matching operation IDs indicate correlation; they do not prove a complete distributed trace.</p>
+            <div class="table-scroll" role="region" aria-label="Azure span history" tabindex="0">
+              <table>
+                <caption>Newest retained application spans, excluding URLs and payloads</caption>
+                <thead><tr>
+                  <th scope="col">Time</th><th scope="col">Service</th>
+                  <th scope="col">Span</th><th scope="col">Duration</th>
+                  <th scope="col">Outcome</th><th scope="col">Operation ID</th>
+                  <th scope="col">Span ID</th><th scope="col">Parent ID</th>
+                </tr></thead>
+                <tbody id="insights-spans"></tbody>
+              </table>
+            </div>
+          </details>
+          <details>
+            <summary>Sanitized audit-log events</summary>
+            <p>At most 50 allowlisted event names and severity labels. Raw log messages, exceptions, prompts, identities, and tool payloads are never returned. Chat log export is disabled, so chat rows may be absent.</p>
+            <div class="table-scroll" role="region" aria-label="Azure audit-log history" tabindex="0">
+              <table>
+                <caption>Known audit-event metadata only, not full log records</caption>
+                <thead><tr><th scope="col">Time</th><th scope="col">Service</th>
+                  <th scope="col">Event</th><th scope="col">Severity</th>
+                  <th scope="col">Operation ID</th></tr></thead>
+                <tbody id="insights-logs"></tbody>
+              </table>
+            </div>
+          </details>
+        </div>
+      </section>
       </div>
     </main>
 
     <footer>
       <p>Synthetic demonstration data only. External assets are not tracked or verified.</p>
     </footer>
-    <script src="/static/app.js?v=identity-policy" type="module"></script>
+    <script src="/static/tabs.js?v=2" defer></script>
+    <script src="/static/app.js?v=identity-insights" type="module"></script>
+    <script src="/static/insights.js?v=tokens-1" defer></script>
+    <script src="/static/flow.js?v=3" defer></script>
   </body>
 </html>

@@ -112,9 +112,8 @@ The governance panel is intentionally visible beside the user experience so a
 demonstration audience can connect an AI action with the controls and evidence
 that govern it. Its main areas are:
 
-1. **Decision controls and totals** — refresh or pause the bounded live view,
-   run an inert default-deny demonstration, and compare allowed, denied, total,
-   and retained event counts.
+1. **Decision controls and totals** — refresh or pause the bounded live view
+   and compare allowed, denied, total, and retained event counts.
 2. **Runtime posture** — inspect chat and MCP readiness, enforcement state,
    sandbox requirements, policy digest, and independent circuit-breaker state.
 3. **Recent decisions** — review privacy-safe lifecycle, action, outcome, rule,
@@ -150,8 +149,10 @@ The browser never calls Foundry or the data gateway directly:
 
 1. The browser sends the bounded conversation to the local chat service.
 2. The governance boundary evaluates the input and pre-model lifecycle points.
-3. The chat service sends the conversation and discovered tool schemas to the
-   configured Azure AI Foundry model through a timeout and circuit breaker.
+3. The chat service selects only discovered tools whose structured MCP metadata
+   explicitly enables browser chat, then sends those schemas to the configured
+   Azure AI Foundry model through a timeout and circuit breaker. Missing or
+   malformed exposure metadata fails closed.
 4. When the model selects a tool, the chat service evaluates it against the
    exact default-deny policy and calls it through MCP
    Streamable HTTP.
@@ -169,16 +170,28 @@ results, tokens, and model responses are excluded from application telemetry.
 
 ## Available MCP Tools
 
-| Tool | Purpose |
-|------|---------|
-| `get_member_profile` | Returns a synthetic member's internal fund profile |
-| `get_member_disengagement_signals` | Returns factual churn and disengagement signals |
-| `get_cohort_churn_analytics` | Returns aggregate cohort churn analytics |
-| `get_fum_outflow_summary` | Returns aggregate funds-under-management outflow risk |
-| `prepare_member_outreach_case` | Requests MCP form approval before preparing a synthetic, read-only outreach case |
+| Tool | Purpose | Browser chat |
+|------|---------|--------------|
+| `get_member_profile` | Returns a synthetic member's internal fund profile | Enabled |
+| `get_member_disengagement_signals` | Returns factual churn and disengagement signals | Enabled, role-governed |
+| `get_cohort_churn_analytics` | Returns aggregate cohort churn analytics | Enabled, role-governed |
+| `get_fum_outflow_summary` | Returns aggregate funds-under-management outflow risk | Enabled, role-governed |
+| `prepare_member_outreach_case` | Requests MCP form approval before preparing a synthetic, read-only outreach case | Enabled |
 
 The remote tool surface does not accept filesystem paths, arbitrary data
 filters, or write operations.
+
+Each tool owns a structured `ai_governance_harness` metadata contract declaring
+its intent, browser-chat exposure, and approval requirement. Chat does not
+derive authorization from natural-language descriptions or maintain a separate
+tool-name allowlist. Descriptions remain mutually exclusive selection guidance:
+profile requests use `get_member_profile`, while prepare/open/create/start
+retention-case requests use `prepare_member_outreach_case`.
+
+Exposure metadata does not grant access. MCP still enforces the local mock
+staff-role matrix. Outreach additionally requires `routine_permitted`
+eligibility and explicit approval; eligibility alone never grants access to
+an anonymous caller, analyst, or reporting agent.
 
 ### MCP Form Elicitation
 
@@ -204,9 +217,60 @@ requires a server-to-client request channel for form elicitation. Streaming
 responses are enabled by default with `MCP_JSON_RESPONSE=false`; setting it to
 `true` disables that back-channel, so approval tools fail closed.
 
-The browser chat does not yet provide a universal approval interface. Calling
-this tool through a client without MCP elicitation support therefore returns a
-sanitized tool error rather than bypassing approval.
+Browser chat presents approval conversationally. After eligibility succeeds,
+the assistant asks the user to reply **Approve** or **Decline** for the named
+member. Only an explicit approval in the immediately following turn is supplied
+to the MCP form resolver. Ambiguous answers repeat the question, and declines
+stop normally without executing the outreach tool. Approval is scoped to the
+member named in the preceding assistant prompt and is never inferred.
+
+### Retention eligibility and specialist referral
+
+Routine outreach preparation uses trusted synthetic case records from
+[`retention_cases.json`](./src/ai_governance_harness/data/synthetic/retention_cases.json).
+The pre-tool policy permits only
+`data.retention_handling_status == 'routine_permitted'`.
+It blocks duplicate open retention cases, specialist handling, completed exits,
+closed accounts and unconfirmed eligibility. The member profile exposes a
+bounded `retention_review` for staff and chat preflight checks; case narratives
+are not included.
+
+| Internal case state | Behaviour |
+|---------------------|-----------|
+| Open routine retention case | Deny duplicate preparation; continue the existing case |
+| Open specialist case | Deny routine preparation; provide staff referral instructions |
+| Closed routine case | Require explicit clearance plus new signals, contact eligibility and cooling-off eligibility |
+| Closed specialist case | Require explicit routine clearance; otherwise retain specialist routing |
+| Closed account or completed exit | Deny ordinary retention preparation |
+| Missing or unknown eligibility | Deny until staff verify the internal records |
+
+Eligibility is checked before requesting MCP approval and rechecked when
+preparing the response. Approval cannot override a business-policy denial.
+Chat retrieves the profile through MCP before attempting outreach and presents
+a policy-denial message with the next staff action. The MCP server independently
+checks its trusted records, so direct clients cannot bypass the restriction.
+
+Specialist handoff is a fixed staff-facing referral summary containing the
+approved team and existing synthetic case reference. Staff must complete the
+handoff through the fund's internal process. No specialist case is created, no
+notification is sent and no member is contacted. Routine preparation is also
+read-only: it does not persist a new case or change existing case status.
+
+Demo personas:
+
+* `MEM-001`: eligible, no existing case.
+* `MEM-002`: closed routine case with explicit clearance, eligible.
+* `MEM-003`: open specialist case, refer to complaints.
+* `MEM-004`: open routine case, continue `CASE-004`.
+* `MEM-005`: closed specialist case without clearance, refer to hardship.
+* `MEM-006`: completed exit, ordinary retention preparation denied.
+* `MEM-007`: closed specialist case explicitly cleared, eligible.
+
+These are illustrative company-policy facts, not approved production rules.
+Contact restrictions, new signals and cooling-off are explicit eligibility
+statuses; no cooling-off duration is invented. An outreach signal can still be
+surfaced even when preparation is blocked. Production integration must source
+these facts and routing rules from approved internal systems.
 
 ## Agent Governance Toolkit
 
@@ -242,9 +306,10 @@ sanitized tool error, not a successful replacement payload. Only the scan
 status and result type enter policy evaluation, never the response text.
 The existing final chat-response guardrail remains in place.
 
-This deterministic pattern scan is not a legal advice classifier and cannot
-detect every paraphrase or contextual recommendation. Production use requires
-compliance-reviewed detection and evaluation cases.
+This deterministic output pattern scan is not a legal advice classifier and
+cannot detect every generated paraphrase. It remains a separate post-tool
+safety boundary from the semantic input classifier described below.
+Production use requires compliance-reviewed detection and evaluation cases.
 
 The five current tools read packaged synthetic data and do not execute
 generated code, shell commands, untrusted files, or unrestricted network
@@ -557,7 +622,6 @@ With the default ports:
 | `http://127.0.0.1:8080/api/chat` | Chat API used by the browser |
 | `http://127.0.0.1:8080/api/mock-identity/signin` | Same-origin local mock persona sign-in |
 | `http://127.0.0.1:8080/api/governance/snapshot` | Merged privacy-safe chat and MCP governance snapshot |
-| `http://127.0.0.1:8080/api/governance/demo/deny` | Inert default-deny demonstration |
 | `http://127.0.0.1:8080/health/live` | Chat liveness |
 | `http://127.0.0.1:8080/health/ready` | Chat governance and sandbox readiness |
 | `http://127.0.0.1:8001/mcp` | MCP Streamable HTTP endpoint |
@@ -594,6 +658,27 @@ Governance denials return HTTP 403 and bounded policy metadata. Invalid requests
 return HTTP 400. Model, MCP, or other upstream failures return HTTP 502 with a
 different stable error code. Responses never include raw prompts, tool
 arguments, tool results, credentials, or internal exception text.
+Foundry response stops are differentiated from repository governance denials.
+A content-filter stop returns HTTP 422 with `model_content_filtered` and bounded
+details for the model `finish_reason`, filter category and severity when
+available. A repeated output-budget stop returns `model_output_limit`. The
+browser displays these stop conditions and the request reference without
+displaying filtered model content.
+MCP clients that do not support form elicitation still receive the protocol's
+capability failure. Browser chat declares the capability and supplies a form
+response only after the explicit conversational approval described above.
+After a successful tool call, blank model output and empty JSON containers such
+as `{}` receive one bounded recovery request using the already-governed
+conversation and tool result. Recovery disables additional tool selection and
+uses minimal reasoning with low verbosity so the bounded completion budget is
+reserved for a user-facing answer. If recovery is also empty, chat returns
+`invalid_model_response` rather than fabricating an answer or retrying
+indefinitely.
+Member profile responses take a narrower path: after the structured profile
+passes tool and output governance, chat validates and renders it
+deterministically. The synthetic name and account identifier are not sent back
+through the hosted model, avoiding an Azure PII content-filter stop and
+eliminating unnecessary post-tool model decisions for a factual profile lookup.
 The browser, static assets, and API responses use `Cache-Control: no-store` so
 the UI error contract and governance table cannot drift behind the running
 service after an update.
@@ -604,17 +689,68 @@ An unavailable local mock sidecar returns `identity_unavailable` (503).
 Both use the same error envelope. Anonymous health and governance endpoints
 remain available. MCP data requests require a signed local mock token.
 
-Personalized financial-advice requests are classified in memory before the
-model call. Only the bounded `advice_request_status` reaches policy evaluation;
-request text is not included in policy data or governance events. The
-`deny-personal-advice-request` rule returns HTTP 403 and appears as a denial in
-the governance panel. General factual questions continue through the normal
-chat path. When a short follow-up supplies only a member ID, classification
-also considers the immediately preceding user request so a multi-turn personal
-advice request cannot bypass the input rule by deferring the identifier.
+Personalized financial-advice requests pass through a dedicated, tool-free
+Foundry classifier before the primary assistant. The classifier uses strict
+JSON schema, a closed intent taxonomy, minimal reasoning, low verbosity,
+`store=False`, and the bounded `CHAT_CLASSIFIER_MAX_OUTPUT_TOKENS` budget.
+It receives the current and immediately preceding user turns as separately
+labelled context so split-turn requests do not rely on member-ID regex routing.
+
+Only typed fields such as `request_intent`, `advice_subject`,
+`financial_action`, `product_scope`, `confidence`, and
+`classification_status` reach YAML policy. Request text and free-form model
+rationale are not included in policy data or governance events. Policy rules
+deny identified-member financial recommendations and external-security
+recommendations; classified factual, educational, retention-outreach, and
+other safe intents continue through the normal chat path. The classifier call
+and result have their own `foundry.advice_classifier` lifecycle decisions and
+reliability circuit, but those decisions authorize classification only, not
+the user request.
+
+Invalid schema, empty or filtered classifier output, an unavailable classifier,
+unknown intent, and low confidence all stop before MCP discovery and the
+primary assistant. Successfully classified unsafe intent returns the matched
+governance denial. A technical or uncertain classifier stop returns
+`classification_unavailable` with a bounded reason and correlation reference
+rather than presenting the failure as a personal-advice denial.
 Failed and denied browser turns remain visible to the user but are removed from
 the active request history, so a rejected intent cannot contaminate the next
 independent question.
+
+### Business-unit policy attribution
+
+The synthetic [BU policy source](./src/ai_governance_harness/governance/policies/superannuation-ba-policy-source.yaml)
+documents `BU-SUPER-001`. Enforcement remains in
+[default.yaml](./src/ai_governance_harness/governance/policies/default.yaml).
+Its advice-related rules contain structured `provenance`: `layer`, `policy_id`,
+`policy_version` (a quoted string), and `source` (a YAML basename, not a path).
+The adapter validates these bounded identifiers at startup and attaches them
+only to the matched rule. Descriptions are not parsed for attribution.
+
+The governance panel shows policy origin in recent decisions and active rules.
+Unmapped rules, default denials, and external provider denials are not attributed
+to a BU policy. Tagged allow rules indicate which boundary passed, not a
+compliance certification. Changing the source document alone cannot change
+enforcement.
+
+The UI labels denials without specific provenance as "System policy", including
+generic scope refusals and default denials. This is a broad presentation label,
+not additional policy-source metadata; specific BU provenance takes precedence.
+Untagged allow rules remain "Not attributed".
+
+Governance spans expose `governance.policy.layer`, `governance.policy.id`,
+`governance.policy.version`, and `governance.policy.source`. Decision counters
+and duration histograms include only layer and policy ID to avoid source/version
+time-series churn. Structured decision logs allowlist `policy_layer`,
+`policy_id`, `policy_version`, and `policy_source`. These values come from the
+loaded policy, never prompts, member records, or caller-supplied policy data.
+Existing Azure Monitor export configuration carries these OTel attributes;
+no Azure credentials are needed for offline validation.
+
+Demo chat errors and refusal notices still show the existing technical reason.
+BU provenance is not added to the chat response. Hiding technical errors for a
+production-facing deployment remains future work; there is no automatic
+development/production presentation switch yet.
 
 The OAuth protected-resource metadata routes exist for future hosted
 authentication work. Local mock authentication verifies JWTs instead of
@@ -630,7 +766,7 @@ messages and the conversation sent to the model.
 | Local mock persona | Aggregate tools | Member tools | Outreach |
 |---|---|---|---|
 | Analyst | Allow | Deny | Deny |
-| Retention Specialist | Allow | Allow | Requires an elicitation-capable MCP client |
+| Retention Specialist | Allow | Allow | Requires eligibility and explicit approval, including the browser approval flow |
 | Compliance Reviewer | Deny | Deny | Deny |
 | Administrator | Deny | Deny | Deny |
 
@@ -674,8 +810,11 @@ control plane without exposing request content. It shows:
 
 Use **Pause updates** to stop the five-second automatic refresh or **Refresh**
 to request the current snapshot. Automatic refresh runs only while the page is
-visible. **Demonstrate default deny** evaluates a fixed prohibited action,
-records the denial, and never executes the action.
+visible.
+**Clear chat** also resets the page's decision counters and recent-decisions
+table. Subsequent refreshes show only decisions generated after that clear
+action. The underlying bounded in-memory audit evidence is retained until the
+services restart; clearing the browser view does not delete server telemetry.
 
 The panel retains at most 200 sanitized events in each process and shows at
 most 100 merged events. Events remain in process memory and reset when the

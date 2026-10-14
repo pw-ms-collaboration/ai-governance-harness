@@ -19,6 +19,22 @@
 
 ## Implementation-Time Plan Updates
 
+### Merge main on 2026-10-15
+
+* User authorized bringing main into the published feature branch and validating identity. Selected a merge, not another rebase, to preserve published commit history.
+* Incoming main: `ef8cef1`, including semantic advice classification, BU policy provenance, outreach eligibility/conversational approval and observability UI/history/GenAI instrumentation.
+* Reconciled [src/ai_governance_harness/chat/service.py](../../../src/ai_governance_harness/chat/service.py) so authenticated `CallerIdentity` passes through the new GenAI wrapper and every MCP exchange, including outreach eligibility reads and approval responses. Retained structured identity errors and breaker isolation alongside the new classifier/model error codes.
+* Kept all five tools browser-enabled through the incoming metadata contract. The normalizer and unchanged role matrix remain the authority; exposure metadata is not authorization.
+* Combined role checks with `routine_permitted` in separate chat/MCP/local outreach allow rules. The generic upstream eligible-outreach allow was not retained because it would bypass identity. Missing/unknown eligibility and specialist/duplicate cases deny.
+* Combined identity enums and BU provenance in events, logs, spans and the panel. Preserved module-scoped bearer memory, same-origin CSP, manual-only export and no token/claim capture.
+* Reconciled [src/ai_governance_harness/chat/static/index.html](../../../src/ai_governance_harness/chat/static/index.html) and [src/ai_governance_harness/chat/static/app.js](../../../src/ai_governance_harness/chat/static/app.js): persona UI, new tabs/flow/history views and approval controls coexist; the event table has nine matching headers/cells.
+* Migrated incoming chat/Insights/retention tests to explicit identity settings and caller fixtures. Updated expectations for deterministic profile rendering and model-content-filter errors without removing coverage.
+* Validation: 428 tests passed using `uv run --no-sync pytest -q --tb=short`; Ruff, strict policy lint, evidence verification, build and audit passed. `cryptography=48.0.1`, `PyJWT=2.15.1`.
+* Browser integration used real issuer/chat/MCP on isolated ports with deterministic classifier/model doubles: all eight persona/aggregate/member outcomes matched policy; retention MEM-001 approval completed; MEM-003 specialist handling returned a 403 policy denial; persona changes cleared history; observability showed mock mode and identity/provenance columns.
+* Live Foundry inference and Azure history were not called. The existing user-owned dev stack was not stopped or synchronized; `--no-sync` avoided its Windows console-executable lock.
+* Recovery branch: `backup/entra-agent-id-before-main-20261015`. Only pre-existing untracked PR drafts were stashed at `7530bf3fe0c5a3cfbade8aef81d551bf7a9e170f`; restore after the merge. No push.
+* Final focused recheck after formatting: 66 identity/chat tests passed, Ruff and all four browser script syntax checks passed. Isolated verification services stopped and temporary test harness removed.
+
 ### Integrate main after implementation
 
 * User explicitly selected preserving the approved MVP tool matrix while retaining main's compatible privacy and guardrail improvements.

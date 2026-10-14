@@ -10,7 +10,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ai_governance_harness.governance.models import GovernanceDecision
+from ai_governance_harness.governance.models import GovernanceDecision, PolicyProvenance
 from ai_governance_harness.governance.context import (
     Actor, Boundary, GovernanceContext, StaffRole, TokenType,
 )
@@ -35,6 +35,7 @@ class GovernanceEvent(BaseModel):
     allowed: bool
     policy_name: str | None = Field(default=None, max_length=128)
     matched_rule: str | None = Field(default=None, max_length=128)
+    provenance: PolicyProvenance | None = None
     policy_digest: str = Field(min_length=8, max_length=64)
     enforcement_mode: str = Field(max_length=16)
     evaluation_ms: float = Field(ge=0)
@@ -76,6 +77,7 @@ class GovernanceEventStore:
                 allowed=decision.allowed,
                 policy_name=decision.policy_name,
                 matched_rule=decision.matched_rule,
+                provenance=decision.provenance,
                 policy_digest=decision.policy_digest,
                 enforcement_mode=decision.enforcement_mode,
                 evaluation_ms=round(decision.evaluation_ms, 3),

@@ -22,6 +22,7 @@ from ai_governance_harness.governance import (
 )
 from ai_governance_harness.guardrails.advice_filter import tool_response_policy_data
 from ai_governance_harness.mcp_server import tools as gateway_tools
+from ai_governance_harness.mcp_server.tool_contracts import build_tool_metadata
 from ai_governance_harness.mcp_server.telemetry import (
     emit_audit_event,
     tool_call_counter,
@@ -82,6 +83,7 @@ def _call_gateway(tool_name: str, operation: Callable[[], ResultT]) -> ResultT:
     error_category: str | None = None
     with tracer.start_as_current_span(f"mcp.tool.{tool_name}") as span:
         span.set_attribute("mcp.tool.name", tool_name)
+        span.set_attribute("gen_ai.tool.name", tool_name)
         try:
             result = dict(operation())
             result.setdefault(
@@ -133,10 +135,26 @@ def _call_gateway(tool_name: str, operation: Callable[[], ResultT]) -> ResultT:
     return result
 
 
-def _resolve_outreach_approval() -> Elicit[OutreachCaseApproval]:
+def _check_outreach_eligibility(member_id: str) -> None:
+    try:
+        gateway_tools.require_member_outreach_eligible(member_id)
+    except GovernanceDeniedError as exc:
+        emit_audit_event(
+            "mcp.retention.eligibility",
+            outcome="denied",
+            tool_name="prepare_member_outreach_case",
+        )
+        review = gateway_tools.get_default_gateway().retention_review(member_id)
+        raise ToolError(review.staff_message()) from exc
+    except gateway_tools.MemberNotFoundError as exc:
+        raise ToolError("Requested member was not found.") from exc
+
+
+def _resolve_outreach_approval(member_id: str) -> Elicit[OutreachCaseApproval]:
+    _check_outreach_eligibility(member_id)
     return Elicit(
         message=(
-            "Approve preparation of a read-only synthetic member outreach case. "
+            f"Approve preparation of a read-only synthetic outreach case for {member_id}. "
             "The result may include synthetic disengagement signals, but no "
             "message, notification, or other external action will be executed."
         ),
@@ -144,7 +162,21 @@ def _resolve_outreach_approval() -> Elicit[OutreachCaseApproval]:
     )
 
 
-@mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
+@mcp.tool(
+    annotations=READ_ONLY_ANNOTATIONS,
+    title="Get member profile",
+    description=(
+        "Retrieve factual synthetic member profile and account information when "
+        "the user asks to view member details, balance, phase, risk profile, "
+        "communication preference, or investment allocation. Do not use this "
+        "tool to prepare or open a retention outreach case; use "
+        "prepare_member_outreach_case instead."
+    ),
+    meta=build_tool_metadata(
+        intent="member_profile",
+        browser_chat_enabled=True,
+    ),
+)
 def get_member_profile(member_id: MemberId) -> dict[str, Any]:
     """Return a synthetic member's internal superannuation profile.
 
@@ -157,7 +189,19 @@ def get_member_profile(member_id: MemberId) -> dict[str, Any]:
     )
 
 
-@mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
+@mcp.tool(
+    annotations=READ_ONLY_ANNOTATIONS,
+    title="Get member disengagement signals",
+    description=(
+        "Retrieve factual synthetic disengagement and churn signals for one "
+        "member. Use this for signal analysis only; it does not prepare an "
+        "outreach case or contact the member."
+    ),
+    meta=build_tool_metadata(
+        intent="member_disengagement_signals",
+        browser_chat_enabled=True,
+    ),
+)
 def get_member_disengagement_signals(member_id: MemberId) -> dict[str, Any]:
     """Return factual disengagement and churn signals for a synthetic member.
 
@@ -170,7 +214,19 @@ def get_member_disengagement_signals(member_id: MemberId) -> dict[str, Any]:
     )
 
 
-@mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
+@mcp.tool(
+    annotations=READ_ONLY_ANNOTATIONS,
+    title="Get cohort churn analytics",
+    description=(
+        "Retrieve aggregate synthetic churn analytics across member cohorts. "
+        "Use this for cohort-level analysis, not individual member profiles or "
+        "retention outreach cases."
+    ),
+    meta=build_tool_metadata(
+        intent="cohort_churn_analytics",
+        browser_chat_enabled=True,
+    ),
+)
 def get_cohort_churn_analytics() -> dict[str, Any]:
     """Return aggregate synthetic cohort churn analytics."""
     return _call_gateway(
@@ -179,7 +235,19 @@ def get_cohort_churn_analytics() -> dict[str, Any]:
     )
 
 
-@mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
+@mcp.tool(
+    annotations=READ_ONLY_ANNOTATIONS,
+    title="Get FUM outflow summary",
+    description=(
+        "Retrieve an aggregate synthetic funds-under-management outflow-risk "
+        "summary. Use this for portfolio-level outflow analysis, not individual "
+        "member profiles or retention outreach cases."
+    ),
+    meta=build_tool_metadata(
+        intent="fum_outflow_summary",
+        browser_chat_enabled=True,
+    ),
+)
 def get_fum_outflow_summary() -> dict[str, Any]:
     """Return aggregate synthetic funds-under-management outflow risk."""
     return _call_gateway(
@@ -188,7 +256,22 @@ def get_fum_outflow_summary() -> dict[str, Any]:
     )
 
 
-@mcp.tool(annotations=APPROVAL_ANNOTATIONS)
+@mcp.tool(
+    annotations=APPROVAL_ANNOTATIONS,
+    title="Prepare member retention outreach case",
+    description=(
+        "Use this tool when the user asks to prepare, open, create, or start a "
+        "retention outreach case for a synthetic member. It checks eligibility "
+        "and requires explicit human approval before preparing a read-only "
+        "result. Do not substitute a profile response for an outreach-case "
+        "request. It never persists a case or contacts the member."
+    ),
+    meta=build_tool_metadata(
+        intent="retention_outreach_case",
+        browser_chat_enabled=True,
+        requires_approval=True,
+    ),
+)
 def prepare_member_outreach_case(
     member_id: MemberId,
     approval: Annotated[
@@ -196,19 +279,16 @@ def prepare_member_outreach_case(
         Resolve(_resolve_outreach_approval),
     ],
 ) -> dict[str, Any]:
-    """Prepare a synthetic outreach case after explicit MCP form approval.
+    """Prepare an eligible synthetic outreach case after MCP form approval.
 
-    This tool never sends a message or performs another external action.
+    Existing cases and specialist restrictions are checked before approval and
+    rechecked before preparation. Referrals are staff-facing instructions only.
+    This tool never persists a case, sends a message or performs external contact.
 
     Args:
         member_id: Synthetic identifier in the form `MEM-001`.
     """
-    engine = get_governance_engine()
-    engine.require_allowed(
-        LifecyclePoint.PRE_TOOL,
-        "prepare_member_outreach_case",
-        source="mcp",
-    )
+    _check_outreach_eligibility(member_id)
     if approval.action == "decline":
         emit_audit_event(
             "mcp.elicitation",
@@ -246,6 +326,7 @@ def prepare_member_outreach_case(
                 "mechanism": "mcp_form_elicitation",
             },
             "external_action_executed": False,
+            "case_persisted": False,
             "disengagement_signals": signals,
         }
         return result

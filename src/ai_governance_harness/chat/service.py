@@ -108,6 +108,19 @@ PROFILE_FIELDS = (
     "provenance",
 )
 
+logger = logging.getLogger(__name__)
+_SAFE_ERROR_VALUE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
+
+ChatErrorCode = Literal[
+    "chat_service_error",
+    "governance_denied",
+    "invalid_model_response",
+    "invalid_request",
+    "model_round_limit",
+    "unsafe_tool_result",
+    "upstream_failure",
+]
+
 
 def _is_scope_refusal(message: str) -> bool:
     """Detect the fixed out-of-scope refusal, tolerating typographic apostrophes."""
@@ -433,6 +446,25 @@ class ChatRequest(BaseModel):
         if value[-1].role != "user":
             raise ValueError("The conversation must end with a user message.")
         return value
+
+
+def _active_advice_request_text(messages: list[ChatMessage]) -> str:
+    """Include prior user intent when the latest turn only supplies a member ID."""
+    latest = messages[-1]
+    if (
+        latest.role != "user"
+        or len(latest.content) > 80
+        or re.search(r"\bMEM-\d{3}\b", latest.content, re.IGNORECASE) is None
+    ):
+        return latest.content
+
+    previous_user = next(
+        (message for message in reversed(messages[:-1]) if message.role == "user"),
+        None,
+    )
+    if previous_user is None:
+        return latest.content
+    return f"{previous_user.content}\n{latest.content}"
 
 
 class PolicyNotice(BaseModel):

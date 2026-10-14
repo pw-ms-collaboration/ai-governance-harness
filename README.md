@@ -669,6 +669,41 @@ Failed and denied browser turns remain visible to the user but are removed from
 the active request history, so a rejected intent cannot contaminate the next
 independent question.
 
+### Business-unit policy attribution
+
+The synthetic [BU policy source](./src/ai_governance_harness/governance/policies/superannuation-ba-policy-source.yaml)
+documents `BU-SUPER-001`. Enforcement remains in
+[default.yaml](./src/ai_governance_harness/governance/policies/default.yaml).
+Its advice-related rules contain structured `provenance`: `layer`, `policy_id`,
+`policy_version` (a quoted string), and `source` (a YAML basename, not a path).
+The adapter validates these bounded identifiers at startup and attaches them
+only to the matched rule. Descriptions are not parsed for attribution.
+
+The governance panel shows policy origin in recent decisions and active rules.
+Unmapped rules, default denials, and external provider denials are not attributed
+to a BU policy. Tagged allow rules indicate which boundary passed, not a
+compliance certification. Changing the source document alone cannot change
+enforcement.
+
+The UI labels denials without specific provenance as "System policy", including
+generic scope refusals and default denials. This is a broad presentation label,
+not additional policy-source metadata; specific BU provenance takes precedence.
+Untagged allow rules remain "Not attributed".
+
+Governance spans expose `governance.policy.layer`, `governance.policy.id`,
+`governance.policy.version`, and `governance.policy.source`. Decision counters
+and duration histograms include only layer and policy ID to avoid source/version
+time-series churn. Structured decision logs allowlist `policy_layer`,
+`policy_id`, `policy_version`, and `policy_source`. These values come from the
+loaded policy, never prompts, member records, or caller-supplied policy data.
+Existing Azure Monitor export configuration carries these OTel attributes;
+no Azure credentials are needed for offline validation.
+
+Demo chat errors and refusal notices still show the existing technical reason.
+BU provenance is not added to the chat response. Hiding technical errors for a
+production-facing deployment remains future work; there is no automatic
+development/production presentation switch yet.
+
 The OAuth protected-resource metadata routes exist for future hosted
 authentication work. Local development does not require Container Apps identity
 headers.

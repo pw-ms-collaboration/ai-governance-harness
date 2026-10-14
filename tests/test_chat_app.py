@@ -236,6 +236,7 @@ def test_given_personal_advice_request_when_posting_then_policy_denies_input() -
         == "deny-identified-member-financial-recommendation"
     )
     assert response.json()["error"]["correlation_id"] == "advice-request-test"
+    assert "BU-SUPER-001" not in response.text
 
 
 def test_given_upstream_failure_when_posting_then_returns_distinct_error() -> None:

@@ -7,7 +7,7 @@ Strictly internal fund data; does not represent external whole-of-wealth or thir
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import List, Optional
+from typing import List
 from pydantic import BaseModel, Field
 
 

@@ -37,32 +37,6 @@ PROHIBITED_ADVICE_PATTERNS = [
     re.compile(r"\b(this\s+is\s+the\s+right\s+investment\s+for\s+your\s+situation)\b", re.IGNORECASE),
 ]
 
-PERSONAL_ADVICE_REQUEST_PATTERNS = [
-    re.compile(
-        r"\b(?:which|what)\s+(?:shares?|stocks?|equities|etfs?|funds?|"
-        r"investments?|investment\s+options?)\s+should\s+(?:i|we)\s+"
-        r"(?:buy|purchase|choose|invest\s+in)\b",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"\b(?:this|the|a)\s+(?:customer|member|client)(?:'s)?\b"
-        r"[\s\S]{0,160}\b(?:recommend(?:ation)?s?|advice|how\s+to\s+grow)\b",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"\b(?:recommend(?:ation)?s?|advice|what\s+should)\b"
-        r"[\s\S]{0,160}\b(?:MEM-\d{3}|my|their|customer(?:'s)?|member(?:'s)?)\b"
-        r"[\s\S]{0,80}\b(?:investment|super|balance|portfolio|account)\b",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"\bwhat\b[\s\S]{0,80}\bshould\b[\s\S]{0,80}"
-        r"\b(?:member|customer|client|MEM-\d{3})\b"
-        r"[\s\S]{0,80}\b(?:choose|invest|switch|allocate)\b",
-        re.IGNORECASE,
-    ),
-]
-
 # Patterns asserting complete whole-of-wealth across external institutions
 WHOLE_OF_WEALTH_EXAGGERATION_PATTERNS = [
     re.compile(r"\b(complete\s+wealth\s+picture|total\s+net\s+worth|all\s+your\s+external\s+assets|complete\s+financial\s+situation)\b", re.IGNORECASE),
@@ -182,14 +156,4 @@ def tool_response_policy_data(payload: object) -> dict[str, str]:
     return {
         "result_type": type(payload).__name__,
         "advice_scan_status": "personal_advice_detected" if detected else "passed",
-    }
-
-
-def advice_request_policy_data(text: str) -> dict[str, str]:
-    """Classify personal-advice request intent without exposing request content."""
-    detected = any(pattern.search(text) for pattern in PERSONAL_ADVICE_REQUEST_PATTERNS)
-    return {
-        "advice_request_status": (
-            "personal_advice_requested" if detected else "passed"
-        )
     }

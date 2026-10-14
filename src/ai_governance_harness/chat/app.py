@@ -20,7 +20,6 @@ from ai_governance_harness.chat.service import (
 )
 from ai_governance_harness.governance import (
     GovernanceContext,
-    LifecyclePoint,
     get_governance_engine,
     get_governance_context,
     governance_context,
@@ -120,27 +119,6 @@ def build_chat_app(
     async def governance_snapshot(_: Request) -> JSONResponse:
         return JSONResponse(await chat_service.governance_snapshot())
 
-    async def demonstrate_default_deny(_: Request) -> JSONResponse:
-        decision = get_governance_engine().evaluate(
-            LifecyclePoint.PRE_TOOL,
-            "demo.prohibited_action",
-            policy_data={"inert_demonstration": True},
-            source="demo",
-        )
-        return JSONResponse(
-            {
-                "executed": False,
-                "decision": decision.action,
-                "allowed": decision.allowed,
-                "lifecycle_point": decision.lifecycle_point.value,
-                "matched_rule": decision.matched_rule,
-                "message": (
-                    "A fixed prohibited action was evaluated. "
-                    "No operation was executed."
-                ),
-            }
-        )
-
     async def chat(request: Request) -> JSONResponse:
         content_type = request.headers.get("content-type", "").split(";", 1)[0]
         if content_type.lower() != "application/json":
@@ -186,11 +164,6 @@ def build_chat_app(
                 "/api/governance/snapshot",
                 governance_snapshot,
                 methods=["GET"],
-            ),
-            Route(
-                "/api/governance/demo/deny",
-                demonstrate_default_deny,
-                methods=["POST"],
             ),
             Route("/health/live", liveness, methods=["GET"]),
             Route("/health/ready", readiness, methods=["GET"]),

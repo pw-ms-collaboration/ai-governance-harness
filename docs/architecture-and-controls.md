@@ -415,9 +415,9 @@ Application lifecycle names map to the Toolkit's four stages:
 | Application point   | Toolkit stage   | Current action or purpose                              |
 | ------------------- | --------------- | ------------------------------------------------------ |
 | `startup`           | `pre_input`     | MCP `agent.startup` before initializing the data       |
-| `input`             | `pre_input`     | Chat `chat.input`, including advice-request status     |
-| `pre_model`         | `pre_input`     | Chat `foundry.chat` before completion                  |
-| `post_model`        | `post_tool`     | Chat `foundry.chat` after completion or provider block |
+| `input`             | `pre_input`     | Chat `chat.input`, including typed semantic advice facts |
+| `pre_model`         | `pre_input`     | `foundry.advice_classifier` or `foundry.chat` before completion |
+| `post_model`        | `post_tool`     | Classifier or primary-chat result and provider stop    |
 | `pre_tool`          | `pre_tool`      | Proposed tool action and shared gateway entry          |
 | `post_tool`         | `post_tool`     | Gateway, MCP adapter, and chat tool-result checks      |
 | `output`            | `pre_output`    | Chat `chat.output` after response sanitization         |
@@ -430,14 +430,23 @@ becomes a denial; `require_allowed` also rejects a `require_approval`
 decision when no approved flow is available.
 
 The default policy allows the current lifecycle actions and five exact tool
-names. `deny-personal-advice-request` blocks matching request intent.
-`deny-personal-advice-tool-response` blocks detected advice in tool results;
-each known tool's result allow requires `advice_scan_status == 'passed'`.
-Missing scan metadata is not an implicit allow.
+names. A strict, tool-free Foundry classifier maps the current and preceding
+user turns into closed fields such as `request_intent`, `advice_subject`,
+`product_scope`, and `confidence`. YAML rules deny identified-member financial
+recommendations, external-security recommendations, unknown intent, low
+confidence, and unavailable or invalid classification. Classifier lifecycle
+allow rules authorize classification only; the resulting `chat.input` policy
+decision separately authorizes or denies the request.
 
-Model lifecycle rules currently authorize the model action using metadata;
-they are not general raw-content classifiers. Output policy likewise sees
-bounded length/count metadata after domain sanitization, not the raw text.
+`deny-personal-advice-tool-response` remains a deterministic output boundary
+for detected advice in tool results; each known tool's result allow requires
+`advice_scan_status == 'passed'`. Missing scan metadata is not an implicit
+allow.
+
+Policy and telemetry receive only bounded classifier facts and lifecycle
+metadata, never conversation text or free-form classifier output. Output
+policy likewise sees bounded length/count metadata after domain sanitization,
+not the raw text.
 
 The outreach allow rule authorizes the named action, not approval itself.
 Actual approval is separately enforced by validated MCP elicitation in the

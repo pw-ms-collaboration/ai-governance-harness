@@ -15,8 +15,46 @@ from ai_governance_harness.synthetic_data.schemas import (
     InteractionRecord,
     DigitalActivityRecord,
 )
+from ai_governance_harness.governance.retention import RetentionRecord
 
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent.parent / "data" / "synthetic"
+
+
+def build_retention_records() -> list[dict]:
+    """Generate explicit demo eligibility without inferring company thresholds."""
+    scenarios: list[dict] = [
+        {"member_id": "MEM-001", "cases": []},
+        {"member_id": "MEM-002", "cases": [
+            {"case_id": "CASE-002", "kind": "routine_retention", "status": "closed",
+             "closure_outcome": "routine_cleared"},
+        ]},
+        {"member_id": "MEM-003", "cases": [
+            {"case_id": "CASE-003", "kind": "specialist", "status": "open",
+             "specialist_team": "complaints"},
+        ]},
+        {"member_id": "MEM-004", "cases": [
+            {"case_id": "CASE-004", "kind": "routine_retention", "status": "open"},
+        ]},
+        {"member_id": "MEM-005", "cases": [
+            {"case_id": "CASE-005", "kind": "specialist", "status": "closed",
+             "closure_outcome": "review_required", "specialist_team": "hardship"},
+        ]},
+        {"member_id": "MEM-006", "account_status": "exit_completed", "cases": []},
+        {"member_id": "MEM-007", "cases": [
+            {"case_id": "CASE-007", "kind": "specialist", "status": "closed",
+             "closure_outcome": "routine_cleared", "specialist_team": "member_support"},
+        ]},
+    ]
+    return [
+        RetentionRecord.model_validate({
+            "account_status": "active",
+            "new_signals_status": "satisfied",
+            "contact_policy_status": "satisfied",
+            "cooling_off_status": "satisfied",
+            **scenario,
+        }).model_dump(mode="json")
+        for scenario in scenarios
+    ]
 
 
 def build_synthetic_dataset() -> Dict[str, List[dict]]:
@@ -421,6 +459,7 @@ def build_synthetic_dataset() -> Dict[str, List[dict]]:
         "contributions.json": [c.model_dump() for c in contributions],
         "interactions.json": [i.model_dump() for i in interactions],
         "digital_activity.json": [d.model_dump() for d in digital_activity],
+        "retention_cases.json": build_retention_records(),
     }
 
 

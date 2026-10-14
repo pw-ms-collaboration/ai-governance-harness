@@ -18,6 +18,7 @@ from ai_governance_harness.chat.service import (
     ChatRequest,
     ChatService,
     ChatServiceError,
+    _advice_classifier_context,
     _restrict_tool_payload,
     _tool_enabled_for_browser_chat,
 )
@@ -126,6 +127,7 @@ def _safe_semantic_classifier(monkeypatch: pytest.MonkeyPatch) -> None:
         *,
         current_user_text: str,
         previous_user_text: str | None,
+        previous_assistant_text: str | None,
     ) -> AdviceRequestClassification:
         return _classification()
 
@@ -397,8 +399,10 @@ class _FakeMcpClient:
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("max_output_tokens", [1_200, 4_000])
 async def test_given_agent_name_when_completing_then_invokes_agent_reference_without_direct_mcp(
     monkeypatch: pytest.MonkeyPatch,
+    max_output_tokens: int,
 ) -> None:
     # Arrange
     model_client = _FakeAgentModelClient()
@@ -419,6 +423,7 @@ async def test_given_agent_name_when_completing_then_invokes_agent_reference_wit
         ChatSettings(
             model_deployment="test-model",
             agent_name="member-wealth-insights-agent",
+            max_output_tokens=max_output_tokens,
         )
     )
     request = ChatRequest(
@@ -445,6 +450,9 @@ async def test_given_agent_name_when_completing_then_invokes_agent_reference_wit
         "system", "user", "assistant", "user",
     ]
     assert response.tools_used == ["get_member_profile"]
+    agent_call = model_client.responses.calls[0]
+    assert "reasoning" not in agent_call
+    assert agent_call["max_output_tokens"] == max_output_tokens
     assert "GENERAL ADVICE WARNING" not in response.message
     assert model_client.closed is True
     assert project_client.closed is True
@@ -483,6 +491,23 @@ async def test_given_incomplete_agent_when_completing_then_exposes_only_bounded_
         "response_status": status,
         **({"incomplete_reason": reason} if reason == "max_output_tokens" else {}),
     }
+
+
+@pytest.mark.parametrize("intervening_assistant", [None, "Full profile or a summary?"])
+def test_given_short_follow_up_when_building_classifier_context_then_includes_only_adjacent_assistant(
+    intervening_assistant: str | None,
+) -> None:
+    messages = [
+        ChatMessage(role="assistant", content="Older context must not be reused."),
+        ChatMessage(role="user", content="Show the account profile for MEM-001."),
+    ]
+    if intervening_assistant is not None:
+        messages.append(ChatMessage(role="assistant", content=intervening_assistant))
+    messages.append(ChatMessage(role="user", content="yes"))
+
+    assert _advice_classifier_context(messages) == (
+        "yes", "Show the account profile for MEM-001.", intervening_assistant,
+    )
 
 
 class _SignalMcpClient(_FakeMcpClient):
@@ -1009,9 +1034,11 @@ async def test_given_member_id_follow_up_to_advice_request_then_blocks_before_mo
         *,
         current_user_text: str,
         previous_user_text: str | None,
+        previous_assistant_text: str | None,
     ):
         classifier_context["current"] = current_user_text
         classifier_context["previous"] = previous_user_text
+        classifier_context["assistant"] = previous_assistant_text
         return _classification(
             request_intent="financial_recommendation",
             advice_subject="identified_member",
@@ -1059,6 +1086,7 @@ async def test_given_member_id_follow_up_to_advice_request_then_blocks_before_mo
     )
     assert classifier_context == {
         "current": "MEM-001",
+        "assistant": "Please share the member ID.",
         "previous": (
             "Given this customer's account balance, give me some financial "
             "recommendations on how to grow their balance"

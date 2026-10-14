@@ -390,13 +390,21 @@ def _foundry_guardrail_code(error: APIStatusError) -> str | None:
 
 def _advice_classifier_context(
     messages: list[ChatMessage],
-) -> tuple[str, str | None]:
-    """Return the current and immediately preceding user turns."""
+) -> tuple[str, str | None, str | None]:
+    """Return bounded user context and the intervening assistant turn."""
     user_messages = [
         message.content for message in messages if message.role == "user"
     ]
     previous = user_messages[-2] if len(user_messages) > 1 else None
-    return user_messages[-1], previous
+    current_index = max(
+        index for index, message in enumerate(messages) if message.role == "user"
+    )
+    previous_assistant = (
+        messages[current_index - 1].content
+        if current_index > 0 and messages[current_index - 1].role == "assistant"
+        else None
+    )
+    return user_messages[-1], previous, previous_assistant
 
 
 def _classification_stop_reason(policy_data: dict[str, str]) -> str | None:
@@ -616,6 +624,7 @@ class _AdviceRequestClassifier(Protocol):
         *,
         current_user_text: str,
         previous_user_text: str | None,
+        previous_assistant_text: str | None = None,
     ) -> AdviceRequestClassification: ...
 
 
@@ -750,7 +759,7 @@ class ChatService:
         try:
             project_client = get_foundry_client()
             model_client = project_client.get_openai_client()
-            current_user_text, previous_user_text = (
+            current_user_text, previous_user_text, previous_assistant_text = (
                 _advice_classifier_context(request.messages)
             )
             self._governance.require_allowed(
@@ -770,6 +779,7 @@ class ChatService:
                         model_client,
                         current_user_text=current_user_text,
                         previous_user_text=previous_user_text,
+                        previous_assistant_text=previous_assistant_text,
                     )
 
                 classification = await self._classifier_reliability.call(

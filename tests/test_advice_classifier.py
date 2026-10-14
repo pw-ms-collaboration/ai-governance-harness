@@ -210,3 +210,33 @@ async def test_given_classification_when_completed_then_records_inference_tokens
     assert span.attributes["gen_ai.usage.cache_read.input_tokens"] == 128
     assert span.attributes["gen_ai.usage.reasoning.output_tokens"] == 0
     provider.shutdown()
+
+
+@pytest.mark.anyio
+async def test_given_confirmation_when_classifying_then_keeps_assistant_context_in_untrusted_payload() -> None:
+    payload = {
+        "classification_status": "classified",
+        "request_intent": "factual_information",
+        "advice_subject": "identified_member",
+        "financial_action": "none",
+        "product_scope": "none",
+        "confidence": "high",
+    }
+    client, completions = _client(json.dumps(payload))
+    classifier = FoundryAdviceRequestClassifier(model="test-model", max_output_tokens=400)
+    assistant_text = "I can pull the profile. Would you like the full profile or a summary?"
+
+    await classifier.classify(
+        client,
+        current_user_text="yes",
+        previous_user_text="Show me the account profile for MEM-001.",
+        previous_assistant_text=assistant_text,
+    )
+
+    messages = completions.calls[0]["messages"]
+    assert assistant_text not in messages[0]["content"]
+    assert json.loads(messages[1]["content"]) == {
+        "previous_user_turn": "Show me the account profile for MEM-001.",
+        "previous_assistant_turn": assistant_text,
+        "current_user_turn": "yes",
+    }

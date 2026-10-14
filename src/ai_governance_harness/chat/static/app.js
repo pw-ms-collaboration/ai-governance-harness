@@ -175,9 +175,9 @@ function appendTableCell(row, value, { code = false } = {}) {
   row.append(cell);
 }
 
-function provenanceLabel(provenance, { includeSource = false } = {}) {
+function provenanceLabel(provenance, { includeSource = false, action = null } = {}) {
   if (!provenance) {
-    return "Not attributed";
+    return action === "deny" ? "System policy" : "Not attributed";
   }
   const layer = provenance.layer === "business-unit" ? "Business unit" : "Enterprise";
   const label = `${layer}: ${provenance.policy_id} v${provenance.policy_version}`;
@@ -216,7 +216,7 @@ function renderEvents(events) {
     decisionCell.append(decisionBadge);
     row.append(decisionCell);
     appendTableCell(row, event.matched_rule || "no rule matched", { code: true });
-    appendTableCell(row, provenanceLabel(event.provenance));
+    appendTableCell(row, provenanceLabel(event.provenance, { action: event.decision }));
     appendTableCell(row, `${Number(event.evaluation_ms || 0).toFixed(3)} ms`);
     decisionEvents.append(row);
   }
@@ -235,7 +235,10 @@ function renderPolicy(policy) {
     appendTableCell(row, rule.stage || "unknown");
     appendTableCell(row, rule.name || "unnamed");
     appendTableCell(row, rule.action || "unknown");
-    appendTableCell(row, provenanceLabel(rule.provenance, { includeSource: true }));
+    appendTableCell(row, provenanceLabel(rule.provenance, {
+      includeSource: true,
+      action: rule.action,
+    }));
     appendTableCell(row, rule.condition || "No condition", { code: true });
     policyRules.append(row);
   }

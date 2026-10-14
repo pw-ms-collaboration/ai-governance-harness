@@ -7,6 +7,46 @@ scope: global
 default_action: deny
 rules:
   # Provenance attributes matched rules; it does not change enforcement.
+  - name: deny-outreach-requiring-specialist-handling
+    description: "BU-SUPER-002 v1.0; source: superannuation-outreach-policy-source.yaml; specialist handling boundary."
+    provenance:
+      layer: business-unit
+      policy_id: BU-SUPER-002
+      policy_version: "1.0"
+      source: superannuation-outreach-policy-source.yaml
+    stage: pre_tool
+    condition: "action.type == 'prepare_member_outreach_case' and data.retention_handling_status == 'specialist_required'"
+    action: deny
+  - name: deny-duplicate-outreach-case
+    description: "BU-SUPER-002 v1.0; source: superannuation-outreach-policy-source.yaml; duplicate case boundary."
+    provenance:
+      layer: business-unit
+      policy_id: BU-SUPER-002
+      policy_version: "1.0"
+      source: superannuation-outreach-policy-source.yaml
+    stage: pre_tool
+    condition: "action.type == 'prepare_member_outreach_case' and data.retention_handling_status == 'duplicate_open'"
+    action: deny
+  - name: deny-outreach-after-account-exit
+    description: "BU-SUPER-002 v1.0; source: superannuation-outreach-policy-source.yaml; account exit boundary."
+    provenance:
+      layer: business-unit
+      policy_id: BU-SUPER-002
+      policy_version: "1.0"
+      source: superannuation-outreach-policy-source.yaml
+    stage: pre_tool
+    condition: "action.type == 'prepare_member_outreach_case' and data.retention_handling_status == 'account_exited'"
+    action: deny
+  - name: deny-unconfirmed-outreach-eligibility
+    description: "BU-SUPER-002 v1.0; source: superannuation-outreach-policy-source.yaml; unconfirmed eligibility boundary."
+    provenance:
+      layer: business-unit
+      policy_id: BU-SUPER-002
+      policy_version: "1.0"
+      source: superannuation-outreach-policy-source.yaml
+    stage: pre_tool
+    condition: "action.type == 'prepare_member_outreach_case' and data.retention_handling_status in ['review_required', 'unknown']"
+    action: deny
   - name: deny-personal-advice-request
     description: "BU-SUPER-001 v1.0; source: superannuation-ba-policy-source.yaml; request advice boundary."
     provenance:
@@ -65,9 +105,15 @@ rules:
     stage: pre_tool
     condition: "action.type == 'get_fum_outflow_summary'"
     action: allow
-  - name: allow-approved-outreach-case
+  - name: allow-eligible-outreach-case
+    description: "BU-SUPER-002 v1.0; source: superannuation-outreach-policy-source.yaml; confirmed routine eligibility."
+    provenance:
+      layer: business-unit
+      policy_id: BU-SUPER-002
+      policy_version: "1.0"
+      source: superannuation-outreach-policy-source.yaml
     stage: pre_tool
-    condition: "action.type == 'prepare_member_outreach_case'"
+    condition: "action.type == 'prepare_member_outreach_case' and data.retention_handling_status == 'routine_permitted'"
     action: allow
   - name: allow-member-profile-result
     description: "BU-SUPER-001 v1.0; source: superannuation-ba-policy-source.yaml; requires a passed advice scan."

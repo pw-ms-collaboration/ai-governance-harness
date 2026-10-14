@@ -1,0 +1,56 @@
+# Source documentation and traceability only; not a toolkit execution policy.
+kind: SyntheticBusinessUnitPolicySource
+policy_id: BU-SUPER-002
+version: "1.0"
+business_unit: superannuation-ba
+title: Routine retention outreach eligibility
+status: synthetic-demo
+policy_layer: business-unit
+restriction: >
+  Prepare a routine retention outreach case only when eligibility is confirmed.
+  Do not prepare routine outreach when specialist handling is required, a routine
+  case is already open, the account has exited, or eligibility needs review or is
+  unknown. Eligibility does not replace the separate human approval requirement.
+regulatory_claim: >
+  This fictional internal policy illustrates routine outreach controls.
+  It is not an APRA CPS requirement, legal interpretation, or compliance certification.
+runtime_policy: default.yaml
+rule_mappings:
+  - rule: deny-outreach-requiring-specialist-handling
+    purpose: Block routine preparation when specialist handling is required.
+  - rule: deny-duplicate-outreach-case
+    purpose: Block creation of a duplicate open routine retention case.
+  - rule: deny-outreach-after-account-exit
+    purpose: Block routine preparation after account closure or completed exit.
+  - rule: deny-unconfirmed-outreach-eligibility
+    purpose: Block preparation when eligibility requires review or is unknown.
+supporting_rules:
+  - allow-eligible-outreach-case
+examples:
+  - action: prepare_member_outreach_case
+    retention_handling_status: routine_permitted
+    expected_pre_tool_decision: allow
+  - action: prepare_member_outreach_case
+    retention_handling_status: specialist_required
+    expected_pre_tool_decision: deny
+  - action: prepare_member_outreach_case
+    retention_handling_status: duplicate_open
+    expected_pre_tool_decision: deny
+  - action: prepare_member_outreach_case
+    retention_handling_status: account_exited
+    expected_pre_tool_decision: deny
+  - action: prepare_member_outreach_case
+    retention_handling_status: review_required
+    expected_pre_tool_decision: deny
+  - action: prepare_member_outreach_case
+    retention_handling_status: unknown
+    expected_pre_tool_decision: deny
+limitations:
+  - Only the YAML rules were copied from feat/policy; runtime eligibility integration is deferred.
+  - This branch does not yet supply retention_handling_status for outreach preparation.
+  - Missing or unsupported eligibility status fails closed without a matched BU denial rule.
+  - Rule examples test policy inputs, not an end-to-end outreach or referral workflow.
+  - The governance panel, traces and logs attribute matched rules; metrics include layer and policy ID only.
+  - The advice scan on outreach results remains mapped separately to BU-SUPER-001.
+  - Editing this source does not change enforcement; runtime rules need explicit updates and tests.
+  - This source is documentation, not an executable policy or an automatically ingested rule set.

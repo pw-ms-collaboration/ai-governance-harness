@@ -565,6 +565,11 @@ to a BU policy. Tagged allow rules indicate which boundary passed, not a
 compliance certification. Changing the source document alone cannot change
 enforcement.
 
+The UI labels denials without specific provenance as "System policy", including
+generic scope refusals and default denials. This is a broad presentation label,
+not additional policy-source metadata; specific BU provenance takes precedence.
+Untagged allow rules remain "Not attributed".
+
 Governance spans expose `governance.policy.layer`, `governance.policy.id`,
 `governance.policy.version`, and `governance.policy.source`. Decision counters
 and duration histograms include only layer and policy ID to avoid source/version

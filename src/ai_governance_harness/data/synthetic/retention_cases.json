@@ -1,0 +1,68 @@
+[
+  {
+    "member_id": "MEM-001",
+    "account_status": "active",
+    "new_signals_status": "satisfied",
+    "contact_policy_status": "satisfied",
+    "cooling_off_status": "satisfied",
+    "cases": []
+  },
+  {
+    "member_id": "MEM-002",
+    "account_status": "active",
+    "new_signals_status": "satisfied",
+    "contact_policy_status": "satisfied",
+    "cooling_off_status": "satisfied",
+    "cases": [
+      {"case_id": "CASE-002", "kind": "routine_retention", "status": "closed", "closure_outcome": "routine_cleared"}
+    ]
+  },
+  {
+    "member_id": "MEM-003",
+    "account_status": "active",
+    "new_signals_status": "satisfied",
+    "contact_policy_status": "satisfied",
+    "cooling_off_status": "satisfied",
+    "cases": [
+      {"case_id": "CASE-003", "kind": "specialist", "status": "open", "specialist_team": "complaints"}
+    ]
+  },
+  {
+    "member_id": "MEM-004",
+    "account_status": "active",
+    "new_signals_status": "satisfied",
+    "contact_policy_status": "satisfied",
+    "cooling_off_status": "satisfied",
+    "cases": [
+      {"case_id": "CASE-004", "kind": "routine_retention", "status": "open"}
+    ]
+  },
+  {
+    "member_id": "MEM-005",
+    "account_status": "active",
+    "new_signals_status": "satisfied",
+    "contact_policy_status": "satisfied",
+    "cooling_off_status": "satisfied",
+    "cases": [
+      {"case_id": "CASE-005", "kind": "specialist", "status": "closed", "closure_outcome": "review_required", "specialist_team": "hardship"}
+    ]
+  },
+  {
+    "member_id": "MEM-006",
+    "account_status": "exit_completed",
+    "new_signals_status": "satisfied",
+    "contact_policy_status": "satisfied",
+    "cooling_off_status": "satisfied",
+    "cases": []
+  },
+  {
+    "member_id": "MEM-007",
+    "account_status": "active",
+    "new_signals_status": "satisfied",
+    "contact_policy_status": "satisfied",
+    "cooling_off_status": "satisfied",
+    "cases": [
+      {"case_id": "CASE-007", "kind": "specialist", "status": "closed", "closure_outcome": "routine_cleared", "specialist_team": "member_support"}
+    ]
+  }
+]

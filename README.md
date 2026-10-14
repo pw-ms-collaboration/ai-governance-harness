@@ -185,6 +185,54 @@ The browser chat does not yet provide a universal approval interface. Calling
 this tool through a client without MCP elicitation support therefore returns a
 sanitized tool error rather than bypassing approval.
 
+### Retention eligibility and specialist referral
+
+Routine outreach preparation uses trusted synthetic case records from
+[`retention_cases.json`](./src/ai_governance_harness/data/synthetic/retention_cases.json).
+The pre-tool policy permits only
+`data.retention_handling_status == 'routine_permitted'`.
+It blocks duplicate open retention cases, specialist handling, completed exits,
+closed accounts and unconfirmed eligibility. The member profile exposes a
+bounded `retention_review` for staff and chat preflight checks; case narratives
+are not included.
+
+| Internal case state | Behaviour |
+|---------------------|-----------|
+| Open routine retention case | Deny duplicate preparation; continue the existing case |
+| Open specialist case | Deny routine preparation; provide staff referral instructions |
+| Closed routine case | Require explicit clearance plus new signals, contact eligibility and cooling-off eligibility |
+| Closed specialist case | Require explicit routine clearance; otherwise retain specialist routing |
+| Closed account or completed exit | Deny ordinary retention preparation |
+| Missing or unknown eligibility | Deny until staff verify the internal records |
+
+Eligibility is checked before requesting MCP approval and rechecked when
+preparing the response. Approval cannot override a business-policy denial.
+Chat retrieves the profile through MCP before attempting outreach and presents
+a policy-denial message with the next staff action. The MCP server independently
+checks its trusted records, so direct clients cannot bypass the restriction.
+
+Specialist handoff is a fixed staff-facing referral summary containing the
+approved team and existing synthetic case reference. Staff must complete the
+handoff through the fund's internal process. No specialist case is created, no
+notification is sent and no member is contacted. Routine preparation is also
+read-only: it does not persist a new case or change existing case status.
+
+Demo personas:
+
+* `MEM-001`: eligible, no existing case.
+* `MEM-002`: closed routine case with explicit clearance, eligible.
+* `MEM-003`: open specialist case, refer to complaints.
+* `MEM-004`: open routine case, continue `CASE-004`.
+* `MEM-005`: closed specialist case without clearance, refer to hardship.
+* `MEM-006`: completed exit, ordinary retention preparation denied.
+* `MEM-007`: closed specialist case explicitly cleared, eligible.
+
+These are illustrative company-policy facts, not approved production rules.
+Contact restrictions, new signals and cooling-off are explicit eligibility
+statuses; no cooling-off duration is invented. An outreach signal can still be
+surfaced even when preparation is blocked. Production integration must source
+these facts and routing rules from approved internal systems.
+
 ## Agent Governance Toolkit
 
 The application uses the released Agent Governance Toolkit 4.1 line and

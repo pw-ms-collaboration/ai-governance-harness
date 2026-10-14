@@ -76,6 +76,121 @@ def test_policy_allows_known_tool_and_denies_unknown_action() -> None:
     assert denied.action == "deny"
 
 
+def test_given_denied_policy_when_requiring_allowed_then_exposes_decision() -> None:
+    # Arrange
+    engine = GovernanceEngine(_settings())
+
+    # Act
+    with pytest.raises(GovernanceDeniedError) as error:
+        engine.require_allowed(LifecyclePoint.PRE_TOOL, "shell.execute")
+
+    # Assert
+    assert error.value.action == "shell.execute"
+    assert error.value.decision is not None
+    assert error.value.decision.action == "deny"
+    assert error.value.decision.lifecycle_point == LifecyclePoint.PRE_TOOL
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_given_external_denial_when_recording_then_enforces_and_counts_it(
+    enabled: bool,
+) -> None:
+    # Arrange
+    engine = GovernanceEngine(_settings(enabled=enabled))
+
+    # Act
+    decision = engine.record_external_denial(
+        LifecyclePoint.POST_MODEL,
+        "foundry.chat",
+        policy_name="azure-ai-foundry",
+        matched_rule="content_filter",
+        source="chat",
+    )
+    snapshot = governance_events.snapshot()
+
+    # Assert
+    assert decision.allowed is False
+    assert decision.enforcement_mode == "enforce"
+    assert snapshot["counts"]["deny"] == 1
+    assert snapshot["recent_events"][0]["policy_name"] == "azure-ai-foundry"
+
+
+@pytest.mark.parametrize(
+    ("status", "expected_allowed"),
+    [("passed", True), ("personal_advice_requested", False), ("unknown", False)],
+)
+def test_given_advice_request_status_when_evaluating_input_then_enforces_policy(
+    status: str,
+    expected_allowed: bool,
+) -> None:
+    # Arrange
+    engine = GovernanceEngine(_settings())
+
+    # Act
+    decision = engine.evaluate(
+        LifecyclePoint.INPUT,
+        "chat.input",
+        policy_data={"advice_request_status": status},
+    )
+
+    # Assert
+    assert decision.allowed is expected_allowed
+    if status == "personal_advice_requested":
+        assert decision.matched_rule == "deny-personal-advice-request"
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        "get_member_profile",
+        "get_member_disengagement_signals",
+        "get_cohort_churn_analytics",
+        "get_fum_outflow_summary",
+        "prepare_member_outreach_case",
+    ],
+)
+@pytest.mark.parametrize(
+    ("status", "expected_allowed"),
+    [("passed", True), ("personal_advice_detected", False), ("unknown", False), (None, False)],
+)
+def test_given_tool_scan_status_when_evaluating_result_then_requires_passed_scan(
+    action: str,
+    status: str | None,
+    expected_allowed: bool,
+) -> None:
+    # Arrange
+    engine = GovernanceEngine(_settings())
+    data = {"advice_scan_status": status} if status is not None else {}
+
+    # Act
+    decision = engine.evaluate(
+        LifecyclePoint.POST_TOOL,
+        action,
+        policy_data=data,
+    )
+
+    # Assert
+    assert decision.allowed is expected_allowed
+    if status == "personal_advice_detected":
+        assert decision.matched_rule == "deny-personal-advice-tool-response"
+
+
+def test_given_direct_gateway_advice_when_returning_result_then_policy_blocks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    engine = GovernanceEngine(_settings())
+    monkeypatch.setattr(tools, "get_governance_engine", lambda: engine)
+
+    @tools.governed_read_only_tool("get_member_profile")
+    def response() -> dict[str, object]:
+        return {"nested": [{"text": "You should switch your super to Growth."}]}
+
+    # Act & Assert
+    with pytest.raises(GovernanceDeniedError):
+        response()
+
+
 def test_policy_evaluation_failure_denies_without_sensitive_detail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

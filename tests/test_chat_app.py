@@ -10,6 +10,7 @@ from starlette.testclient import TestClient
 from ai_governance_harness.chat.app import STATIC_DIR, build_chat_app
 from ai_governance_harness.chat.config import ChatSettings
 from ai_governance_harness.chat.service import ChatRequest, ChatResponse
+from ai_governance_harness.chat.service import ChatServiceError
 
 
 class _FakeChatService:
@@ -29,6 +30,16 @@ class _FakeChatService:
                 {"name": "mcp", "status": "unavailable"},
             ],
         }
+
+
+class _FailingChatService(_FakeChatService):
+    def __init__(self, error: ChatServiceError) -> None:
+        super().__init__()
+        self._error = error
+
+    async def complete(self, request: ChatRequest) -> ChatResponse:
+        self.requests.append(request)
+        raise self._error
 
 
 class _StructureParser(HTMLParser):
@@ -100,6 +111,97 @@ def test_given_disallowed_origin_when_posting_then_returns_403() -> None:
     assert response.status_code == 403
 
 
+def test_given_governance_denial_when_posting_then_returns_policy_error() -> None:
+    # Arrange
+    service = _FailingChatService(
+        ChatServiceError(
+            "Governance policy denied the requested operation.",
+            code="governance_denied",
+            status_code=403,
+            details={
+                "lifecycle_point": "post_tool",
+                "matched_rule": "deny-personal-advice-tool-response",
+            },
+        )
+    )
+    client = TestClient(build_chat_app(_settings(), service))
+
+    # Act
+    response = client.post(
+        "/api/chat",
+        headers={"X-Correlation-ID": "policy-test"},
+        json={"messages": [{"role": "user", "content": "Recommend an investment"}]},
+    )
+
+    # Assert
+    assert response.status_code == 403
+    assert response.json() == {
+        "error": {
+            "code": "governance_denied",
+            "message": "Governance policy denied the requested operation.",
+            "correlation_id": "policy-test",
+            "details": {
+                "lifecycle_point": "post_tool",
+                "matched_rule": "deny-personal-advice-tool-response",
+            },
+        }
+    }
+
+
+def test_given_personal_advice_request_when_posting_then_policy_denies_input() -> None:
+    # Arrange
+    client = TestClient(build_chat_app(_settings()))
+
+    # Act
+    response = client.post(
+        "/api/chat",
+        headers={"X-Correlation-ID": "advice-request-test"},
+        json={
+            "messages": [
+                {
+                    "role": "user",
+                    "content": (
+                        "Given this customer's account balance, give me some "
+                        "financial recommendations on how to grow their balance"
+                    ),
+                }
+            ]
+        },
+    )
+
+    # Assert
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "governance_denied"
+    assert (
+        response.json()["error"]["details"]["matched_rule"]
+        == "deny-personal-advice-request"
+    )
+    assert response.json()["error"]["correlation_id"] == "advice-request-test"
+
+
+def test_given_upstream_failure_when_posting_then_returns_distinct_error() -> None:
+    # Arrange
+    service = _FailingChatService(
+        ChatServiceError(
+            "An upstream chat dependency could not complete the request.",
+            code="upstream_failure",
+        )
+    )
+    client = TestClient(build_chat_app(_settings(), service))
+
+    # Act
+    response = client.post(
+        "/api/chat",
+        headers={"X-Correlation-ID": "upstream-test"},
+        json={"messages": [{"role": "user", "content": "Hello"}]},
+    )
+
+    # Assert
+    assert response.status_code == 502
+    assert response.json()["error"]["code"] == "upstream_failure"
+    assert response.json()["error"]["correlation_id"] == "upstream-test"
+
+
 def test_given_ui_request_when_loading_then_includes_security_headers() -> None:
     # Arrange
     client = TestClient(build_chat_app(_settings(), _FakeChatService()))
@@ -111,6 +213,7 @@ def test_given_ui_request_when_loading_then_includes_security_headers() -> None:
     assert response.status_code == 200
     assert response.headers["X-Content-Type-Options"] == "nosniff"
     assert response.headers["X-Frame-Options"] == "DENY"
+    assert response.headers["Cache-Control"] == "no-store"
     assert "default-src 'self'" in response.headers["Content-Security-Policy"]
 
 

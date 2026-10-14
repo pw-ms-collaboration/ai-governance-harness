@@ -204,6 +204,25 @@ policy:
 * Treats required approval without an approval flow as denied.
 * Fails closed when policy loading or evaluation fails.
 
+Tool responses are scanned in memory using the existing personal-advice pattern
+guardrail, including strings nested in dictionaries and lists. The
+`deny-personal-advice-tool-response` post-tool rule blocks detected personalized
+financial advice. Known tool-result allow rules require
+`data.advice_scan_status == 'passed'`; missing or unknown scan status is denied.
+Factual information and general guidance that do not match prohibited patterns
+remain permitted.
+
+The shared gateway protects direct callers, the MCP adapter checks complete
+responses (including outreach cases), and the chat service checks structured
+MCP results before passing them to the model. A blocked MCP response returns a
+sanitized tool error, not a successful replacement payload. Only the scan
+status and result type enter policy evaluation, never the response text.
+The existing final chat-response guardrail remains in place.
+
+This deterministic pattern scan is not a legal advice classifier and cannot
+detect every paraphrase or contextual recommendation. Production use requires
+compliance-reviewed detection and evaluation cases.
+
 The five current tools read packaged synthetic data and do not execute
 generated code, shell commands, untrusted files, or unrestricted network
 requests. `GOVERNANCE_SANDBOX_PROVIDER=none` is therefore ready for the current
@@ -493,6 +512,42 @@ With the default ports:
 | `http://127.0.0.1:8001/governance/snapshot` | MCP process governance snapshot |
 | `http://127.0.0.1:8001/health/live` | MCP liveness |
 | `http://127.0.0.1:8001/health/ready` | MCP governance and sandbox readiness |
+
+Chat API failures use a structured, privacy-safe error envelope:
+
+```json
+{
+  "error": {
+    "code": "governance_denied",
+    "message": "Governance policy denied the requested operation.",
+    "correlation_id": "request-reference",
+    "details": {
+      "lifecycle_point": "post_tool",
+      "matched_rule": "deny-personal-advice-tool-response"
+    }
+  }
+}
+```
+
+Governance denials return HTTP 403 and bounded policy metadata. Invalid requests
+return HTTP 400. Model, MCP, or other upstream failures return HTTP 502 with a
+different stable error code. Responses never include raw prompts, tool
+arguments, tool results, credentials, or internal exception text.
+The browser, static assets, and API responses use `Cache-Control: no-store` so
+the UI error contract and governance table cannot drift behind the running
+service after an update.
+
+Personalized financial-advice requests are classified in memory before the
+model call. Only the bounded `advice_request_status` reaches policy evaluation;
+request text is not included in policy data or governance events. The
+`deny-personal-advice-request` rule returns HTTP 403 and appears as a denial in
+the governance panel. General factual questions continue through the normal
+chat path. When a short follow-up supplies only a member ID, classification
+also considers the immediately preceding user request so a multi-turn personal
+advice request cannot bypass the input rule by deferring the identifier.
+Failed and denied browser turns remain visible to the user but are removed from
+the active request history, so a rejected intent cannot contaminate the next
+independent question.
 
 The OAuth protected-resource metadata routes exist for future hosted
 authentication work. Local development does not require Container Apps identity

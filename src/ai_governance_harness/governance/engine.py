@@ -48,6 +48,17 @@ _TOOLKIT_STAGE_BY_LIFECYCLE = {
 class GovernanceDeniedError(RuntimeError):
     """Raised when policy prevents an operation from executing."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        action: str | None = None,
+        decision: GovernanceDecision | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.action = action
+        self.decision = decision
+
 
 class GovernanceEngine:
     """Load one policy and normalize toolkit decisions."""
@@ -191,9 +202,32 @@ class GovernanceEngine:
         )
         if not decision.allowed or decision.action == "require_approval":
             raise GovernanceDeniedError(
-                f"Governance denied the {lifecycle_point.value} operation."
+                f"Governance denied the {lifecycle_point.value} operation.",
+                action=action,
+                decision=decision,
             )
         return decision
+
+    def record_external_denial(
+        self,
+        lifecycle_point: LifecyclePoint,
+        action: str,
+        *,
+        policy_name: str,
+        matched_rule: str,
+        source: EventSource = "system",
+    ) -> GovernanceDecision:
+        """Record an enforced provider denial independently of local policy."""
+        decision = GovernanceDecision(
+            allowed=False,
+            action="deny",
+            lifecycle_point=lifecycle_point,
+            policy_name=policy_name,
+            matched_rule=matched_rule,
+            policy_digest=self.policy_digest,
+            enforcement_mode="enforce",
+        )
+        return self._record_decision(decision, action=action, source=source)
 
     @staticmethod
     def _record_decision(

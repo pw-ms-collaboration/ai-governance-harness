@@ -16,9 +16,11 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from typing_extensions import Annotated
 
 from ai_governance_harness.governance import (
+    GovernanceDeniedError,
     LifecyclePoint,
     get_governance_engine,
 )
+from ai_governance_harness.guardrails.advice_filter import tool_response_policy_data
 from ai_governance_harness.mcp_server import tools as gateway_tools
 from ai_governance_harness.mcp_server.telemetry import (
     emit_audit_event,
@@ -82,6 +84,24 @@ def _call_gateway(tool_name: str, operation: Callable[[], ResultT]) -> ResultT:
         span.set_attribute("mcp.tool.name", tool_name)
         try:
             result = dict(operation())
+            result.setdefault(
+                "provenance",
+                {
+                    "source": "internal_superannuation_core",
+                    "scope": "synthetic_in_fund_data",
+                    "synthetic": True,
+                },
+            )
+            get_governance_engine().require_allowed(
+                LifecyclePoint.POST_TOOL,
+                tool_name,
+                policy_data=tool_response_policy_data(result),
+                source="mcp",
+            )
+        except GovernanceDeniedError as exc:
+            outcome = "denied"
+            error_category = "governance_denied"
+            raise ToolError("Governance denied the tool response.") from exc
         except gateway_tools.MemberNotFoundError as exc:
             outcome = "not_found"
             error_category = "member_not_found"
@@ -110,14 +130,6 @@ def _call_gateway(tool_name: str, operation: Callable[[], ResultT]) -> ResultT:
                 latency_ms=elapsed * 1000,
             )
 
-    result.setdefault(
-        "provenance",
-        {
-            "source": "internal_superannuation_core",
-            "scope": "synthetic_in_fund_data",
-            "synthetic": True,
-        },
-    )
     return result
 
 
@@ -236,12 +248,6 @@ def prepare_member_outreach_case(
             "external_action_executed": False,
             "disengagement_signals": signals,
         }
-        engine.require_allowed(
-            LifecyclePoint.POST_TOOL,
-            "prepare_member_outreach_case",
-            policy_data={"result_type": type(result).__name__},
-            source="mcp",
-        )
         return result
 
     return _call_gateway("prepare_member_outreach_case", build_case)

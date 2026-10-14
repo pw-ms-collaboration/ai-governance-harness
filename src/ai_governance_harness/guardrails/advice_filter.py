@@ -6,6 +6,7 @@ mandatory statutory disclaimers and in-fund data scope notices.
 """
 
 import re
+from collections.abc import Iterator
 from typing import List, Optional, Tuple
 
 GENERAL_ADVICE_WARNING = (
@@ -34,6 +35,26 @@ PROHIBITED_ADVICE_PATTERNS = [
     re.compile(r"\b(you\s+should\s+close\s+your\s+account)\b", re.IGNORECASE),
     re.compile(r"\b(you\s+would\s+be\s+better\s+off\s+(switching|moving|transferring))\b", re.IGNORECASE),
     re.compile(r"\b(this\s+is\s+the\s+right\s+investment\s+for\s+your\s+situation)\b", re.IGNORECASE),
+]
+
+PERSONAL_ADVICE_REQUEST_PATTERNS = [
+    re.compile(
+        r"\b(?:this|the|a)\s+(?:customer|member|client)(?:'s)?\b"
+        r"[\s\S]{0,160}\b(?:recommend(?:ation)?s?|advice|how\s+to\s+grow)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:recommend(?:ation)?s?|advice|what\s+should)\b"
+        r"[\s\S]{0,160}\b(?:MEM-\d{3}|my|their|customer(?:'s)?|member(?:'s)?)\b"
+        r"[\s\S]{0,80}\b(?:investment|super|balance|portfolio|account)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bwhat\b[\s\S]{0,80}\bshould\b[\s\S]{0,80}"
+        r"\b(?:member|customer|client|MEM-\d{3})\b"
+        r"[\s\S]{0,80}\b(?:choose|invest|switch|allocate)\b",
+        re.IGNORECASE,
+    ),
 ]
 
 # Patterns asserting complete whole-of-wealth across external institutions
@@ -125,3 +146,44 @@ class DisclosureAttacher:
             result = f"{result}\n\n{IN_FUND_PROVENANCE_NOTICE}"
 
         return result
+
+
+def _response_text(payload: object) -> Iterator[str]:
+    if isinstance(payload, str):
+        yield payload
+    elif isinstance(payload, dict):
+        for key, value in payload.items():
+            yield from _response_text(key)
+            yield from _response_text(value)
+    elif isinstance(payload, (list, tuple)):
+        for value in payload:
+            yield from _response_text(value)
+    elif payload is not None and not isinstance(payload, (bool, int, float)):
+        raise TypeError("Tool advice scanning requires a JSON-compatible response.")
+
+
+def tool_response_policy_data(payload: object) -> dict[str, str]:
+    """Scan response text in memory and expose only bounded policy metadata.
+
+    A passed scan means no prohibited pattern was detected, not that the
+    response has been legally classified as factual information or general advice.
+    """
+    guardrail = AdviceClassificationGuardrail()
+    detected = any(
+        guardrail.scan_for_personal_advice(text)
+        for text in _response_text(payload)
+    )
+    return {
+        "result_type": type(payload).__name__,
+        "advice_scan_status": "personal_advice_detected" if detected else "passed",
+    }
+
+
+def advice_request_policy_data(text: str) -> dict[str, str]:
+    """Classify personal-advice request intent without exposing request content."""
+    detected = any(pattern.search(text) for pattern in PERSONAL_ADVICE_REQUEST_PATTERNS)
+    return {
+        "advice_request_status": (
+            "personal_advice_requested" if detected else "passed"
+        )
+    }

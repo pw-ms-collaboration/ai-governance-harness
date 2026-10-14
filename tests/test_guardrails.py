@@ -8,6 +8,10 @@ from ai_governance_harness.guardrails import (
     DisclosureAttacher,
     PersonalAdviceViolationError,
 )
+from ai_governance_harness.guardrails.advice_filter import (
+    advice_request_policy_data,
+    tool_response_policy_data,
+)
 
 
 def test_sovereignty_guardrail_approved_regions():
@@ -69,6 +73,36 @@ def test_advice_classification_allows_factual_information():
         assert len(violations) == 0, f"False positive advice violation in: {sample}"
 
 
+@pytest.mark.parametrize(
+    ("request_text", "expected_status"),
+    [
+        (
+            "Given this customer's account balance, give me some financial "
+            "recommendations on how to grow their balance",
+            "personal_advice_requested",
+        ),
+        (
+            "What investment option should member MEM-001 choose?",
+            "personal_advice_requested",
+        ),
+        (
+            "What general factors can affect superannuation investment growth?",
+            "passed",
+        ),
+        ("Show me the profile for MEM-001.", "passed"),
+    ],
+)
+def test_given_advice_request_when_classifying_then_returns_only_metadata(
+    request_text: str,
+    expected_status: str,
+) -> None:
+    # Act
+    result = advice_request_policy_data(request_text)
+
+    # Assert
+    assert result == {"advice_request_status": expected_status}
+
+
 def test_advice_classification_enforces_fallback_or_exception():
     """Verify advice enforcement triggers factual fallback or raises error."""
     guard = AdviceClassificationGuardrail()
@@ -91,3 +125,45 @@ def test_disclosure_attacher_appends_statutory_notices():
 
     assert "GENERAL ADVICE WARNING (ASIC RG 244)" in disclosed
     assert "IN-FUND DATA SCOPE & PROVENANCE NOTICE" in disclosed
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_status"),
+    [
+        ({"balance": 145_000, "active": True}, "passed"),
+        (
+            {"guidance": ["Consider obtaining personal financial advice."]},
+            "passed",
+        ),
+        (
+            {"nested": [{"text": "You should switch your balance to Growth."}]},
+            "personal_advice_detected",
+        ),
+        (
+            {"You should close your account": None},
+            "personal_advice_detected",
+        ),
+        (
+            {"nested": ["You\nshould\nswitch your balance to Growth."]},
+            "personal_advice_detected",
+        ),
+    ],
+)
+def test_given_structured_response_when_scanning_then_returns_only_metadata(
+    payload: object,
+    expected_status: str,
+) -> None:
+    # Act
+    result = tool_response_policy_data(payload)
+
+    # Assert
+    assert result == {
+        "result_type": type(payload).__name__,
+        "advice_scan_status": expected_status,
+    }
+
+
+def test_given_unsupported_response_when_scanning_then_rejects_unscanned_data() -> None:
+    # Act & Assert
+    with pytest.raises(TypeError, match="JSON-compatible response"):
+        tool_response_policy_data({"unscannable": object()})

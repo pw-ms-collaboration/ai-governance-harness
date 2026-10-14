@@ -89,6 +89,7 @@ Sources: [chat/config.py](../src/ai_governance_harness/chat/config.py) and
 | `CHAT_MAX_MESSAGE_LENGTH`      | `4000`                      | Setting range 100-20,000, but message-schema hard cap is 4,000                             |
 | `CHAT_MAX_TOOL_ROUNDS`         | `4`                         | Setting range 1-8; model loop permits at most this value plus one model completion attempt |
 | `CHAT_MAX_OUTPUT_TOKENS`       | `1200`                      | Setting range 100-4,000; sent as `max_completion_tokens`                                   |
+| `CHAT_CLASSIFIER_MAX_OUTPUT_TOKENS` | `400`                  | Setting range 100-800; bounds the strict semantic-classifier response                      |
 | `CHAT_MAX_REQUEST_BODY_SIZE`   | `65536` bytes               | Setting range 1,024-1,048,576; oversized JSON returns HTTP 413                             |
 
 Default chat origins are `http://127.0.0.1:8080` and

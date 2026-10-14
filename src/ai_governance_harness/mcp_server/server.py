@@ -22,6 +22,7 @@ from ai_governance_harness.governance import (
 )
 from ai_governance_harness.guardrails.advice_filter import tool_response_policy_data
 from ai_governance_harness.mcp_server import tools as gateway_tools
+from ai_governance_harness.mcp_server.tool_contracts import build_tool_metadata
 from ai_governance_harness.mcp_server.telemetry import (
     emit_audit_event,
     tool_call_counter,
@@ -160,7 +161,21 @@ def _resolve_outreach_approval(member_id: str) -> Elicit[OutreachCaseApproval]:
     )
 
 
-@mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
+@mcp.tool(
+    annotations=READ_ONLY_ANNOTATIONS,
+    title="Get member profile",
+    description=(
+        "Retrieve factual synthetic member profile and account information when "
+        "the user asks to view member details, balance, phase, risk profile, "
+        "communication preference, or investment allocation. Do not use this "
+        "tool to prepare or open a retention outreach case; use "
+        "prepare_member_outreach_case instead."
+    ),
+    meta=build_tool_metadata(
+        intent="member_profile",
+        browser_chat_enabled=True,
+    ),
+)
 def get_member_profile(member_id: MemberId) -> dict[str, Any]:
     """Return a synthetic member's internal superannuation profile.
 
@@ -173,7 +188,19 @@ def get_member_profile(member_id: MemberId) -> dict[str, Any]:
     )
 
 
-@mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
+@mcp.tool(
+    annotations=READ_ONLY_ANNOTATIONS,
+    title="Get member disengagement signals",
+    description=(
+        "Retrieve factual synthetic disengagement and churn signals for one "
+        "member. Use this for signal analysis only; it does not prepare an "
+        "outreach case or contact the member."
+    ),
+    meta=build_tool_metadata(
+        intent="member_disengagement_signals",
+        browser_chat_enabled=False,
+    ),
+)
 def get_member_disengagement_signals(member_id: MemberId) -> dict[str, Any]:
     """Return factual disengagement and churn signals for a synthetic member.
 
@@ -186,7 +213,19 @@ def get_member_disengagement_signals(member_id: MemberId) -> dict[str, Any]:
     )
 
 
-@mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
+@mcp.tool(
+    annotations=READ_ONLY_ANNOTATIONS,
+    title="Get cohort churn analytics",
+    description=(
+        "Retrieve aggregate synthetic churn analytics across member cohorts. "
+        "Use this for cohort-level analysis, not individual member profiles or "
+        "retention outreach cases."
+    ),
+    meta=build_tool_metadata(
+        intent="cohort_churn_analytics",
+        browser_chat_enabled=False,
+    ),
+)
 def get_cohort_churn_analytics() -> dict[str, Any]:
     """Return aggregate synthetic cohort churn analytics."""
     return _call_gateway(
@@ -195,7 +234,19 @@ def get_cohort_churn_analytics() -> dict[str, Any]:
     )
 
 
-@mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
+@mcp.tool(
+    annotations=READ_ONLY_ANNOTATIONS,
+    title="Get FUM outflow summary",
+    description=(
+        "Retrieve an aggregate synthetic funds-under-management outflow-risk "
+        "summary. Use this for portfolio-level outflow analysis, not individual "
+        "member profiles or retention outreach cases."
+    ),
+    meta=build_tool_metadata(
+        intent="fum_outflow_summary",
+        browser_chat_enabled=False,
+    ),
+)
 def get_fum_outflow_summary() -> dict[str, Any]:
     """Return aggregate synthetic funds-under-management outflow risk."""
     return _call_gateway(
@@ -204,7 +255,22 @@ def get_fum_outflow_summary() -> dict[str, Any]:
     )
 
 
-@mcp.tool(annotations=APPROVAL_ANNOTATIONS)
+@mcp.tool(
+    annotations=APPROVAL_ANNOTATIONS,
+    title="Prepare member retention outreach case",
+    description=(
+        "Use this tool when the user asks to prepare, open, create, or start a "
+        "retention outreach case for a synthetic member. It checks eligibility "
+        "and requires explicit human approval before preparing a read-only "
+        "result. Do not substitute a profile response for an outreach-case "
+        "request. It never persists a case or contacts the member."
+    ),
+    meta=build_tool_metadata(
+        intent="retention_outreach_case",
+        browser_chat_enabled=True,
+        requires_approval=True,
+    ),
+)
 def prepare_member_outreach_case(
     member_id: MemberId,
     approval: Annotated[

@@ -29,6 +29,7 @@ class ChatSettings(BaseModel):
     max_message_length: int = Field(default=4_000, ge=100, le=20_000)
     max_tool_rounds: int = Field(default=4, ge=1, le=8)
     max_output_tokens: int = Field(default=1_200, ge=100, le=4_000)
+    classifier_max_output_tokens: int = Field(default=400, ge=100, le=800)
     max_request_body_size: int = Field(default=65_536, ge=1_024, le=1_048_576)
 
     @field_validator("host", "model_deployment")
@@ -79,6 +80,9 @@ class ChatSettings(BaseModel):
             max_message_length=int(os.getenv("CHAT_MAX_MESSAGE_LENGTH", "4000")),
             max_tool_rounds=int(os.getenv("CHAT_MAX_TOOL_ROUNDS", "4")),
             max_output_tokens=int(os.getenv("CHAT_MAX_OUTPUT_TOKENS", "1200")),
+            classifier_max_output_tokens=int(
+                os.getenv("CHAT_CLASSIFIER_MAX_OUTPUT_TOKENS", "400")
+            ),
             max_request_body_size=int(
                 os.getenv("CHAT_MAX_REQUEST_BODY_SIZE", "65536")
             ),

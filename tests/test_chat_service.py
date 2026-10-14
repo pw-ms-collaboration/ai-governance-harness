@@ -9,13 +9,59 @@ import pytest
 
 from ai_governance_harness.chat.config import ChatSettings
 from ai_governance_harness.chat.service import (
+    SYSTEM_INSTRUCTIONS,
     SCOPE_REFUSAL_MESSAGE,
     ChatMessage,
     ChatRequest,
     ChatService,
     ChatServiceError,
     _restrict_tool_payload,
+    _tool_enabled_for_browser_chat,
 )
+from ai_governance_harness.guardrails.advice_classifier import (
+    AdviceClassificationFailure,
+    AdviceRequestClassification,
+    FoundryAdviceRequestClassifier,
+)
+from ai_governance_harness.governance.events import governance_events
+
+
+def _classification(
+    *,
+    request_intent: str = "factual_information",
+    advice_subject: str = "none",
+    financial_action: str = "none",
+    product_scope: str = "none",
+    confidence: str = "high",
+) -> AdviceRequestClassification:
+    return AdviceRequestClassification.model_validate(
+        {
+            "classification_status": "classified",
+            "request_intent": request_intent,
+            "advice_subject": advice_subject,
+            "financial_action": financial_action,
+            "product_scope": product_scope,
+            "confidence": confidence,
+        }
+    )
+
+
+@pytest.fixture(autouse=True)
+def _safe_semantic_classifier(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def classify(
+        _self,
+        _model_client,
+        *,
+        current_user_text: str,
+        previous_user_text: str | None,
+    ) -> AdviceRequestClassification:
+        return _classification()
+
+    monkeypatch.setattr(
+        FoundryAdviceRequestClassifier,
+        "classify",
+        classify,
+    )
 
 
 class _FakeToolCall:
@@ -201,6 +247,12 @@ class _FakeMcpClient:
         profile_tool = SimpleNamespace(
             name="get_member_profile",
             description="Get a member profile.",
+            meta={
+                "ai_governance_harness": {
+                    "browser_chat": {"enabled": True},
+                    "intent": "member_profile",
+                }
+            },
             input_schema={
                 "type": "object",
                 "properties": {"member_id": {"type": "string"}},
@@ -210,6 +262,12 @@ class _FakeMcpClient:
         signals_tool = SimpleNamespace(
             name="get_member_disengagement_signals",
             description="Get churn signals.",
+            meta={
+                "ai_governance_harness": {
+                    "browser_chat": {"enabled": False},
+                    "intent": "member_disengagement_signals",
+                }
+            },
             input_schema={
                 "type": "object",
                 "properties": {"member_id": {"type": "string"}},
@@ -274,8 +332,37 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
+def test_browser_tool_metadata_fails_closed_when_missing_or_malformed() -> None:
+    enabled = SimpleNamespace(
+        meta={
+            "ai_governance_harness": {
+                "browser_chat": {"enabled": True},
+                "intent": "member_profile",
+            }
+        }
+    )
+    missing = SimpleNamespace(meta=None)
+    malformed = SimpleNamespace(
+        meta={
+            "ai_governance_harness": {
+                "browser_chat": {"enabled": "true"},
+            }
+        }
+    )
+
+    assert _tool_enabled_for_browser_chat(enabled) is True
+    assert _tool_enabled_for_browser_chat(missing) is False
+    assert _tool_enabled_for_browser_chat(malformed) is False
+
+
+def test_system_instructions_distinguish_profile_and_outreach_intents() -> None:
+    assert "only tool you can use" not in SYSTEM_INSTRUCTIONS
+    assert "Do not substitute a profile response" in SYSTEM_INSTRUCTIONS
+    assert "prepare_member_outreach_case" in SYSTEM_INSTRUCTIONS
+
+
 @pytest.mark.anyio
-async def test_given_outreach_request_when_model_selects_disallowed_tool_then_fails_closed(
+async def test_given_outreach_with_unknown_eligibility_then_policy_denies(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Arrange
@@ -285,6 +372,9 @@ async def test_given_outreach_request_when_model_selects_disallowed_tool_then_fa
 
     class OutreachCompletions:
         def create(self, **kwargs):
+            assert kwargs["tool_choice"]["function"]["name"] == (
+                "prepare_member_outreach_case"
+            )
             tool_call = _FakeToolCall()
             tool_call.function.name = "prepare_member_outreach_case"
             return SimpleNamespace(choices=[SimpleNamespace(
@@ -312,21 +402,24 @@ async def test_given_outreach_request_when_model_selects_disallowed_tool_then_fa
     monkeypatch.setattr("ai_governance_harness.chat.service.Client", OutreachMcpClient)
     service = ChatService(ChatSettings(model_deployment="test-model"))
     request = ChatRequest(messages=[ChatMessage(
-        role="user", content="Prepare an outreach case for MEM-001",
+        role="user", content="Prepare an outreach retention case for MEM-001",
     )])
 
     # Act & Assert
-    with pytest.raises(ChatServiceError, match="Governance policy denied") as error:
+    with pytest.raises(
+        ChatServiceError,
+        match="eligibility is not confirmed",
+    ) as error:
         await service.complete(request)
     assert error.value.code == "governance_denied"
     assert error.value.status_code == 403
-    assert calls == []
+    assert calls == ["get_member_profile"]
     assert model_client.closed
     assert project_client.closed
 
 
 @pytest.mark.anyio
-async def test_given_eligible_outreach_when_chat_calls_disallowed_tool_then_fails_closed(
+async def test_given_eligible_outreach_request_then_asks_for_approval(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Arrange
@@ -336,6 +429,10 @@ async def test_given_eligible_outreach_when_chat_calls_disallowed_tool_then_fail
 
     class OutreachCompletions(_FakeCompletions):
         def create(self, **kwargs):
+            if not self.calls:
+                assert kwargs["tool_choice"]["function"]["name"] == (
+                    "prepare_member_outreach_case"
+                )
             result = super().create(**kwargs)
             message = result.choices[0].message
             if message.tool_calls:
@@ -372,18 +469,20 @@ async def test_given_eligible_outreach_when_chat_calls_disallowed_tool_then_fail
     monkeypatch.setattr("ai_governance_harness.chat.service.Client", OutreachMcpClient)
     service = ChatService(ChatSettings(model_deployment="test-model"))
     request = ChatRequest(messages=[ChatMessage(
-        role="user", content="Prepare an outreach case for MEM-001",
+        role="user", content="Prepare an outreach retention case for MEM-001",
     )])
 
-    # Act & Assert
-    with pytest.raises(ChatServiceError, match="Governance policy denied") as error:
-        await service.complete(request)
-    assert error.value.code == "governance_denied"
-    assert calls == []
+    # Act
+    response = await service.complete(request)
+
+    # Assert
+    assert response.message.startswith("Approval required for MEM-001")
+    assert response.tools_used == []
+    assert calls == ["get_member_profile"]
 
 
 @pytest.mark.anyio
-async def test_given_explicit_approval_when_outreach_pending_then_still_fails_closed(
+async def test_given_explicit_approval_when_outreach_pending_then_executes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Arrange
@@ -393,6 +492,10 @@ async def test_given_explicit_approval_when_outreach_pending_then_still_fails_cl
 
     class OutreachCompletions(_FakeCompletions):
         def create(self, **kwargs):
+            if not self.calls:
+                assert kwargs["tool_choice"]["function"]["name"] == (
+                    "prepare_member_outreach_case"
+                )
             result = super().create(**kwargs)
             message = result.choices[0].message
             if message.tool_calls:
@@ -459,11 +562,12 @@ async def test_given_explicit_approval_when_outreach_pending_then_still_fails_cl
         ]
     )
 
-    # Act & Assert
-    with pytest.raises(ChatServiceError, match="Governance policy denied") as error:
-        await service.complete(request)
-    assert error.value.code == "governance_denied"
-    assert calls == []
+    # Act
+    response = await service.complete(request)
+
+    # Assert
+    assert response.tools_used == ["prepare_member_outreach_case"]
+    assert calls == ["get_member_profile", "prepare_member_outreach_case"]
 
 
 @pytest.mark.anyio
@@ -554,12 +658,25 @@ async def test_given_personal_advice_request_when_completing_then_blocks_before_
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Arrange
-    def unexpected_foundry_call():
-        raise AssertionError("Foundry must not be called for a denied input.")
+    model_client = _FakeModelClient()
+    project_client = _FakeProjectClient(model_client)
+
+    async def classify(*_args, **_kwargs):
+        return _classification(
+            request_intent="financial_recommendation",
+            advice_subject="identified_member",
+            financial_action="invest",
+            product_scope="superannuation_option",
+        )
 
     monkeypatch.setattr(
         "ai_governance_harness.chat.service.get_foundry_client",
-        unexpected_foundry_call,
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        FoundryAdviceRequestClassifier,
+        "classify",
+        classify,
     )
     service = ChatService(ChatSettings(model_deployment="test-model"))
     request = ChatRequest(
@@ -582,7 +699,69 @@ async def test_given_personal_advice_request_when_completing_then_blocks_before_
     assert error.value.code == "governance_denied"
     assert error.value.status_code == 403
     assert error.value.details["action"] == "chat.input"
-    assert error.value.details["matched_rule"] == "deny-personal-advice-request"
+    assert (
+        error.value.details["matched_rule"]
+        == "deny-identified-member-financial-recommendation"
+    )
+    assert model_client.chat.completions.calls == []
+    assert model_client.closed is True
+    assert project_client.closed is True
+
+
+@pytest.mark.anyio
+async def test_given_mixed_outreach_and_stock_advice_then_denies_before_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    model_client = _FakeModelClient()
+    project_client = _FakeProjectClient(model_client)
+
+    async def classify(*_args, **_kwargs):
+        return _classification(
+            request_intent="financial_recommendation",
+            advice_subject="identified_member",
+            financial_action="invest",
+            product_scope="external_security",
+        )
+
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        FoundryAdviceRequestClassifier,
+        "classify",
+        classify,
+    )
+    service = ChatService(ChatSettings(model_deployment="test-model"))
+    request = ChatRequest(
+        messages=[
+            ChatMessage(
+                role="user",
+                content=(
+                    "Okay if I can't create a retention case for this customer "
+                    "MEM-003, should they invest in Microsoft stock?"
+                ),
+            )
+        ]
+    )
+
+    # Act
+    with pytest.raises(ChatServiceError) as error:
+        await service.complete(request)
+
+    # Assert
+    assert error.value.code == "governance_denied"
+    assert error.value.status_code == 403
+    assert error.value.details["action"] == "chat.input"
+    assert error.value.details["matched_rule"] in {
+        "deny-identified-member-financial-recommendation",
+        "deny-external-security-recommendation",
+    }
+    assert model_client.chat.completions.calls == []
+    snapshot = json.dumps(governance_events.snapshot())
+    assert "Microsoft stock" not in snapshot
+    assert "MEM-003" not in snapshot
 
 
 @pytest.mark.anyio
@@ -590,12 +769,34 @@ async def test_given_member_id_follow_up_to_advice_request_then_blocks_before_mo
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Arrange
-    def unexpected_foundry_call():
-        raise AssertionError("Foundry must not be called for a denied input.")
+    model_client = _FakeModelClient()
+    project_client = _FakeProjectClient(model_client)
+    classifier_context: dict[str, str | None] = {}
+
+    async def classify(
+        _self,
+        _model_client,
+        *,
+        current_user_text: str,
+        previous_user_text: str | None,
+    ):
+        classifier_context["current"] = current_user_text
+        classifier_context["previous"] = previous_user_text
+        return _classification(
+            request_intent="financial_recommendation",
+            advice_subject="identified_member",
+            financial_action="invest",
+            product_scope="superannuation_option",
+        )
 
     monkeypatch.setattr(
         "ai_governance_harness.chat.service.get_foundry_client",
-        unexpected_foundry_call,
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        FoundryAdviceRequestClassifier,
+        "classify",
+        classify,
     )
     service = ChatService(ChatSettings(model_deployment="test-model"))
     request = ChatRequest(
@@ -622,7 +823,122 @@ async def test_given_member_id_follow_up_to_advice_request_then_blocks_before_mo
     # Assert
     assert error.value.code == "governance_denied"
     assert error.value.details["action"] == "chat.input"
-    assert error.value.details["matched_rule"] == "deny-personal-advice-request"
+    assert (
+        error.value.details["matched_rule"]
+        == "deny-identified-member-financial-recommendation"
+    )
+    assert classifier_context == {
+        "current": "MEM-001",
+        "previous": (
+            "Given this customer's account balance, give me some financial "
+            "recommendations on how to grow their balance"
+        ),
+    }
+    assert model_client.chat.completions.calls == []
+
+
+@pytest.mark.anyio
+async def test_given_classifier_failure_then_surfaces_distinct_technical_stop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model_client = _FakeModelClient()
+    project_client = _FakeProjectClient(model_client)
+
+    async def classify(*_args, **_kwargs):
+        raise AdviceClassificationFailure("invalid_response")
+
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        FoundryAdviceRequestClassifier,
+        "classify",
+        classify,
+    )
+    service = ChatService(ChatSettings(model_deployment="test-model"))
+    request = ChatRequest(
+        messages=[ChatMessage(role="user", content="Show MEM-001")]
+    )
+
+    with pytest.raises(ChatServiceError) as error:
+        await service.complete(request)
+
+    assert error.value.code == "classification_unavailable"
+    assert error.value.status_code == 503
+    assert error.value.details["classification_reason"] == "invalid_response"
+    assert error.value.details["matched_rule"] == "deny-unclassified-chat-input"
+    assert model_client.chat.completions.calls == []
+    assert model_client.closed is True
+    assert project_client.closed is True
+
+
+@pytest.mark.anyio
+async def test_given_classifier_timeout_then_fails_closed_as_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model_client = _FakeModelClient()
+    project_client = _FakeProjectClient(model_client)
+
+    async def classify(*_args, **_kwargs):
+        raise TimeoutError
+
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        FoundryAdviceRequestClassifier,
+        "classify",
+        classify,
+    )
+    service = ChatService(ChatSettings(model_deployment="test-model"))
+    request = ChatRequest(
+        messages=[ChatMessage(role="user", content="Show MEM-001")]
+    )
+
+    with pytest.raises(ChatServiceError) as error:
+        await service.complete(request)
+
+    assert error.value.code == "classification_unavailable"
+    assert error.value.details["classification_reason"] == "unavailable"
+    assert error.value.details["matched_rule"] == "deny-unclassified-chat-input"
+    assert model_client.chat.completions.calls == []
+
+
+@pytest.mark.anyio
+async def test_given_low_confidence_classification_then_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model_client = _FakeModelClient()
+    project_client = _FakeProjectClient(model_client)
+
+    async def classify(*_args, **_kwargs):
+        return _classification(
+            request_intent="other_safe",
+            confidence="low",
+        )
+
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        FoundryAdviceRequestClassifier,
+        "classify",
+        classify,
+    )
+    service = ChatService(ChatSettings(model_deployment="test-model"))
+    request = ChatRequest(
+        messages=[ChatMessage(role="user", content="Please help.")]
+    )
+
+    with pytest.raises(ChatServiceError) as error:
+        await service.complete(request)
+
+    assert error.value.code == "classification_unavailable"
+    assert error.value.details["classification_reason"] == "low_confidence"
+    assert error.value.details["matched_rule"] == "deny-low-confidence-chat-input"
 
 
 @pytest.mark.anyio

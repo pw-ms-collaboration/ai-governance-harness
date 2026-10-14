@@ -116,27 +116,91 @@ def test_given_external_denial_when_recording_then_enforces_and_counts_it(
 
 
 @pytest.mark.parametrize(
-    ("status", "expected_allowed"),
-    [("passed", True), ("personal_advice_requested", False), ("unknown", False)],
+    ("overrides", "expected_allowed", "expected_rule"),
+    [
+        ({}, True, "allow-chat-input"),
+        (
+            {
+                "request_intent": "financial_recommendation",
+                "advice_subject": "identified_member",
+                "financial_action": "invest",
+                "product_scope": "superannuation_option",
+            },
+            False,
+            "deny-identified-member-financial-recommendation",
+        ),
+        (
+            {
+                "request_intent": "financial_recommendation",
+                "advice_subject": "general_audience",
+                "financial_action": "buy",
+                "product_scope": "external_security",
+            },
+            False,
+            "deny-external-security-recommendation",
+        ),
+        (
+            {"classification_status": "unavailable"},
+            False,
+            "deny-unclassified-chat-input",
+        ),
+        (
+            {"request_intent": "unknown"},
+            False,
+            "deny-unknown-chat-intent",
+        ),
+        (
+            {"confidence": "low"},
+            False,
+            "deny-low-confidence-chat-input",
+        ),
+    ],
 )
-def test_given_advice_request_status_when_evaluating_input_then_enforces_policy(
-    status: str,
+def test_given_semantic_advice_facts_when_evaluating_input_then_enforces_policy(
+    overrides: dict[str, str],
     expected_allowed: bool,
+    expected_rule: str,
 ) -> None:
     # Arrange
     engine = GovernanceEngine(_settings())
+    policy_data = {
+        "classification_status": "classified",
+        "request_intent": "factual_information",
+        "advice_subject": "none",
+        "financial_action": "none",
+        "product_scope": "none",
+        "confidence": "high",
+        **overrides,
+    }
 
     # Act
     decision = engine.evaluate(
         LifecyclePoint.INPUT,
         "chat.input",
-        policy_data={"advice_request_status": status},
+        policy_data=policy_data,
     )
 
     # Assert
     assert decision.allowed is expected_allowed
-    if status == "personal_advice_requested":
-        assert decision.matched_rule == "deny-personal-advice-request"
+    assert decision.matched_rule == expected_rule
+
+
+@pytest.mark.parametrize(
+    "lifecycle_point",
+    [LifecyclePoint.PRE_MODEL, LifecyclePoint.POST_MODEL],
+)
+def test_classifier_model_lifecycle_is_explicitly_allowed(
+    lifecycle_point: LifecyclePoint,
+) -> None:
+    engine = GovernanceEngine(_settings())
+
+    decision = engine.evaluate(
+        lifecycle_point,
+        "foundry.advice_classifier",
+        policy_data={"classification_status": "classified"},
+    )
+
+    assert decision.allowed is True
 
 
 @pytest.mark.parametrize(

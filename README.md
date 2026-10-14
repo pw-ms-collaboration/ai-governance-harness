@@ -111,9 +111,8 @@ The governance panel is intentionally visible beside the user experience so a
 demonstration audience can connect an AI action with the controls and evidence
 that govern it. Its main areas are:
 
-1. **Decision controls and totals** — refresh or pause the bounded live view,
-   run an inert default-deny demonstration, and compare allowed, denied, total,
-   and retained event counts.
+1. **Decision controls and totals** — refresh or pause the bounded live view
+   and compare allowed, denied, total, and retained event counts.
 2. **Runtime posture** — inspect chat and MCP readiness, enforcement state,
    sandbox requirements, policy digest, and independent circuit-breaker state.
 3. **Recent decisions** — review privacy-safe lifecycle, action, outcome, rule,
@@ -149,8 +148,10 @@ The browser never calls Foundry or the data gateway directly:
 
 1. The browser sends the bounded conversation to the local chat service.
 2. The governance boundary evaluates the input and pre-model lifecycle points.
-3. The chat service sends the conversation and discovered tool schemas to the
-   configured Azure AI Foundry model through a timeout and circuit breaker.
+3. The chat service selects only discovered tools whose structured MCP metadata
+   explicitly enables browser chat, then sends those schemas to the configured
+   Azure AI Foundry model through a timeout and circuit breaker. Missing or
+   malformed exposure metadata fails closed.
 4. When the model selects a tool, the chat service evaluates it against the
    exact default-deny policy and calls it through MCP
    Streamable HTTP.
@@ -168,16 +169,23 @@ results, tokens, and model responses are excluded from application telemetry.
 
 ## Available MCP Tools
 
-| Tool | Purpose |
-|------|---------|
-| `get_member_profile` | Returns a synthetic member's internal fund profile |
-| `get_member_disengagement_signals` | Returns factual churn and disengagement signals |
-| `get_cohort_churn_analytics` | Returns aggregate cohort churn analytics |
-| `get_fum_outflow_summary` | Returns aggregate funds-under-management outflow risk |
-| `prepare_member_outreach_case` | Requests MCP form approval before preparing a synthetic, read-only outreach case |
+| Tool | Purpose | Browser chat |
+|------|---------|--------------|
+| `get_member_profile` | Returns a synthetic member's internal fund profile | Enabled |
+| `get_member_disengagement_signals` | Returns factual churn and disengagement signals | Direct MCP only |
+| `get_cohort_churn_analytics` | Returns aggregate cohort churn analytics | Direct MCP only |
+| `get_fum_outflow_summary` | Returns aggregate funds-under-management outflow risk | Direct MCP only |
+| `prepare_member_outreach_case` | Requests MCP form approval before preparing a synthetic, read-only outreach case | Enabled |
 
 The remote tool surface does not accept filesystem paths, arbitrary data
 filters, or write operations.
+
+Each tool owns a structured `ai_governance_harness` metadata contract declaring
+its intent, browser-chat exposure, and approval requirement. Chat does not
+derive authorization from natural-language descriptions or maintain a separate
+tool-name allowlist. Descriptions remain mutually exclusive selection guidance:
+profile requests use `get_member_profile`, while prepare/open/create/start
+retention-case requests use `prepare_member_outreach_case`.
 
 ### MCP Form Elicitation
 
@@ -292,9 +300,10 @@ sanitized tool error, not a successful replacement payload. Only the scan
 status and result type enter policy evaluation, never the response text.
 The existing final chat-response guardrail remains in place.
 
-This deterministic pattern scan is not a legal advice classifier and cannot
-detect every paraphrase or contextual recommendation. Production use requires
-compliance-reviewed detection and evaluation cases.
+This deterministic output pattern scan is not a legal advice classifier and
+cannot detect every generated paraphrase. It remains a separate post-tool
+safety boundary from the semantic input classifier described below.
+Production use requires compliance-reviewed detection and evaluation cases.
 
 The five current tools read packaged synthetic data and do not execute
 generated code, shell commands, untrusted files, or unrestricted network
@@ -580,7 +589,6 @@ With the default ports:
 | `http://127.0.0.1:8080` | Browser chat UI |
 | `http://127.0.0.1:8080/api/chat` | Chat API used by the browser |
 | `http://127.0.0.1:8080/api/governance/snapshot` | Merged privacy-safe chat and MCP governance snapshot |
-| `http://127.0.0.1:8080/api/governance/demo/deny` | Inert default-deny demonstration |
 | `http://127.0.0.1:8080/health/live` | Chat liveness |
 | `http://127.0.0.1:8080/health/ready` | Chat governance and sandbox readiness |
 | `http://127.0.0.1:8001/mcp` | MCP Streamable HTTP endpoint |
@@ -633,14 +641,30 @@ The browser, static assets, and API responses use `Cache-Control: no-store` so
 the UI error contract and governance table cannot drift behind the running
 service after an update.
 
-Personalized financial-advice requests are classified in memory before the
-model call. Only the bounded `advice_request_status` reaches policy evaluation;
-request text is not included in policy data or governance events. The
-`deny-personal-advice-request` rule returns HTTP 403 and appears as a denial in
-the governance panel. General factual questions continue through the normal
-chat path. When a short follow-up supplies only a member ID, classification
-also considers the immediately preceding user request so a multi-turn personal
-advice request cannot bypass the input rule by deferring the identifier.
+Personalized financial-advice requests pass through a dedicated, tool-free
+Foundry classifier before the primary assistant. The classifier uses strict
+JSON schema, a closed intent taxonomy, minimal reasoning, low verbosity,
+`store=False`, and the bounded `CHAT_CLASSIFIER_MAX_OUTPUT_TOKENS` budget.
+It receives the current and immediately preceding user turns as separately
+labelled context so split-turn requests do not rely on member-ID regex routing.
+
+Only typed fields such as `request_intent`, `advice_subject`,
+`financial_action`, `product_scope`, `confidence`, and
+`classification_status` reach YAML policy. Request text and free-form model
+rationale are not included in policy data or governance events. Policy rules
+deny identified-member financial recommendations and external-security
+recommendations; classified factual, educational, retention-outreach, and
+other safe intents continue through the normal chat path. The classifier call
+and result have their own `foundry.advice_classifier` lifecycle decisions and
+reliability circuit, but those decisions authorize classification only, not
+the user request.
+
+Invalid schema, empty or filtered classifier output, an unavailable classifier,
+unknown intent, and low confidence all stop before MCP discovery and the
+primary assistant. Successfully classified unsafe intent returns the matched
+governance denial. A technical or uncertain classifier stop returns
+`classification_unavailable` with a bounded reason and correlation reference
+rather than presenting the failure as a personal-advice denial.
 Failed and denied browser turns remain visible to the user but are removed from
 the active request history, so a rejected intent cannot contaminate the next
 independent question.
@@ -681,8 +705,11 @@ control plane without exposing request content. It shows:
 
 Use **Pause updates** to stop the five-second automatic refresh or **Refresh**
 to request the current snapshot. Automatic refresh runs only while the page is
-visible. **Demonstrate default deny** evaluates a fixed prohibited action,
-records the denial, and never executes the action.
+visible.
+**Clear chat** also resets the page's decision counters and recent-decisions
+table. Subsequent refreshes show only decisions generated after that clear
+action. The underlying bounded in-memory audit evidence is retained until the
+services restart; clearing the browser view does not delete server telemetry.
 
 The panel retains at most 200 sanitized events in each process and shows at
 most 100 merged events. Events remain in process memory and reset when the

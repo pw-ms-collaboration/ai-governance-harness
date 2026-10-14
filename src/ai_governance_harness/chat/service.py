@@ -37,28 +37,31 @@ from ai_governance_harness.governance.snapshot import (
 from ai_governance_harness.guardrails.advice_filter import (
     AdviceClassificationGuardrail,
     WholeOfWealthInvariantGuardrail,
-    advice_request_policy_data,
     tool_response_policy_data,
+)
+from ai_governance_harness.guardrails.advice_classifier import (
+    AdviceClassificationFailure,
+    AdviceRequestClassification,
+    FoundryAdviceRequestClassifier,
+    classification_failure_policy_data,
+)
+from ai_governance_harness.mcp_server.tool_contracts import (
+    browser_chat_enabled,
 )
 
 SYSTEM_INSTRUCTIONS = (
-    "You are an internal assistant for bank business analysts working only with "
-    "synthetic customer account data. The only tool you can use is "
-    "get_member_profile, which returns member details (name, tenure, risk "
-    "profile, communication preference), account balance, phase, and investment "
-    "option allocation. Use it for every profile fact and never invent tool results. "
-    "Share only those profile fields. If asked for an email, phone number, or "
-    "contact details, call get_member_profile and share the communication "
-    "preference, stating that the record holds no email address or phone number. "
-    "For any other customer information, "
-    "including contributions, digital activity, interactions, churn signals, or "
-    "cohort and FUM analytics, reply exactly: Sorry, I can’t assist "
-    "with this request. I can only provide factual information and general "
-    "guidance based on a member’s internal superannuation records, including "
-    "their account profile, contributions, engagement activity, and recorded "
-    "disengagement signals. Do not give personal financial advice to customers "
-    "or recommend actions for them, and do not claim visibility into external "
-    "assets. Keep responses concise."
+    "You are an internal assistant for business analysts working only with "
+    "synthetic in-fund superannuation data. Use get_member_profile for factual "
+    "member and account-profile requests. Use prepare_member_outreach_case when "
+    "the user asks to prepare, open, create, or start a retention outreach case; "
+    "that workflow checks eligibility and requires explicit human approval. Do "
+    "not substitute a profile response for an outreach-case request. Never "
+    "invent tool results. If asked for contact details, use the profile's "
+    "communication preference and state that no email address or phone number "
+    "is recorded. For unsupported customer information, explain the supported "
+    "profile and retention-outreach capabilities. Do not give personal "
+    "financial advice, recommend actions for a member, or claim visibility into "
+    "external assets. Keep responses concise."
 )
 
 logger = logging.getLogger(__name__)
@@ -78,6 +81,7 @@ _DECLINE_RESPONSES = frozenset(
 ChatErrorCode = Literal[
     "chat_service_error",
     "client_capability_required",
+    "classification_unavailable",
     "governance_denied",
     "invalid_model_response",
     "invalid_request",
@@ -89,13 +93,11 @@ ChatErrorCode = Literal[
 ]
 SCOPE_REFUSAL_PREFIX = "Sorry, I can't assist with this request"
 SCOPE_REFUSAL_MESSAGE = (
-    "Sorry, I can’t assist with this request. I can only provide factual information "
-    "and general guidance based on a member’s internal superannuation records, "
-    "including their account profile, contributions, engagement activity, and "
-    "recorded disengagement signals"
+    "Sorry, I can’t assist with this request. I can provide factual synthetic "
+    "member profile information or help prepare an eligible read-only retention "
+    "outreach case with explicit approval."
 )
 
-ALLOWED_CHAT_TOOLS = frozenset({"get_member_profile"})
 PROFILE_FIELDS = (
     "member_id",
     "full_name",
@@ -111,6 +113,11 @@ def _is_scope_refusal(message: str) -> bool:
     """Detect the fixed out-of-scope refusal, tolerating typographic apostrophes."""
     normalized = message.replace("\u2019", "'").strip()
     return normalized.startswith(SCOPE_REFUSAL_PREFIX)
+
+
+def _tool_enabled_for_browser_chat(tool: Any) -> bool:
+    """Fail closed unless MCP metadata explicitly enables the tool."""
+    return browser_chat_enabled(getattr(tool, "meta", None))
 
 
 def _restrict_tool_payload(tool_name: str, payload: Any) -> Any:
@@ -368,27 +375,27 @@ def _foundry_guardrail_code(error: APIStatusError) -> str | None:
     return None
 
 
-def _active_advice_request_text(messages: list[ChatMessage]) -> str:
-    """Include prior user intent when the latest turn only supplies a member ID."""
-    latest = messages[-1]
-    if (
-        latest.role != "user"
-        or len(latest.content) > 80
-        or re.search(r"\bMEM-\d{3}\b", latest.content, re.IGNORECASE) is None
-    ):
-        return latest.content
+def _advice_classifier_context(
+    messages: list[ChatMessage],
+) -> tuple[str, str | None]:
+    """Return the current and immediately preceding user turns."""
+    user_messages = [
+        message.content for message in messages if message.role == "user"
+    ]
+    previous = user_messages[-2] if len(user_messages) > 1 else None
+    return user_messages[-1], previous
 
-    previous_user = next(
-        (
-            message
-            for message in reversed(messages[:-1])
-            if message.role == "user"
-        ),
-        None,
-    )
-    if previous_user is None:
-        return latest.content
-    return f"{previous_user.content}\n{latest.content}"
+
+def _classification_stop_reason(policy_data: dict[str, str]) -> str | None:
+    """Return the bounded reason for a fail-closed classification stop."""
+    status = policy_data["classification_status"]
+    if status != "classified":
+        return status
+    if policy_data["request_intent"] == "unknown":
+        return "unknown_intent"
+    if policy_data["confidence"] == "low":
+        return "low_confidence"
+    return None
 
 
 class ChatMessage(BaseModel):
@@ -475,6 +482,23 @@ def _pending_outreach_approval(
     return member_match.group(1), decision
 
 
+def _requested_outreach_member(messages: list[ChatMessage]) -> str | None:
+    """Return the member named in an explicit outreach-case request."""
+    latest = messages[-1].content
+    normalized = latest.lower()
+    if (
+        "outreach" not in normalized
+        or "case" not in normalized
+        or not any(
+            action in normalized
+            for action in ("prepare", "open", "create", "start")
+        )
+    ):
+        return None
+    member_match = re.search(r"\bMEM-\d{3}\b", latest, re.IGNORECASE)
+    return member_match.group(0).upper() if member_match is not None else None
+
+
 class ChatResponse(BaseModel):
     """Sanitized response returned to the browser."""
 
@@ -552,17 +576,42 @@ class _CompletionClient(Protocol):
     def close(self) -> None: ...
 
 
+class _AdviceRequestClassifier(Protocol):
+    async def classify(
+        self,
+        model_client: _CompletionClient,
+        *,
+        current_user_text: str,
+        previous_user_text: str | None,
+    ) -> AdviceRequestClassification: ...
+
+
 class ChatService:
     """Run a bounded Foundry tool-calling loop against an MCP endpoint."""
 
-    def __init__(self, settings: ChatSettings) -> None:
+    def __init__(
+        self,
+        settings: ChatSettings,
+        advice_classifier: _AdviceRequestClassifier | None = None,
+    ) -> None:
         self._settings = settings
+        self._advice_classifier = (
+            advice_classifier
+            or FoundryAdviceRequestClassifier(
+                model=settings.model_deployment,
+                max_output_tokens=settings.classifier_max_output_tokens,
+            )
+        )
         self._advice_guardrail = AdviceClassificationGuardrail()
         self._wealth_guardrail = WholeOfWealthInvariantGuardrail()
         self._governance = get_governance_engine()
         self._foundry_reliability = ReliabilityGuard(
             self._governance.settings,
             "foundry",
+        )
+        self._classifier_reliability = ReliabilityGuard(
+            self._governance.settings,
+            "foundry-advice-classifier",
         )
         self._mcp_reliability = ReliabilityGuard(
             self._governance.settings,
@@ -580,6 +629,9 @@ class ChatService:
             source="chat",
             circuits={
                 "foundry": self._foundry_reliability.state,
+                "foundry_advice_classifier": (
+                    self._classifier_reliability.state
+                ),
                 "mcp": self._mcp_reliability.state,
                 "mcp_observability": self._dashboard_reliability.state,
             },
@@ -649,20 +701,86 @@ class ChatService:
         model_client: _CompletionClient | None = None
         tools_used: list[str] = []
         pending_approval = _pending_outreach_approval(request.messages)
+        requested_outreach_member = _requested_outreach_member(
+            request.messages
+        )
         try:
+            project_client = get_foundry_client()
+            model_client = project_client.get_openai_client()
+            current_user_text, previous_user_text = (
+                _advice_classifier_context(request.messages)
+            )
             self._governance.require_allowed(
-                LifecyclePoint.INPUT,
-                "chat.input",
+                LifecyclePoint.PRE_MODEL,
+                "foundry.advice_classifier",
                 policy_data={
-                    "message_count": len(request.messages),
-                    **advice_request_policy_data(
-                        _active_advice_request_text(request.messages)
-                    ),
+                    "context_user_turn_count": (
+                        2 if previous_user_text is not None else 1
+                    )
                 },
                 source="chat",
             )
-            project_client = get_foundry_client()
-            model_client = project_client.get_openai_client()
+
+            classification_failure_reason: str | None = None
+            try:
+                async def classify_request() -> AdviceRequestClassification:
+                    return await self._advice_classifier.classify(
+                        model_client,
+                        current_user_text=current_user_text,
+                        previous_user_text=previous_user_text,
+                    )
+
+                classification = await self._classifier_reliability.call(
+                    classify_request
+                )
+                classification_data = classification.to_policy_data()
+            except AdviceClassificationFailure as exc:
+                classification_failure_reason = exc.reason
+                classification_data = classification_failure_policy_data(
+                    exc.reason
+                )
+            except Exception as exc:
+                classification_failure_reason = "unavailable"
+                classification_data = classification_failure_policy_data(
+                    "unavailable"
+                )
+                logger.warning(
+                    "Advice classifier unavailable",
+                    extra={"failure_type": type(exc).__name__},
+                )
+
+            self._governance.require_allowed(
+                LifecyclePoint.POST_MODEL,
+                "foundry.advice_classifier",
+                policy_data=classification_data,
+                source="chat",
+            )
+            classification_stop_reason = (
+                classification_failure_reason
+                or _classification_stop_reason(classification_data)
+            )
+            try:
+                self._governance.require_allowed(
+                    LifecyclePoint.INPUT,
+                    "chat.input",
+                    policy_data={
+                        "message_count": len(request.messages),
+                        **classification_data,
+                    },
+                    source="chat",
+                )
+            except GovernanceDeniedError as exc:
+                if classification_stop_reason is None:
+                    raise
+                details = _governance_error_details(exc)
+                details["classification_reason"] = classification_stop_reason
+                raise ChatServiceError(
+                    "The request could not be safely classified. Please try "
+                    "again or rephrase the request.",
+                    code="classification_unavailable",
+                    status_code=503,
+                    details=details,
+                ) from exc
 
             async def resolve_elicitation(_context: Any, _params: Any):
                 if pending_approval is not None and pending_approval[1] is True:
@@ -682,7 +800,9 @@ class ChatService:
                     mcp_client.list_tools,
                 )
                 allowed_tools = [
-                    tool for tool in discovered.tools if tool.name in ALLOWED_CHAT_TOOLS
+                    tool
+                    for tool in discovered.tools
+                    if _tool_enabled_for_browser_chat(tool)
                 ]
                 tool_by_name = {tool.name: tool for tool in allowed_tools}
                 model_tools = [
@@ -703,6 +823,21 @@ class ChatService:
                         for message in request.messages
                     ],
                 ]
+                if (
+                    requested_outreach_member is not None
+                    and pending_approval is None
+                ):
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "The user explicitly requested a retention "
+                                "outreach case. Call "
+                                "prepare_member_outreach_case for "
+                                f"{requested_outreach_member}."
+                            ),
+                        }
+                    )
                 if pending_approval is not None:
                     member_id, decision = pending_approval
                     if decision is None:
@@ -751,15 +886,36 @@ class ChatService:
                             "model": self._settings.model_deployment,
                             "messages": messages,
                             "tools": model_tools,
-                            "tool_choice": (
-                                "none" if empty_response_retried else "auto"
-                            ),
+                            "tool_choice": "none",
                             "parallel_tool_calls": False,
                             "max_completion_tokens": (
                                 self._settings.max_output_tokens
                             ),
                             "store": False,
                         }
+                        if not empty_response_retried:
+                            outreach_requested = (
+                                not tools_used
+                                and (
+                                    requested_outreach_member is not None
+                                    or (
+                                        pending_approval is not None
+                                        and pending_approval[1] is True
+                                    )
+                                )
+                            )
+                            completion_options["tool_choice"] = (
+                                {
+                                    "type": "function",
+                                    "function": {
+                                        "name": (
+                                            "prepare_member_outreach_case"
+                                        )
+                                    },
+                                }
+                                if outreach_requested
+                                else "auto"
+                            )
                         if empty_response_retried:
                             completion_options.update(
                                 reasoning_effort="minimal",

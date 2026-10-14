@@ -98,9 +98,6 @@
             <button id="pause-governance" type="button" class="secondary" aria-pressed="false">
               Pause updates
             </button>
-            <button id="demo-deny" type="button" class="danger-secondary">
-              Demonstrate default deny
-            </button>
           </div>
           <p id="governance-update-status" class="activity" role="status" aria-live="polite"></p>
 
@@ -124,7 +121,9 @@
           </dl>
 
           <section class="runtime-summary" aria-labelledby="runtime-title">
-            <h3 id="runtime-title">Runtime posture</h3>
+            <h3 id="runtime-title">System health</h3>
+            <p class="section-intro">Current availability of the services used by governed chat.</p>
+            <p id="circuit-health-summary" class="health-summary">Checking service health...</p>
             <ul id="service-statuses" class="status-list"></ul>
             <dl class="compact-definition">
               <div>
@@ -140,7 +139,26 @@
                 <dd><code id="policy-digest">Unknown</code></dd>
               </div>
             </dl>
-            <div id="circuit-statuses" class="circuit-grid"></div>
+            <h4 class="health-subheading">Failure protection</h4>
+            <p class="section-intro">These safeguards show whether calls are allowed. They do not independently prove that a remote service is reachable.</p>
+            <ul id="circuit-statuses" class="health-grid" aria-label="Dependency health"></ul>
+            <details class="health-help">
+              <summary>What do these failure-protection statuses mean?</summary>
+              <dl class="health-legend">
+                <div>
+                  <dt>Calls allowed</dt>
+                  <dd>The circuit is closed because the repeated-failure threshold has not been reached.</dd>
+                </div>
+                <div>
+                  <dt>Recovery check</dt>
+                  <dd>The circuit is half-open and is testing a limited request.</dd>
+                </div>
+                <div>
+                  <dt>Calls paused</dt>
+                  <dd>The circuit is open after repeated failures and pauses calls briefly.</dd>
+                </div>
+              </dl>
+            </details>
           </section>
 
           <details open>
@@ -206,6 +224,6 @@
     <footer>
       <p>Synthetic demonstration data only. External assets are not tracked or verified.</p>
     </footer>
-    <script src="/static/app.js?v=policy-notice" defer></script>
+    <script src="/static/app.js?v=health-panel" defer></script>
   </body>
 </html>

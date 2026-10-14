@@ -9,9 +9,9 @@
 
 ## Executive Summary
 
-* Bottom line: Extend the current synthetic-data harness toward the workshop architecture by adopting a Foundry Prompt Agent, Entra agent identity, an APIM-backed MCP gateway, and correlated Azure Monitor evidence in gated releases.
+* Bottom line: Extend the current synthetic-data harness toward the workshop architecture with ACA, an APIM-backed MCP gateway, a browser chat UI in front of a Foundry Prompt Agent, identity, guardrails, and correlated Azure Monitor evidence.
 * Why this matters: The current code is a local-style chat orchestrator with direct Foundry and MCP calls. The target architecture places Azure-native identity, guardrails, gateway controls, approval, and evidence across that flow.
-* Planning result: Partial and not ready for implementation. Existing ACA and MCP security work is still planned, while Foundry agent, gateway feature availability, identity propagation, and audit-retention decisions need a deployment preflight.
+* Planning result: Partial and not ready for implementation. The user confirmed the existing chat UI remains in front of a backend Foundry Prompt Agent. Existing ACA/MCP work, Azure feature availability, identity propagation, and audit-retention decisions still need preflight.
 * Confidence and uncertainty: High confidence in the repo delta and release order. Azure region, tenant, Foundry agent/MCP feature availability, Entra Agent ID support, APIM MCP streaming and elicitation behavior, and business-approved audit retention are not established by repository evidence.
 
 ### What You May Not Know
@@ -19,6 +19,7 @@
 * The existing `real-mcp-server` plan already owns the baseline ACA, Bicep, remote MCP authentication, and App Insights work. This plan depends on that baseline and avoids duplicating it.
 * The Dockerfile still starts the local two-process supervisor. It is not the final hosted workload entrypoint.
 * The current chat calls Foundry Chat Completions and directly calls MCP. It does not invoke a Foundry Prompt Agent or pass an authenticated agent token to MCP.
+* The chat UI is the user-facing frontend; `ChatService` remains its API façade and invokes the Foundry Prompt Agent as the backend orchestrator.
 * The image describes some gateway capabilities as preview. The deployment must verify current tenant, region, protocol, and client support before selecting the Foundry AI Gateway path; APIM remains the concrete gateway fallback.
 
 ## Phase Checklist
@@ -133,11 +134,29 @@ Requirements:
 
 Details:
 * The supplied architecture describes Foundry AI Gateway MCP support as preview and identifies APIM as its implementation. Treat current availability and compatibility as a release gate, not as a guaranteed feature.
+* Infrastructure as Code is supported for the surrounding resources: Microsoft Learn documents Bicep resources for the Foundry Cognitive Services account/project and project connections. The APIM `service/apis` Bicep schema includes MCP API type/properties, but the MCP properties use a preview API version. Confirm that API version and tier in the target subscription before deployment.
+* The Foundry project provider exposes projects and connections but no agent/toolbox ARM resource type. Prompt Agent versions and MCP tool definitions are Foundry data-plane operations through the SDK or REST API. The installed `azure-ai-projects` version is `2.8.0` and lacks an MCP tool model; P02 must use a supported SDK version or the documented REST API.
+* Entra Agent ID lifecycle is managed through Foundry integration or Microsoft Graph, not as a native `Microsoft.CognitiveServices` Bicep resource. The existing Foundry agent has an identity object; verify its Entra Agent ID semantics and permissions instead of creating another identity by default. Bicep may orchestrate a Graph step only with explicitly approved Graph permissions and an idempotent lifecycle.
+* `.env` identifies Foundry project `project-aigovernance-amp-guardrails-hack-aue` in `australiaeast`; the project resource exists and its configured `gpt-5` deployment reports `Succeeded`. The Azure CLI and `.env` tenant/subscription contexts match; identifiers are not recorded here.
+* Read-only Foundry SDK queries found five agents. `member-wealth-insights-agent` is enabled, version `1` is a `prompt` definition, and its identity record has both client and principal identifiers. Identifier values are intentionally omitted.
+* Version `1` has no tools in its prompt definition. The installed `azure-ai-projects` package contains no MCP tool schema references, so its typed agent model does not configure MCP tools. This does not prove service-side MCP support is unavailable; the platform owner must identify a supported service/portal/API/SDK configuration path.
+* APIM `ajhackathon` in the selected resource group reports `Succeeded` at Developer tier, but its API list contains no MCP API. Foundry AI Gateway MCP routing and MCP streaming/session/elicitation behavior remain unverified.
+* Confirmed user direction: keep Azure Container Apps as the workload host and use Foundry AI Gateway backed by APIM for eligible MCP tools when available in the target region and when MCP discovery, streaming/session, authentication, and elicitation tests pass. Use direct APIM as the approved fallback if that integration is unavailable or incompatible. Do not create a public direct-to-MCP route.
+* Confirmed user direction: retain the existing chat UI in front of the Foundry Prompt Agent. `ChatService` remains the browser API façade and invokes the hosted agent; it does not replace the agent as backend orchestrator.
+* Preserve the current direct Chat Completions path only as rollback until an authenticated synthetic end-to-end call proves the selected identity/token contract. The application workload identity and per-agent identity are separate principals with separate permissions.
+* Read-only Azure checks used the target configured in `.env`: Foundry project `project-aigovernance-amp-guardrails-hack-aue`, resource group `rg-aigovernance-amp-guardrails-hack`, and region `australiaeast`. The Azure CLI tenant/subscription context matched the configured tenant/subscription; identifiers are omitted from this artifact.
+* The Foundry project resource exists in `australiaeast`, and its `gpt-5` deployment reports provisioning state `Succeeded`. APIM `ajhackathon` exists in `australiaeast`, reports provisioning state `Succeeded`, and uses the Developer tier. A read-only APIM API listing found no MCP API.
+* `az ml workspace show` returns `ResourceNotFound` because this Foundry project is not an Azure ML workspace. Foundry SDK read-only queries succeeded when scoped to the user-provided CA bundle; TLS verification remained enabled. No Azure resource or persistent trust setting was changed.
 * If the agent service cannot invoke the MCP endpoint through the gateway with the required identity and session behavior, retain the direct Chat Completions path for the pilot and return the architecture decision for owner review. Do not silently claim target alignment.
 
 References:
 * [src/ai_governance_harness/chat/service.py](../../../src/ai_governance_harness/chat/service.py): Current direct Foundry and MCP call path.
 * [src/ai_governance_harness/mcp_server/config.py](../../../src/ai_governance_harness/mcp_server/config.py): Current hosted MCP auth and region requirements.
+* [Foundry MCP tool support](https://learn.microsoft.com/en-us/azure/ai-foundry/agents/how-to/tools/model-context-protocol): Supported prompt-agent SDK/REST configuration, identity options, approval, and private MCP requirements.
+* [Foundry project Bicep resource](https://learn.microsoft.com/en-us/azure/templates/microsoft.cognitiveservices/accounts/projects): ARM/Bicep project and identity properties.
+* [Foundry project connection Bicep resource](https://learn.microsoft.com/en-us/azure/templates/microsoft.cognitiveservices/accounts/projects/connections): Connection resource schema and supported authentication types.
+* [APIM API Bicep resource](https://learn.microsoft.com/en-us/azure/templates/microsoft.apimanagement/service/apis): MCP API type, transport properties, and preview API version.
+* [Entra Agent ID creation](https://learn.microsoft.com/en-us/entra/agent-id/create-delete-agent-identities): Product and Microsoft Graph identity lifecycle.
 * Workshop architecture supplied in the conversation: Foundry Prompt Agent, Entra Agent ID, and APIM-backed MCP gateway target.
 
 Dependencies:
@@ -157,6 +176,7 @@ Requirements:
 
 Details:
 * The current [real-mcp-server plan](../../plans/2026-10-14/real-mcp-server-plan.md) owns baseline ACA, Bicep, remote MCP security, and deployment. Its P03/P04 tasks are unchecked in the available artifact. Complete or explicitly supersede that work before treating ACA as an available platform.
+* Read-only ARM inventory found no Azure Container Apps environment or Container App in the selected resource group. It found an existing Application Insights component in `australiaeast`, using Log Analytics ingestion with a linked workspace and 90-day retention. Verify ownership, access, and policy suitability before routing this app's telemetry there.
 * Do not duplicate the existing plan's infrastructure tasks here. Any necessary change to its topology belongs in a reviewed update to that plan or a superseding architecture decision.
 
 References:
@@ -175,12 +195,14 @@ Goals:
 
 Requirements:
 * `FR-005`, `FR-006`, `NFR-003`, `NFR-004`, `NFR-006`; product `NFR-007`.
-* Acceptance: Business data and security/compliance owners approve event categories, permitted attributes, retention, access roles, deletion, incident retrieval, and whether immutable storage is required.
-* Acceptance: The policy explicitly separates Application Insights/Log Analytics operational diagnostics from any durable audit system and retains the repository rule that prompts, tool payloads, member identifiers, credentials, and raw claims are excluded.
-* Verification: Review the approved data-classification and retention record; test representative serialized events against a denylist of prohibited fields before any Azure export is enabled.
+* Acceptance: Use the user-approved existing Application Insights resource only for privacy-filtered operational telemetry; document table-specific retention and confirm workspace access/privacy policy before the workload emits data.
+* Acceptance: Durable business-audit storage remains deferred until owners define event categories, retention, access, deletion, incident retrieval, and immutability needs; operational diagnostics are not presented as compliance audit evidence.
+* Verification: Query the configured resource and workspace retention before enabling export; test representative serialized events against the prohibited-field denylist; after ACA identity exists, verify its least-privilege write access without exposing credentials.
 
 Details:
 * Product `NFR-007` says audit events, retention periods, and record access remain to be specified. Do not take retention durations from an earlier plan as approved policy.
+* Confirmed user direction: reuse the existing Australia East Application Insights component and its linked Log Analytics workspace for privacy-filtered operational telemetry. The component reports 90 days, the workspace default is 30 days, and core Application Insights tables such as requests, dependencies, events, exceptions, metrics, and traces report 90 days. Do not generalize 90 days to every workspace table.
+* App Insights/Log Analytics identity and privacy access settings still require review; there is no ACA app identity in the selected resource group to validate as the telemetry writer. Keep business-audit requirements separate and do not add immutable Storage until owners approve them.
 * Use Application Insights and Log Analytics for operational traces, metrics, and logs. Add Azure Storage with immutability only if owners require tamper-resistant audit retention and approve its access, deletion, and residency model.
 
 References:
@@ -247,12 +269,15 @@ Requirements:
 
 Details:
 * This task changes the current orchestration boundary, not the synthetic MCP data contract. Keep the MCP tool schema and policy action names stable unless a separately reviewed contract change is required.
+* Bicep does not declare the Foundry agent version or its MCP tool list. Use the Foundry data-plane SDK or REST API after infrastructure deployment. Select a supported `azure-ai-projects` version with MCP tool types, or implement the documented REST calls behind the Foundry client boundary if the selected SDK release lacks them.
+* Configure the existing `member-wealth-insights-agent` version or create a controlled new version. The current version is enabled but has no tools, so do not replace or delete it until the new version passes the synthetic evaluation suite.
 * Do not represent Foundry guardrails as replacing the repository's runtime governance policy. Record model, agent version, evaluation set, and guardrail configuration in deployment evidence.
 
 References:
 * [src/ai_governance_harness/chat/service.py](../../../src/ai_governance_harness/chat/service.py): Existing Chat Completions tool loop and output sanitization.
 * [src/ai_governance_harness/governance/policies/default.yaml](../../../src/ai_governance_harness/governance/policies/default.yaml): Exact default-deny action policy.
 * [src/ai_governance_harness/guardrails/advice_filter.py](../../../src/ai_governance_harness/guardrails/advice_filter.py): Existing deterministic advice and scope guardrails.
+* [Foundry MCP tool support](https://learn.microsoft.com/en-us/azure/ai-foundry/agents/how-to/tools/model-context-protocol): Data-plane creation of MCP-enabled prompt-agent versions and approval behavior.
 
 Dependencies:
 * `P01-T01`
@@ -272,12 +297,16 @@ Requirements:
 
 Details:
 * `DefaultAzureCredential` currently authenticates the application to Foundry; it is not itself an Entra Agent ID. Do not infer per-agent identity from the app's managed identity.
+* The existing Foundry agent has an `AgentIdentity` object with client and principal identifiers. Verify that this is the approved Entra Agent ID for the target workload and that APIM/MCP validates the intended audience and permissions. Do not print or log the identifier values.
+* Bicep can deploy supported project/connection ARM resources, but its current project-connection schema does not list `agentic-identity` as an auth type. Use the documented Foundry/`azd ai` identity connection path for agentic identity, or stop if tenant/API support differs. Do not place client secrets or Graph tokens in Bicep parameters.
 * Confirm how the hosted agent obtains and presents a token to the chosen MCP gateway. If the product supplies an identity bridge, validate its trust and claim contract; never authorize from arbitrary caller-supplied headers.
 
 References:
 * [src/ai_governance_harness/foundry_client.py](../../../src/ai_governance_harness/foundry_client.py): Current application credential path.
 * [src/ai_governance_harness/governance/context.py](../../../src/ai_governance_harness/governance/context.py): Existing bounded workload and identity context.
 * [src/ai_governance_harness/governance/agt-runtime-evidence.yaml](../../../src/ai_governance_harness/governance/agt-runtime-evidence.yaml): Current hosted principal propagation limitation.
+* [Entra Agent ID creation](https://learn.microsoft.com/en-us/entra/agent-id/create-delete-agent-identities): Microsoft Graph identity lifecycle and permissions.
+* [Foundry MCP tool support](https://learn.microsoft.com/en-us/azure/ai-foundry/agents/how-to/tools/model-context-protocol): Agentic identity authentication for MCP connections.
 
 Dependencies:
 * `P01-T01`
@@ -365,12 +394,14 @@ Requirements:
 
 Details:
 * Prefer APIM as the stable API boundary. Enable a Foundry AI Gateway MCP integration only when `P01-T01` proves its support and operations contract for this tenant and region.
+* The APIM API ARM schema supports `apiType: 'mcp'` and streamable transport through a preview API version. Use Bicep for that APIM API and policies only after target subscription validation; keep agent creation/tool binding in the Foundry data plane.
 * If APIM cannot proxy the necessary MCP protocol behavior, stop this release for architecture review. A temporary direct route may be used only in a non-production private spike and must not be described as satisfying the target gateway control.
 
 References:
 * [src/ai_governance_harness/chat/service.py](../../../src/ai_governance_harness/chat/service.py): Current direct MCP URL and client behavior.
 * [src/ai_governance_harness/mcp_server/http_app.py](../../../src/ai_governance_harness/mcp_server/http_app.py): Current Streamable HTTP endpoint and discovery routes.
 * [docs/planning/adrs/0005-present-governance-through-a-same-origin-observability-panel.md](../../../docs/planning/adrs/0005-present-governance-through-a-same-origin-observability-panel.md): Current same-origin browser-to-chat boundary.
+* [APIM API Bicep resource](https://learn.microsoft.com/en-us/azure/templates/microsoft.apimanagement/service/apis): `mcp` API type and streamable transport properties.
 
 Dependencies:
 * `P01-T01`
@@ -603,15 +634,18 @@ Dependencies:
 * Create a new implementation plan from the prior repository findings and supplied workshop architecture.
 * Prefer native Azure services where practical and deliver the work through incremental releases.
 * Give implementation tasks checkable acceptance conditions and verification methods.
+* Keep the existing chat UI in front of a backend Foundry Prompt Agent; retain `ChatService` as the UI/API façade.
+* Use the Azure target configured in `.env` for read-only P01 preflight; do not provision or change Azure resources.
 * Do not change application source or deploy Azure resources as part of this planning task.
 
 ### Planning Decisions and Feedback
 
 | Group | Decision or feedback item | Status | Owner | Rationale or input needed | Evidence | Planning impact |
 |---|---|---|---|---|---|---|
-| D1 | Use ACA as the workload host and APIM as the MCP gateway; enable Foundry AI Gateway only if its MCP feature set is available and verified. | Confirmed direction | User/platform owner | The existing deployment plan selects ACA and the supplied diagram selects APIM-backed gateway control. Tenant, region, protocol, and preview availability remain verification gates. | Existing MCP deployment plan and workshop architecture | Gates `P01-T01`, `P01-T02`, `P03-T01`, and `P03-T02`; stop or return for review if required protocol/security behavior is unsupported. |
-| D2 | Target a Foundry Prompt Agent with Entra Agent ID; verify the supported invocation and token flow before replacing direct Chat Completions. | Confirmed direction | User/platform owner | The supplied diagram specifies these components. Repository evidence only establishes direct Chat Completions with `DefaultAzureCredential`; it does not establish Agent Service MCP transport, elicitation, identity, or authorization support in the target tenant. | Workshop architecture, current Foundry client and chat service | Gates `P01-T01`, `P02-T01`, and `P02-T02`; preserve the existing path until a passing vertical slice. |
-| D3 | Approve audit event scope, retention, access, and whether immutable storage is required. | Deferred | Business data owner and security/compliance owner | Product NFR `NFR-007` explicitly leaves audit events, retention, and access unspecified. Operational telemetry and compliance evidence may need different stores and retention. | Product requirements and telemetry ADR | Gates `P01-T03` and `P04-T02`; no claim of a durable audit trail before approval. |
+| D1 | Use ACA as the workload host and Foundry AI Gateway backed by APIM for eligible MCP tools; fall back to direct APIM only if the integrated gateway is unavailable or fails protocol checks. | Confirmed direction | User/platform owner | User approved the conditional route. Tenant availability, region, MCP protocol, and preview support remain verification gates, not provisioning approval. | User approval, workshop architecture, existing MCP deployment plan, and read-only APIM inventory | Gates `P01-T01`, `P01-T02`, `P03-T01`, and `P03-T02`; no public direct-to-MCP route. |
+| D2 | Keep the current chat UI/API façade in front of a Foundry Prompt Agent with a distinct Entra Agent ID; retain direct Chat Completions only as rollback until the authenticated route passes. | Confirmed direction | User/platform owner | User clarified that the chat UI is in front of the Prompt Agent. A separate workload managed identity serves application-to-Foundry access where supported; tenant protocol and identity support remain verification gates. | User confirmation, workshop architecture, current Foundry client and chat service | Gates `P01-T01`, `P02-T01`, and `P02-T02`; no cutover before an authenticated synthetic vertical slice passes. |
+| D3 | Reuse the existing Australia East Application Insights/Log Analytics workspace for operational telemetry with table-specific retention; keep durable business-audit policy separate. | Confirmed direction | User/platform owner; business data owner and security/compliance owner for audit policy | The user approved operational reuse. The component reports 90 days; workspace default is 30 days; core Application Insights tables report 90 days. Workload access/privacy configuration remains to be reviewed. Product NFR `NFR-007` leaves durable business-audit requirements unspecified. | User approval and read-only Application Insights, workspace, and table-retention queries; product requirements and telemetry ADR | Gates `P01-T03` and `P04-T02`; operational telemetry is not durable compliance audit evidence. |
+| D4 | Select the Azure subscription, Foundry project, and region for read-only feature and deployment-baseline verification. | Resolved | User/platform owner | The user pointed to `.env` as the target configuration. Its tenant/subscription matched the Azure CLI context and identified the Foundry project, resource group, and `australiaeast` region. | `.env` target plus read-only Azure Resource Manager and deployment-list queries | Environment selection is complete; P01-T01 Foundry Agent/Gateway feature support and P01-T02 hosted baseline remain unverified or absent. |
 
 ### Planning Participation
 
@@ -622,15 +656,15 @@ Dependencies:
 
 | Field | Record |
 |---|---|
-| Planning execution and readiness | Partial; not ready for implementation because D1-D3 require tenant/platform and business-owner evidence. |
-| Blockers | Foundry/APIM MCP capability and identity support; approved audit retention/access posture. |
+| Planning execution and readiness | Partial; Foundry documents support MCP tools through SDK/REST, and Bicep supports the project/APIM resource layers. The installed SDK lacks MCP tool models, the existing prompt agent has no tools, APIM's MCP API schema is preview, and ACA is absent from the selected group. |
+| Blockers | Select a supported SDK upgrade or REST bootstrap; validate APIM MCP preview/API version and identity/approval protocol behavior in the target tenant; complete ACA baseline; verify telemetry permissions/privacy. Durable audit requirements remain separate owner work. |
 | Latest critique | Not run. |
 | Relevant research | Not activated; supplied architecture, prior planning artifacts, and repository code establish the current design delta. |
 | Plan | `.copilot-tracking/plans/2026-10-14/azure-native-services-migration-plan.md` |
 | Changes-record role | `.copilot-tracking/changes/2026-10-14/azure-native-services-migration-changes.md` will record implementation evidence if this plan proceeds. |
 | Continuation owner | User, standalone planning. |
-| Required gates or confirmations | Resolve D1-D3 through `P01` preflight before committing to Azure resources or production evidence claims. |
-| Next action | Complete the preflight tasks, record confirmed service choices and audit requirements, then reassess readiness. |
+| Required gates or confirmations | Confirm a supported way to attach MCP tools to the existing Prompt Agent and route them through the approved gateway; complete inherited ACA baseline; review telemetry permissions/privacy filtering before configuring the workload writer. |
+| Next action | Treat P01 as partially complete; platform owner to demonstrate an authenticated synthetic tool call through the selected Foundry/APIM route, then complete the ACA baseline before P02 implementation. Keep durable audit requirements with business/security owners. |
 
 ## Goals
 
@@ -675,8 +709,8 @@ Dependencies:
 
 | Priority | Type | Risk, question, or planning item | Affected work | Impact | Smallest action or evidence needed | Owner |
 |---|---|---|---|---|---|---|
-| High | Open question | Does the target Foundry Agent Service support the required MCP Streamable HTTP/session and elicitation behavior, Entra Agent ID, and required region? | `P01-T02`, `P02-T01` | Could change the agent-to-MCP integration and approval design. | Run a tenant/region feature check and protocol spike with a synthetic tool before decommissioning direct Chat Completions. | Platform owner |
-| High | Open question | Does APIM or the selected Foundry AI Gateway preserve MCP streaming, sessions, protected-resource discovery, and elicitation? | `P01-T01`, `P03-T01` | Gateway may need a supported APIM configuration or a staged direct-to-private-MCP fallback. | Verify product support and run protocol conformance tests through the gateway. | Platform owner |
+| High | Open question | Can the existing Foundry Prompt Agent in this tenant/region attach the APIM MCP endpoint using the configured agent identity and required approval behavior? | `P01-T01`, `P02-T01`, `P02-T02` | The service supports MCP in documented SDK/REST flows, but this repo's installed SDK lacks MCP tool models and target integration behavior is untested. | Upgrade to a documented SDK release or use the documented REST contract; execute a synthetic tool call with required approval and identity. | Platform owner |
+| High | Open question | Does the target APIM service support the documented preview MCP API schema and preserve streaming, sessions, protected-resource discovery, and elicitation? | `P01-T01`, `P03-T01` | APIM MCP API is declarative in the preview ARM schema, but a schema-supported deployment does not prove protocol behavior or tenant availability. | Validate the API version in Bicep/what-if and run MCP conformance tests through the gateway. | Platform owner |
 | High | Open question | What audit events, retention period, access roles, deletion process, and tamper-resistance level are required? | `P01-T03`, `P04-T02` | Determines Application Insights/Log Analytics scope versus a dedicated audit store. | Obtain approved requirements from business data owner and security/compliance. | Business/security owners |
 | Medium | Risk | The existing development launcher and Dockerfile are not suitable as a hosted production startup contract. | `P02-T03` | Browser launch, loopback binds, and coupled process lifecycle may prevent reliable ACA health and scaling. | Define explicit hosted entrypoints and test container lifecycle/probes. | Engineering |
 | Medium | Risk | A Foundry-hosted agent, APIM gateway, and MCP backend can each emit overlapping telemetry with different identifiers. | `P04-T01` | Evidence may be incomplete or misleading if trace context is not propagated. | Define end-to-end trace contract and prove one trace through all hops. | Observability owner |

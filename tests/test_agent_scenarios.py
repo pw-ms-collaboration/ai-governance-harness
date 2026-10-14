@@ -1,8 +1,11 @@
 """Integration and acceptance scenario tests verifying PRD AC-001 through AC-004."""
 
 import pytest
+
 from ai_governance_harness.agent import MemberWealthInsightsAgent
 from ai_governance_harness.cli import run_cli
+
+pytestmark = pytest.mark.usefixtures("local_persona")
 
 
 @pytest.fixture

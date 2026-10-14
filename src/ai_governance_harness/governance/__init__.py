@@ -2,7 +2,11 @@
 
 from ai_governance_harness.governance.config import GovernanceSettings
 from ai_governance_harness.governance.context import (
+    Actor,
+    Boundary,
     GovernanceContext,
+    StaffRole,
+    TokenType,
     get_governance_context,
     governance_context,
 )
@@ -18,6 +22,10 @@ from ai_governance_harness.governance.models import (
 )
 
 __all__ = [
+    "Actor",
+    "Boundary",
+    "StaffRole",
+    "TokenType",
     "GovernanceContext",
     "GovernanceDecision",
     "GovernanceDeniedError",

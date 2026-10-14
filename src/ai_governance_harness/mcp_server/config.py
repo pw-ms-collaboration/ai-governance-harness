@@ -12,6 +12,8 @@ from ai_governance_harness.guardrails.sovereignty import (
     SovereigntyGuardrail,
     SovereigntyViolationError,
 )
+from ai_governance_harness.identity.config import require_loopback_url
+from ai_governance_harness.mock_identity_guard import require_mock_identity_allowed
 
 load_dotenv()
 
@@ -50,6 +52,11 @@ class ServerSettings(BaseModel):
     auth_tenant_id: str | None = None
     auth_audience: str | None = None
     auth_required_scope: str | None = None
+    principal_source: Literal["easy_auth", "jwt"] | None = None
+    jwt_issuer: str | None = None
+    jwt_jwks_url: str | None = None
+    interactive_agent_id: str | None = None
+    reporting_agent_id: str | None = None
     resource_url: str | None = None
     max_request_body_size: int = Field(default=1_048_576, ge=1, le=4_194_304)
     rate_limit_capacity: int = Field(default=60, ge=1, le=10_000)
@@ -97,6 +104,7 @@ class ServerSettings(BaseModel):
         """Fail closed when hosted configuration lacks sovereignty controls."""
         if not self.hosted:
             return self
+
         if self.transport != "streamable-http":
             raise ValueError("Hosted MCP mode requires the streamable-http transport.")
         if not self.region:
@@ -116,6 +124,33 @@ class ServerSettings(BaseModel):
             raise ValueError(
                 "Hosted MCP mode requires tenant, audience, scope, and resource URL settings."
             )
+        return self
+
+    @model_validator(mode="after")
+    def validate_identity_source(self) -> Self:
+        """Require an authenticated source for HTTP without affecting stdio."""
+        if self.transport == "stdio":
+            return self
+        source = self.principal_source or ("easy_auth" if self.hosted else "jwt")
+        object.__setattr__(self, "principal_source", source)
+        if not all((
+            self.auth_tenant_id, self.auth_audience, self.auth_required_scope,
+            self.interactive_agent_id, self.reporting_agent_id,
+        )):
+            raise ValueError("HTTP MCP requires tenant, audience, scope and both agent IDs.")
+        if self.interactive_agent_id == self.reporting_agent_id:
+            raise ValueError("Interactive and reporting agent IDs must differ.")
+        if source == "easy_auth":
+            if not self.hosted:
+                raise ValueError("Easy Auth requires a trusted hosted boundary.")
+        else:
+            if self.hosted or self.environment not in {"local", "development", "test"}:
+                raise ValueError("Mock JWT trust is restricted to local environments.")
+            require_mock_identity_allowed("mcp-jwt", bind_host=self.host)
+            if not self.jwt_issuer or not self.jwt_jwks_url:
+                raise ValueError("JWT trust requires issuer and JWKS URLs.")
+            require_loopback_url(self.jwt_issuer)
+            require_loopback_url(self.jwt_jwks_url)
         return self
 
     @classmethod
@@ -140,6 +175,11 @@ class ServerSettings(BaseModel):
             auth_tenant_id=os.getenv("MCP_AUTH_TENANT_ID") or os.getenv("AZURE_TENANT_ID"),
             auth_audience=os.getenv("MCP_AUTH_AUDIENCE"),
             auth_required_scope=os.getenv("MCP_AUTH_REQUIRED_SCOPE"),
+            principal_source=os.getenv("MCP_PRINCIPAL_SOURCE") or None,
+            jwt_issuer=os.getenv("MCP_JWT_ISSUER") or None,
+            jwt_jwks_url=os.getenv("MCP_JWT_JWKS_URL") or None,
+            interactive_agent_id=os.getenv("AGENT_ID_INTERACTIVE_ID") or None,
+            reporting_agent_id=os.getenv("AGENT_ID_REPORTING_ID") or None,
             resource_url=os.getenv("MCP_RESOURCE_URL"),
             max_request_body_size=int(
                 os.getenv("MCP_MAX_REQUEST_BODY_SIZE", "1048576")

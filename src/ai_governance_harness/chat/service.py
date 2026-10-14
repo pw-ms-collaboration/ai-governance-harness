@@ -11,6 +11,8 @@ from urllib.request import urlopen
 from typing import Any, Literal, Protocol
 
 import anyio
+import httpx2
+from mcp.client.streamable_http import streamable_http_client
 from mcp import Client, types
 from openai import APIStatusError
 from pydantic import (
@@ -23,6 +25,9 @@ from pydantic import (
 
 from ai_governance_harness.chat import genai_telemetry
 from ai_governance_harness.chat.config import ChatSettings
+from ai_governance_harness.errors import ChatServiceError
+from ai_governance_harness.errors import ChatErrorCode as ChatErrorCode
+from ai_governance_harness.identity.sidecar import AgentAuth, CallerIdentity, SidecarClient
 from ai_governance_harness.foundry_client import get_foundry_client
 from ai_governance_harness.governance import (
     GovernanceDeniedError,
@@ -52,7 +57,10 @@ from ai_governance_harness.mcp_server.tool_contracts import (
 
 SYSTEM_INSTRUCTIONS = (
     "You are an internal assistant for business analysts working only with "
-    "synthetic in-fund superannuation data. Use get_member_profile for factual "
+    "synthetic in-fund superannuation data. Use the available tools for cohort "
+    "risk, FUM summaries and member disengagement signals when requested. "
+    "Governance enforces the caller's role; never bypass a denied tool. "
+    "Use get_member_profile for factual "
     "member and account-profile requests. Use prepare_member_outreach_case when "
     "the user asks to prepare, open, create, or start a retention outreach case; "
     "that workflow checks eligibility and requires explicit human approval. Do "
@@ -60,7 +68,7 @@ SYSTEM_INSTRUCTIONS = (
     "invent tool results. If asked for contact details, use the profile's "
     "communication preference and state that no email address or phone number "
     "is recorded. For unsupported customer information, explain the supported "
-    "profile and retention-outreach capabilities. Do not give personal "
+    "member, aggregate and retention-outreach capabilities. Do not give personal "
     "financial advice, recommend actions for a member, or claim visibility into "
     "external assets. Keep responses concise."
 )
@@ -79,19 +87,6 @@ _DECLINE_RESPONSES = frozenset(
     {"cancel", "decline", "declined", "do not approve", "no"}
 )
 
-ChatErrorCode = Literal[
-    "chat_service_error",
-    "client_capability_required",
-    "classification_unavailable",
-    "governance_denied",
-    "invalid_model_response",
-    "invalid_request",
-    "model_content_filtered",
-    "model_output_limit",
-    "model_round_limit",
-    "unsafe_tool_result",
-    "upstream_failure",
-]
 SCOPE_REFUSAL_PREFIX = "Sorry, I can't assist with this request"
 SCOPE_REFUSAL_MESSAGE = (
     "Sorry, I can’t assist with this request. I can provide factual synthetic "
@@ -108,19 +103,6 @@ PROFILE_FIELDS = (
     "account",
     "provenance",
 )
-
-logger = logging.getLogger(__name__)
-_SAFE_ERROR_VALUE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
-
-ChatErrorCode = Literal[
-    "chat_service_error",
-    "governance_denied",
-    "invalid_model_response",
-    "invalid_request",
-    "model_round_limit",
-    "unsafe_tool_result",
-    "upstream_failure",
-]
 
 
 def _is_scope_refusal(message: str) -> bool:
@@ -139,23 +121,6 @@ def _restrict_tool_payload(tool_name: str, payload: Any) -> Any:
     if tool_name != "get_member_profile" or not isinstance(payload, dict):
         return payload
     return {key: payload[key] for key in PROFILE_FIELDS if key in payload}
-
-
-class ChatServiceError(RuntimeError):
-    """Raised when a chat turn cannot be completed safely."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        code: ChatErrorCode = "chat_service_error",
-        status_code: int = 502,
-        details: dict[str, str] | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.code = code
-        self.status_code = status_code
-        self.details = dict(details or {})
 
 
 def _governance_error_details(error: GovernanceDeniedError) -> dict[str, str]:
@@ -387,6 +352,11 @@ def _foundry_guardrail_code(error: APIStatusError) -> str | None:
         }:
             return "content_filter"
     return None
+
+
+def _identity_failure(error: Exception) -> bool:
+    known = _known_service_error(error)
+    return known is not None and known.code in {"authentication_required", "identity_unavailable"}
 
 
 def _advice_classifier_context(
@@ -713,12 +683,12 @@ class ChatService:
             raise ValueError("MCP governance snapshot must be an object.")
         return document
 
-    async def complete(self, request: ChatRequest) -> ChatResponse:
+    async def complete(self, request: ChatRequest, caller: CallerIdentity) -> ChatResponse:
         """Complete one chat turn without persisting conversation content."""
         with genai_telemetry.invoke_agent_span(model=self._settings.model_deployment):
-            return await self._complete(request)
+            return await self._complete(request, caller)
 
-    async def _complete(self, request: ChatRequest) -> ChatResponse:
+    async def _complete(self, request: ChatRequest, caller: CallerIdentity) -> ChatResponse:
         if len(request.messages) > self._settings.max_messages:
             raise ChatServiceError(
                 "The conversation is too long.",
@@ -829,12 +799,20 @@ class ChatService:
                     return types.ElicitResult(action="decline")
                 return types.ElicitResult(action="cancel")
 
-            async with Client(
-                self._settings.mcp_url,
+            sidecar = SidecarClient(
+                self._settings.sidecar_url, timeout=self._governance.settings.operation_timeout_seconds,
+            )
+            async with httpx2.AsyncClient(
+                auth=AgentAuth(sidecar, self._settings.interactive_agent_id, caller),
+                trust_env=False, follow_redirects=False,
+                timeout=self._governance.settings.operation_timeout_seconds,
+            ) as http, Client(
+                streamable_http_client(self._settings.mcp_url, http_client=http),
                 elicitation_callback=resolve_elicitation,
             ) as mcp_client:
                 discovered = await self._mcp_reliability.call(
                     mcp_client.list_tools,
+                    ignore_error=_identity_failure,
                 )
                 allowed_tools = [
                     tool
@@ -1120,6 +1098,7 @@ class ChatService:
 
                             profile_result = await self._mcp_reliability.call(
                                 read_retention_profile,
+                                ignore_error=_identity_failure,
                             )
                             self._governance.require_allowed(
                                 LifecyclePoint.POST_TOOL,
@@ -1187,7 +1166,7 @@ class ChatService:
                                     tool_execution.fail("tool_error")
                                 return result
 
-                        result = await self._mcp_reliability.call(call_tool)
+                        result = await self._mcp_reliability.call(call_tool, ignore_error=_identity_failure)
                         self._governance.require_allowed(
                             LifecyclePoint.POST_TOOL,
                             tool_name,
@@ -1242,7 +1221,7 @@ class ChatService:
             known_error = _known_service_error(exc)
             if known_error is not None:
                 raise known_error from exc
-            logger.exception("Chat service failed unexpectedly")
+            logger.error("Chat service failed unexpectedly")
             raise ChatServiceError(
                 "An upstream chat dependency could not complete the request.",
                 code="upstream_failure",

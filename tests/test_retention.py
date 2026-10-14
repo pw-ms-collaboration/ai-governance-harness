@@ -89,6 +89,7 @@ def test_given_unconfirmed_eligibility_when_reviewing_then_blocks(
     ["routine_permitted", "duplicate_open", "specialist_required",
      "account_exited", "review_required", "unknown", None, "invalid"],
 )
+@pytest.mark.usefixtures("mcp_caller")
 def test_given_retention_status_when_policy_runs_then_only_permitted_allows(
     status: str | None,
 ) -> None:
@@ -122,6 +123,7 @@ def test_given_multiple_cases_when_reviewing_then_specialist_overrides_duplicate
     assert "No specialist case was created" in review.staff_message()
 
 
+@pytest.mark.usefixtures("mcp_caller")
 def test_given_missing_case_file_when_gateway_checks_then_denies(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

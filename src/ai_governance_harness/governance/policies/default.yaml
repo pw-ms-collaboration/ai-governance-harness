@@ -6,6 +6,10 @@ agent: ai-governance-harness
 scope: global
 default_action: deny
 rules:
+  - name: deny-personal-advice-request
+    stage: pre_input
+    condition: "action.type == 'chat.input' and data.advice_request_status == 'personal_advice_requested'"
+    action: deny
   - name: deny-personal-advice-tool-response
     stage: post_tool
     condition: "data.advice_scan_status == 'personal_advice_detected'"
@@ -16,7 +20,7 @@ rules:
     action: allow
   - name: allow-chat-input
     stage: pre_input
-    condition: "action.type == 'chat.input'"
+    condition: "action.type == 'chat.input' and data.advice_request_status == 'passed'"
     action: allow
   - name: allow-model-call
     stage: pre_input

@@ -1,0 +1,21 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Start AI Governance Harness (uv Python 3)",
+			"type": "shell",
+			"command": "/Users/jfernandes075/.local/bin/uv",
+			"args": [
+				"run",
+				"--python",
+				"/opt/homebrew/bin/python3.13",
+				"--all-extras",
+				"python3",
+				"-m",
+				"ai_governance_harness.dev_launcher"
+			],
+			"isBackground": true,
+			"problemMatcher": []
+		}
+	]
+}

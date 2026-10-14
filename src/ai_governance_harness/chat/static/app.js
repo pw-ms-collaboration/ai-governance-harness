@@ -67,6 +67,25 @@ function clearError() {
   errorMessage.hidden = true;
 }
 
+function chatErrorMessage(payload) {
+  const error = payload?.error;
+  if (typeof error === "string") {
+    return error;
+  }
+  if (!error || typeof error !== "object") {
+    return "The chat request failed.";
+  }
+
+  const parts = [String(error.message || "The chat request failed.")];
+  if (error.details?.matched_rule) {
+    parts.push(`Policy rule: ${String(error.details.matched_rule)}.`);
+  }
+  if (error.correlation_id) {
+    parts.push(`Reference: ${String(error.correlation_id)}.`);
+  }
+  return parts.join(" ");
+}
+
 async function checkHealth() {
   try {
     const response = await fetch("/health/ready", { headers: { Accept: "application/json" } });
@@ -153,7 +172,7 @@ function renderEvents(events) {
   if (!values.length) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
-    cell.colSpan = 6;
+    cell.colSpan = 7;
     cell.textContent = "No governance decisions have been recorded yet.";
     row.append(cell);
     decisionEvents.append(row);
@@ -178,6 +197,7 @@ function renderEvents(events) {
     decisionBadge.textContent = String(event.decision || "unknown").replaceAll("_", " ");
     decisionCell.append(decisionBadge);
     row.append(decisionCell);
+    appendTableCell(row, event.matched_rule || "default action", { code: true });
     appendTableCell(row, `${Number(event.evaluation_ms || 0).toFixed(3)} ms`);
     decisionEvents.append(row);
   }
@@ -322,12 +342,16 @@ form.addEventListener("submit", async (event) => {
     });
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload.error || "The chat request failed.");
+      throw new Error(chatErrorMessage(payload));
     }
     addMessage("assistant", payload.message);
     history.push({ role: "assistant", content: payload.message });
     history = history.slice(-20);
   } catch (error) {
+    const failedTurn = history.at(-1);
+    if (failedTurn?.role === "user" && failedTurn.content === content) {
+      history.pop();
+    }
     showError(error.message || "The chat service could not be reached.");
   } finally {
     setBusy(false);

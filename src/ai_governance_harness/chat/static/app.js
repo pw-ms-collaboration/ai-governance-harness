@@ -348,6 +348,10 @@ form.addEventListener("submit", async (event) => {
     history.push({ role: "assistant", content: payload.message });
     history = history.slice(-20);
   } catch (error) {
+    const failedTurn = history.at(-1);
+    if (failedTurn?.role === "user" && failedTurn.content === content) {
+      history.pop();
+    }
     showError(error.message || "The chat service could not be reached.");
   } finally {
     setBusy(false);

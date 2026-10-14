@@ -545,6 +545,9 @@ the governance panel. General factual questions continue through the normal
 chat path. When a short follow-up supplies only a member ID, classification
 also considers the immediately preceding user request so a multi-turn personal
 advice request cannot bypass the input rule by deferring the identifier.
+Failed and denied browser turns remain visible to the user but are removed from
+the active request history, so a rejected intent cannot contaminate the next
+independent question.
 
 The OAuth protected-resource metadata routes exist for future hosted
 authentication work. Local development does not require Container Apps identity

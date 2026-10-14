@@ -1295,6 +1295,7 @@ form > button {
 }
 
 .status-badge.ready,
+.status-badge.passed,
 .decision-badge.allow,
 .evidence-status.implemented {
   background: #e6f4e6;
@@ -1303,6 +1304,7 @@ form > button {
 
 .status-badge.partial,
 .status-badge.neutral,
+.status-badge.running,
 .evidence-status.partial,
 .evidence-status.not_applicable {
   background: #fff4ce;
@@ -1311,6 +1313,8 @@ form > button {
 
 .status-badge.not_ready,
 .status-badge.unavailable,
+.status-badge.failed,
+.status-badge.error,
 .decision-badge.deny,
 .decision-badge.require_approval,
 .evidence-status.gap,
@@ -1347,6 +1351,51 @@ form > button {
 .runtime-summary {
   border-top: 1px solid var(--border);
   padding-top: 1rem;
+}
+
+.evaluation-panel {
+  min-width: 0;
+}
+
+.evaluation-panel[hidden] {
+  display: none;
+}
+
+.evaluation-panel .panel-heading {
+  align-items: center;
+  margin-bottom: 0;
+}
+
+.evaluation-panel h2 {
+  margin: 0;
+}
+
+.evaluation-artifact {
+  color: var(--muted);
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+#foundry-evaluation-select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0.5rem;
+  font: inherit;
+}
+
+.foundry-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.foundry-run-counts .status-badge {
+  margin: 0 0.4rem 0.35rem 0;
+}
+
+.foundry-run-counts > span:last-child {
+  display: block;
+  color: var(--muted);
 }
 
 .status-list,
@@ -1553,37 +1602,6 @@ footer {
     padding-top: 2rem;
   }
 
-  @media (max-width: 74rem) {
-    .workspace {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  @media (max-width: 36rem) {
-    .metric-grid,
-    .health-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .health-summary,
-    .health-card-heading {
-      align-items: flex-start;
-      flex-direction: column;
-    }
-
-    .panel-heading,
-    .status-line,
-    .evidence-heading {
-      align-items: flex-start;
-      flex-direction: column;
-    }
-
-    .compact-definition div {
-      grid-template-columns: 1fr;
-      gap: 0.15rem;
-    }
-  }
-
   .message {
     max-width: 96%;
   }
@@ -1591,6 +1609,39 @@ footer {
   .form-meta {
     display: grid;
     gap: 0.25rem;
+  }
+}
+
+@media (max-width: 74rem) {
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 36rem) {
+  .view-tabs [role="tab"] {
+    padding-inline: 0.65rem;
+  }
+
+  .metric-grid,
+  .health-grid,
+  .circuit-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .health-summary,
+  .health-card-heading,
+  .panel-heading,
+  .evaluation-panel .panel-heading,
+  .status-line,
+  .evidence-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .compact-definition div {
+    grid-template-columns: 1fr;
+    gap: 0.15rem;
   }
 }
 

@@ -14,14 +14,14 @@ classifiers = [
 dependencies = [
     "agent-governance-toolkit[full]==4.1.0",
     "agt-sandbox[policy]==4.1.0",
-    "azure-ai-projects>=1.0.0b1",
+    "azure-ai-projects>=2.8.0",
     "azure-ai-inference>=1.0.0b1",
     "azure-identity>=1.16.0",
     "azure-monitor-opentelemetry>=1.6.0,<2.0.0",
     "mcp[cli]>=2.3.0,<3.0.0",
     "opentelemetry-api>=1.39.0,<2.0.0",
-    "openai>=3.24.0,<4.0.0",
-    "python-dotenv>=1.0.0",
+    "openai>=3.29.0,<4.0.0",
+    "python-dotenv>=1.2.4",
     "pyyaml>=6.0.0,<7.0.0",
     "pydantic>=2.0.0",
     "starlette>=1.0.0,<2.0.0",
@@ -33,6 +33,7 @@ ai-governance-mcp = "ai_governance_harness.mcp_server.__main__:main"
 ai-governance-chat = "ai_governance_harness.chat.__main__:main"
 ai-governance-dev = "ai_governance_harness.dev_launcher:main"
 ai-governance-audit = "ai_governance_harness.security_audit:main"
+ai-governance-eval = "ai_governance_harness.evaluation.__main__:main"
 
 [project.optional-dependencies]
 dev = [
@@ -46,6 +47,9 @@ dev = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.sdist]
+exclude = ["/.copilot-tracking", "/.local"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F"]

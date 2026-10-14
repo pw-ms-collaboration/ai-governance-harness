@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
+from types import SimpleNamespace, TracebackType
+from typing import ClassVar
 
 import httpx
 import pytest
 
 from ai_governance_harness.chat.config import ChatSettings
+from ai_governance_harness.chat.app import build_chat_app
 from ai_governance_harness.chat.service import (
     SYSTEM_INSTRUCTIONS,
     SCOPE_REFUSAL_MESSAGE,
+    ChatContentFilteredError,
     ChatMessage,
     ChatRequest,
     ChatService,
@@ -97,7 +100,34 @@ class _FakeCompletions:
                 content="The synthetic profile was retrieved.",
                 tool_calls=None,
             )
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=message,
+                    finish_reason="tool_calls" if message.tool_calls else "stop",
+                )
+            ]
+        )
+
+
+class _FilteredCompletions(_FakeCompletions):
+    def __init__(self, partial_content: str | None) -> None:
+        super().__init__()
+        self.partial_content = partial_content
+
+    def create(self, **kwargs: object) -> SimpleNamespace:
+        self.calls.append(kwargs)
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    finish_reason="content_filter",
+                    message=SimpleNamespace(
+                        content=self.partial_content,
+                        tool_calls=[_FakeToolCall()],
+                    ),
+                )
+            ]
+        )
 
 
 class _FakeModelClient:
@@ -115,7 +145,9 @@ class _GoalHijackCompletions:
         tool_call.function.name = "shell.execute"
         tool_call.function.arguments = json.dumps({"command": "print secrets"})
         message = SimpleNamespace(content=None, tool_calls=[tool_call])
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=message, finish_reason="tool_calls")]
+        )
 
 
 class _GoalHijackModelClient(_FakeModelClient):
@@ -326,6 +358,22 @@ class _WrappingMcpClient(_SignalMcpClient):
     async def __aexit__(self, exc_type, exc, traceback) -> None:
         if exc is not None:
             raise ExceptionGroup("MCP task group failed", [exc])
+
+
+class _GroupingMcpClient(_FakeMcpClient):
+    extra_error: ClassVar[Exception | None] = None
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        if isinstance(exc, Exception):
+            errors: list[Exception] = [ExceptionGroup("MCP task", [exc])]
+            if self.extra_error is not None:
+                errors.append(self.extra_error)
+            raise ExceptionGroup("MCP session", errors)
 
 
 @pytest.fixture()
@@ -1219,6 +1267,127 @@ async def test_given_foundry_filter_http_error_then_surfaces_safe_details(
         "content_filter_category": "jailbreak",
         "content_filter_severity": "high",
     }
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("partial_content", [None, "Filtered partial output"])
+@pytest.mark.parametrize("mcp_client_type", [_FakeMcpClient, _GroupingMcpClient])
+async def test_filtered_completion_does_not_return_content_or_execute_tools(
+    monkeypatch: pytest.MonkeyPatch,
+    partial_content: str | None,
+    mcp_client_type: type[_FakeMcpClient],
+) -> None:
+    governance_events.clear()
+    _FakeMcpClient.called_tools = []
+    model_client = _FakeModelClient()
+    model_client.chat.completions = _FilteredCompletions(partial_content)
+    project_client = _FakeProjectClient(model_client)
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.Client",
+        mcp_client_type,
+    )
+    service = ChatService(ChatSettings(model_deployment="test-model"))
+    request = ChatRequest(
+        messages=[ChatMessage(role="user", content="Show MEM-001")]
+    )
+
+    with pytest.raises(ChatContentFilteredError) as error:
+        await service.complete(request)
+
+    assert error.value.code == "model_content_filtered"
+    assert error.value.status_code == 422
+    denial = governance_events.snapshot()["recent_events"][0]
+    assert denial["decision"] == "deny"
+    assert denial["policy_name"] == "azure-ai-foundry"
+    assert denial["matched_rule"] == "content_filter"
+    assert len(model_client.chat.completions.calls) == 1
+    assert _FakeMcpClient.called_tools == []
+    assert project_client.closed is True
+    assert model_client.closed is True
+
+
+@pytest.mark.anyio
+async def test_filter_and_transport_errors_are_not_misclassified_as_only_filtered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _FakeMcpClient.called_tools = []
+    model_client = _FakeModelClient()
+    model_client.chat.completions = _FilteredCompletions(None)
+    project_client = _FakeProjectClient(model_client)
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.Client",
+        _GroupingMcpClient,
+    )
+    monkeypatch.setattr(
+        _GroupingMcpClient,
+        "extra_error",
+        RuntimeError("Sensitive transport detail"),
+    )
+    service = ChatService(ChatSettings(model_deployment="test-model"))
+    request = ChatRequest(
+        messages=[ChatMessage(role="user", content="Show MEM-001")]
+    )
+
+    with pytest.raises(ChatServiceError) as error:
+        await service.complete(request)
+
+    assert not isinstance(error.value, ChatContentFilteredError)
+    assert str(error.value) == (
+        "An upstream chat dependency could not complete the request."
+    )
+    assert error.value.code == "upstream_failure"
+    assert error.value.status_code == 502
+    assert _FakeMcpClient.called_tools == []
+    assert project_client.closed is True
+    assert model_client.closed is True
+
+
+@pytest.mark.anyio
+async def test_filtered_completion_returns_explicit_stop_through_chat_api(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _FakeMcpClient.called_tools = []
+    model_client = _FakeModelClient()
+    model_client.chat.completions = _FilteredCompletions("Filtered partial output")
+    project_client = _FakeProjectClient(model_client)
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.Client",
+        _GroupingMcpClient,
+    )
+    settings = ChatSettings(model_deployment="test-model")
+    app = build_chat_app(settings, ChatService(settings))
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/api/chat",
+            headers={"X-Correlation-ID": "foundry-filter-test"},
+            json={"messages": [{"role": "user", "content": "Show MEM-001"}]},
+        )
+
+    assert response.status_code == 422
+    error = response.json()["error"]
+    assert error["code"] == "model_content_filtered"
+    assert error["correlation_id"] == "foundry-filter-test"
+    assert error["details"]["finish_reason"] == "content_filter"
+    assert "Filtered partial output" not in response.text
+    assert _FakeMcpClient.called_tools == []
+    assert project_client.closed is True
+    assert model_client.closed is True
 
 
 @pytest.mark.anyio

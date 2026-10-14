@@ -10,6 +10,7 @@ from starlette.testclient import TestClient
 from ai_governance_harness.chat.app import STATIC_DIR, build_chat_app
 from ai_governance_harness.chat.config import ChatSettings
 from ai_governance_harness.chat.service import (
+    ChatContentFilteredError,
     ChatRequest,
     ChatResponse,
     ChatServiceError,
@@ -43,6 +44,11 @@ class _FailingChatService(_FakeChatService):
     async def complete(self, request: ChatRequest) -> ChatResponse:
         self.requests.append(request)
         raise self._error
+
+
+class _FilteredChatService(_FakeChatService):
+    async def complete(self, request: ChatRequest) -> ChatResponse:
+        raise ChatContentFilteredError()
 
 
 class _StructureParser(HTMLParser):
@@ -81,6 +87,54 @@ def test_given_valid_chat_request_when_posting_then_returns_response() -> None:
         "policy_notice": None,
     }
     assert service.requests[0].messages[0].content == "Profile MEM-001"
+
+
+def test_content_filtered_response_returns_explicit_denial_without_an_answer() -> None:
+    client = TestClient(build_chat_app(_settings(), _FilteredChatService()))
+
+    response = client.post(
+        "/api/chat",
+        headers={"X-Correlation-ID": "filtered-response-test"},
+        json={"messages": [{"role": "user", "content": "Profile MEM-001"}]},
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "error": {
+            "code": "model_content_filtered",
+            "message": (
+                "Azure AI Foundry blocked the model response under a configured "
+                "content filter."
+            ),
+            "correlation_id": "filtered-response-test",
+        },
+    }
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+
+
+def test_other_chat_service_errors_keep_sanitized_502() -> None:
+    service = _FailingChatService(
+        ChatServiceError(
+            "An upstream chat dependency could not complete the request.",
+            code="upstream_failure",
+        )
+    )
+    client = TestClient(build_chat_app(_settings(), service))
+
+    response = client.post(
+        "/api/chat",
+        headers={"X-Correlation-ID": "service-error-test"},
+        json={"messages": [{"role": "user", "content": "Profile MEM-001"}]},
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "error": {
+            "code": "upstream_failure",
+            "message": "An upstream chat dependency could not complete the request.",
+            "correlation_id": "service-error-test",
+        },
+    }
 
 
 def test_given_invalid_chat_request_when_posting_then_rejects_before_service() -> None:
@@ -322,6 +376,20 @@ def test_static_ui_has_required_accessible_structure() -> None:
         and attrs.get("aria-label") == "Dependency health"
         for tag, attrs in tags
     )
+    assert any(
+        tag == "button" and attrs.get("id") == "run-evaluation"
+        for tag, attrs in tags
+    )
+    assert any(
+        tag == "p" and attrs.get("id") == "evaluation-status"
+        and attrs.get("aria-live") == "polite"
+        for tag, attrs in tags
+    )
+    assert any(
+        tag == "p" and attrs.get("id") == "evaluation-error"
+        and attrs.get("role") == "alert"
+        for tag, attrs in tags
+    )
     assert Path(STATIC_DIR / "app.js").is_file()
 
 
@@ -370,7 +438,7 @@ class _PanelParser(HTMLParser):
             self.stack.pop()
 
 
-def test_given_ui_when_loaded_then_chat_and_observability_are_separate_tabs() -> None:
+def test_given_ui_when_loaded_then_chat_observability_and_eval_are_separate_tabs() -> None:
     # Arrange
     parser = _PanelParser()
 
@@ -378,17 +446,39 @@ def test_given_ui_when_loaded_then_chat_and_observability_are_separate_tabs() ->
     parser.feed((STATIC_DIR / "index.html").read_text(encoding="utf-8"))
 
     # Assert
-    assert [tab["id"] for tab in parser.tabs] == ["tab-chat", "tab-observability"]
+    assert [tab["id"] for tab in parser.tabs] == [
+        "tab-chat", "tab-observability", "tab-eval",
+    ]
     assert [tab["aria-controls"] for tab in parser.tabs] == [
         "panel-chat",
         "panel-observability",
+        "panel-eval",
     ]
     assert parser.tabs[0]["aria-selected"] == "true"
     assert "hidden" not in parser.panels["panel-chat"]
     assert "hidden" in parser.panels["panel-observability"]
+    assert "hidden" in parser.panels["panel-eval"]
+    for tab in parser.tabs:
+        assert parser.panels[tab["aria-controls"]]["aria-labelledby"] == tab["id"]
+        if tab["id"] != "tab-chat":
+            assert tab["aria-selected"] == "false"
+            assert tab["tabindex"] == "-1"
     assert parser.panel_of["chat-input"] == "panel-chat"
     assert parser.panel_of["governance-title"] == "panel-observability"
     assert parser.panel_of["insights-title"] == "panel-observability"
+    for element_id in (
+        "evaluation-title", "run-evaluation", "evaluation-status",
+        "evaluation-error", "evaluation-results", "evaluation-summary",
+        "evaluation-artifact", "evaluation-baselines", "evaluation-controls",
+    ):
+        assert parser.panel_of[element_id] == "panel-eval"
+
+
+def test_evaluation_controls_are_not_duplicated_when_moved_to_eval_tab() -> None:
+    parser = _StructureParser()
+    parser.feed((STATIC_DIR / "index.html").read_text(encoding="utf-8"))
+    ids = [attrs["id"] for _, attrs in parser.tags if attrs.get("id")]
+    assert len(ids) == len(set(ids))
 
 
 def test_given_tab_script_when_requested_then_served_as_javascript() -> None:

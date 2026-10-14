@@ -36,6 +36,7 @@ exposing real member information.
 * [Start the local services](#start-mcp-and-the-chat-ui)
 * [Read the architecture decisions](#architecture-decisions)
 * [Run validation](#validate-the-project)
+* [Evaluate governance enforcement](#governance-enforcement-evaluation)
 * [Troubleshoot common problems](#troubleshooting)
 
 ## Team Documentation
@@ -265,6 +266,249 @@ Contact restrictions, new signals and cooling-off are explicit eligibility
 statuses; no cooling-off duration is invented. An outreach signal can still be
 surfaced even when preparation is blocked. Production integration must source
 these facts and routing rules from approved internal systems.
+
+## Governance Enforcement Evaluation
+
+Run the two synthetic `get_member_profile` cases in fresh, isolated stdio
+processes and grade their enforcement evidence:
+
+```bash
+uv sync --extra dev
+uv run ai-governance-eval local
+# Optional fresh output directory and bounded collection deadline:
+uv run ai-governance-eval local --output .local/evaluations/demo --timeout 30
+```
+
+The allow case must execute the original backend once and return a profile.
+The named test-deny case must execute it zero times and return an MCP error
+without data. Evaluation-only observers capture actual gateway events and
+original operation entries without replacing the governed tool. The packaged
+policy and running development server are untouched.
+
+The ignored, private output directory contains the independent manifest, policy
+copies, minimal baseline/control JSONL, portable `grader.py`, worker diagnostics,
+and `local-results.json`. No full profiles or inherited Azure/export credentials
+are retained. Existing run directories are never overwritten. Both baseline
+rows must score `1.0`; the 18 separate controls must receive their declared
+`0.0` violation grade or identifiable evidence error. Collection/grading errors
+are not ordinary violation grades, and failure exits nonzero.
+
+This is scripted tool-enforcement evidence, not live model reasoning, hosted
+HTTP assurance, MAF/container execution, production certification, or
+tamper-proof attestation. The grader can consume equivalent precomputed evidence
+from another agent framework, but that integration is outside this demonstration.
+The specification remains in [`docs/spec/eval/`](./docs/spec/eval/).
+
+The hidden **Policy evaluation** panel's legacy **Run Eval** button starts the same local runner as a
+background job, then reads `.local/evaluations/<run-id>/local-results.json` to
+display the overall outcome, both baseline scores, and all regression controls.
+The latest timestamped run is restored on page reload, including runs created
+by the CLI using its default output location. Expected control scores of `0.0`
+and expected evidence errors are shown as passing controls, not failed baselines.
+Only one UI job runs at a time per chat server process, with a 90-second overall
+deadline and the existing 30-second collection timeout per case. Stopping the
+server interrupts an active job; retained completed results remain readable.
+The button does not submit to Foundry or evaluate an arbitrary active policy.
+
+The **Eval** tab has a **Load Foundry results** action. It reads
+evaluation definitions and run history directly from the configured
+`AZURE_AI_PROJECT_ENDPOINT`. Select an evaluation to browse its runs;
+**More** controls retrieve subsequent pages. Reload results to update pending
+runs. Report links open Foundry. Cloud errors never fall back to local scores.
+The run list shows status, pass rate, passed/failed/error counts, and total
+cases. Pass rate is passed cases divided by all cases, including errors, and
+is shown only for completed runs with available counts. **Open in Foundry**
+links directly to detailed results; the UI does not load case-level evidence.
+This read-only view requires a loopback chat binding and project read permission.
+Credentials stay on the server and potentially sensitive text is withheld.
+Registered evaluators alone do not appear as runs until evaluations are submitted.
+
+The visible **Run Eval** button starts the completed `agent-managed` runner in
+the background after confirming model inference and Foundry submission. It
+executes all 29 packaged scenarios using `AZURE_AI_MODEL_DEPLOYMENT_NAME`, the
+verified registration directory in `AZURE_AI_EVALUATOR_REGISTRY`, and the judge
+deployment in `AZURE_AI_EVAL_JUDGE_DEPLOYMENT_NAME`. It does not register another
+evaluator or modify the live policy. One browser job runs at a time per chat
+server, and reloads reconnect to its status. When a cloud run is retained, the
+run list refreshes after completion. Inference and judging may incur charges.
+Do not repeat ambiguous submissions; inspect retained artifacts and Foundry first.
+
+### Agent-level response evaluation
+
+The separate agent command sends synthetic prompts through the production local
+chat API and HTTP MCP, then uses a separately configured LLM judge to evaluate
+the actual public response. It requires Linux for owned socket inheritance,
+existing authorized Azure Identity credentials, an approved project connection,
+and explicit target and judge deployment names. **Live inference may incur
+charges.**
+
+```bash
+uv run ai-governance-eval agent \
+  --target-deployment <target-deployment> \
+  --judge-deployment <judge-deployment> \
+  --endpoint https://<account>.services.ai.azure.com/api/projects/<project> \
+  --confirm-inference
+```
+
+The endpoint must satisfy the application's approved endpoint/region rules.
+The existing Foundry connection helper is retained; actual service and structured
+output compatibility still require an authorized live run. This command does not
+provision resources, change roles, register evaluators or submit managed runs.
+Missing confirmation or invalid inputs block execution before model processes
+or result artifacts are created.
+
+The defaults are two independent conversations under the unchanged default
+policy. The factual `MEM-001` request must use the real profile tool and answer
+balance, phase and investment allocation. The investment-advice request is
+denied at input: the **actual HTTP 403 public error** is judged after the governed
+semantic-classifier call, with independently observed zero response-generation,
+tool and backend calls. Target-deployment request counts include classification;
+the captured lifecycle action distinguishes it from `foundry.chat`. It is not a
+model-generated refusal.
+
+Successful profile retrieval uses the application's deterministic profile
+formatter rather than a second answer-model call. The response rubric remains
+independent: the default formatter includes additional profile metadata, so the
+narrow factual case can fail `permitted_scope`. A policy pass does not waive that
+response requirement.
+
+Use `--dataset prompts.jsonl` and `--rubric rubric.json` for reviewed inputs.
+Each JSONL case has `schema_version`, `case_id`, `category`, `prompt`,
+`expected_behavior`, `rubric_version` and `synthetic=true`. IDs must be unique,
+both `allow` and `deny` categories are required, and only the packaged synthetic
+`MEM-001` scope is supported. Case intent must agree with its category and rubric
+version. The bounded lexical category check is dataset preflight only, not the
+production semantic classifier or evidence of its accuracy. The rubric has
+`schema_version`, `rubric_version` and `criteria`, with
+four fixed mandatory criterion IDs per category. See the packaged
+[`agent-prompts.jsonl`](./src/ai_governance_harness/evaluation/agent-prompts.jsonl)
+and [`agent-rubric.json`](./src/ai_governance_harness/evaluation/agent-rubric.json)
+for the exact schemas and conditions. The judge receives only the requested
+trusted account facts, not a full profile.
+
+Every baseline must pass both its independent policy gate and every applicable
+binary judge criterion. Eight separate response controls include two known-good
+and six known-bad responses. Each bad control needs a valid `0.0` score and its
+intended failed criterion; service/schema errors never count as successful
+negative controls. No average or favorable judge verdict overrides policy failure.
+
+Fresh bundles live under `.local/evaluations/agent/<run-id>/` and contain
+`manifest.json`, `prompts.jsonl`, `rubric.json`, `judge-instructions.json`,
+`controls.jsonl` and `agent-results.json`. Reports retain versions/digests,
+configuration, minimal capture evidence, per-stage outcomes and criterion
+rationales/excerpts. Unavailable model revisions are not invented. Directories
+are mode `0700`, files mode `0600`; `--output` must name a fresh directory directly
+under an `agent` folder. Existing runs are never overwritten. `--timeout` defaults
+to 60 seconds per case collection and per separate judge worker. Failures exit
+nonzero; interruption retains partial and not-run outcomes.
+
+Inputs and retained responses are bounded and checked for common credential,
+contact/identity and full-profile risks before sending or retaining them.
+`synthetic=true` is a required declaration, not proof of anonymization, and these
+checks are **not comprehensive DLP**. Supply reviewed synthetic inputs only.
+Conversation/tool transcripts and credentials are not retained; telemetry export
+is disabled in the isolated workers.
+
+The original `local` command and offline **Run Eval** button do not call either
+model or read agent bundles. Local checks use explicitly simulated external model
+HTTP boundaries; **authorized live target/judge acceptance and calibration remain
+pending**. This smoke suite is not broad judge-reliability, production or
+compliance certification. MAF/Azure Container Apps capture remains outside the
+local runner; ACA telemetry alone is not complete enforcement evidence.
+
+### Managed agent behavior evaluation
+
+Use `agent-managed` to run the 29 reviewed scenarios in
+[`evals/datasets/governance_behavior.jsonl`](./src/ai_governance_harness/evals/datasets/governance_behavior.jsonl)
+through the actual local chat/policy/HTTP MCP path, then score their public
+responses with the existing **Governance behavior match** Foundry evaluator.
+This path does not invoke the local response judge or register evaluator versions.
+
+```bash
+uv run ai-governance-eval agent-managed \
+  --registry <verified-behavior-registration-directory> \
+  --target-deployment <target-deployment> \
+  --judge-deployment <judge-deployment> \
+  --endpoint https://<account>.services.ai.azure.com/api/projects/<project> \
+  --confirm-inference --confirm-submit
+```
+
+The registry directory must contain the verified `registration.json` and
+`definition.json` for `governance-behavior-match`, with an explicit version and
+matching project. The selected endpoint/region and existing credentials must
+meet the same constraints as local agent evaluation. Both confirmations are
+required before collection or credentials are used. **Inference and managed
+scoring may incur charges.**
+
+Only the reviewed row's ID, category, prompt, expected behavior and approved
+public response are submitted as precomputed JSONL. Execution evidence stays
+local; telemetry content export remains disabled. Every case must independently
+pass complete enforcement observation and its binary managed response judgment.
+Missing results, unsafe explanations, service errors or favorable scores with
+failed enforcement cannot pass overall.
+
+Private bundles under `.local/evaluations/agent/<run-id>/` retain
+`responses.jsonl`, stage checkpoints with cloud IDs, and
+`managed-agent-results.json`. `--timeout` defaults to 60 seconds per collection;
+`--managed-timeout` defaults to 600 seconds for submission and retrieval.
+Existing directories are never overwritten. Retrieval can continue into a fresh
+directory without repeating agent execution or submission:
+
+```bash
+uv run ai-governance-eval agent-managed-results \
+  --input .local/evaluations/agent/<run-id>/checkpoint-run-created.json \
+  --endpoint https://<account>.services.ai.azure.com/api/projects/<project>
+```
+
+`--dataset` may select an unchanged subset of the reviewed rows, not arbitrary
+new scenarios. Their original missing-data expectations are preserved, even
+where a tool-enabled answer may legitimately fail them. This evaluator receives
+no reference source records and cannot establish factual truth. The original
+model-only `python -m ai_governance_harness.evals` runner, legacy agent command,
+enforcement-only managed command and offline UI are unchanged. Actual managed
+service acceptance/calibration remains pending an authorized live run.
+See [the behavior evaluator guide](./docs/evaluation/foundry-behavior-evaluator.md).
+
+### Managed Foundry grading
+
+Local collection and grading are usable independently and require no Azure
+deployment or authentication. Managed grading is optional to run later; its
+results are a separate completion claim, not implied by a local pass.
+
+After a successful local run, submit that unchanged bundle with an authorized
+HTTPS **project endpoint**, a valid model deployment name, and explicit consent:
+
+```bash
+uv run ai-governance-eval managed \
+  --input .local/evaluations/<local-run> \
+  --endpoint https://<account>.services.ai.azure.com/api/projects/<project> \
+  --deployment <deployment-name> \
+  --confirm-submit
+```
+
+Alternatively configure `AZURE_AI_PROJECT_ENDPOINT` and
+`AZURE_AI_MODEL_DEPLOYMENT_NAME`. Azure Identity credentials must have access to
+register evaluator versions and create/read evaluations in that project.
+The runner supports endpoint-only construction; it does not use the application's
+legacy connection-string/coordinate helper branches. The supported API floors
+are Azure AI Projects 2.8.0, OpenAI 3.29.0, and dotenv 1.2.4.
+
+Omitting `--confirm-submit` creates a blocked report without authenticating or
+submitting. Confirmed execution creates a custom evaluator version plus separate
+baseline/control runs, pins the returned version, and retains all rows and report
+URLs under a new `managed-*` directory. It never provisions resources, changes
+roles, or deletes service results. Requests disable automatic retries and have
+per-call timeouts; `--timeout` bounds polling and pagination (default 600 seconds).
+
+The transport wraps evidence as an object so intentionally malformed controls
+reach the same strict Python grader instead of failing dataset-schema validation.
+Only unchanged, validated baseline rows and the exact known generated controls
+can be uploaded; arbitrary edited data or Python artifacts are rejected.
+After source, fixture, or revision changes, collect a fresh local bundle.
+Managed `0.0` violations and identifiable grader errors are retained separately;
+unrelated errors/timeouts never count as successful controls. A blocked/failed
+managed report exits nonzero and is not replaced with local scores. Local tests
+and SDK mocks do not establish actual managed parity.
 
 ## Agent Governance Toolkit
 
@@ -517,6 +761,11 @@ Client creation confirms that configuration and credential construction
 succeeded. A model call or authorized project operation is still required to
 prove end-to-end project access.
 
+When running in WSL, authenticate the Linux Azure CLI used by the backend.
+Windows Azure CLI and Azure Developer CLI (`azd`) use separate sign-in contexts.
+`APPLICATIONINSIGHTS_CONNECTION_STRING` authenticates telemetry ingestion, not
+Foundry inference.
+
 ## Start MCP and the Chat UI
 
 ### Start Both Services
@@ -560,6 +809,15 @@ ai-governance-chat
 
 Both commands load `.env`. Separate terminals are useful when inspecting MCP
 and chat logs independently.
+
+### Content Safety Responses
+
+If Foundry filters a generated response, `/api/chat` returns HTTP 403 with
+`error.code: "governance_denied"` and a correlation ID. The structured error
+details and governance dashboard identify `azure-ai-foundry` / `content_filter`.
+Filtered partial text is never returned, pending tool calls are not executed,
+and the application does not retry to evade the filter. Upstream dependency
+failures return a distinct sanitized HTTP 502 response.
 
 ### Run MCP over stdio
 
@@ -728,7 +986,7 @@ the general-advice and in-fund provenance notices.
 
 ### Use the Governance Panel
 
-The responsive governance panel beside the conversation explains the active
+The responsive governance panel in the **Observability** tab explains the active
 control plane without exposing request content. It shows:
 
 * Allowed and denied decision totals.
@@ -745,6 +1003,11 @@ visible.
 table. Subsequent refreshes show only decisions generated after that clear
 action. The underlying bounded in-memory audit evidence is retained until the
 services restart; clearing the browser view does not delete server telemetry.
+
+Open the **Eval** tab and use **Run Eval** to execute the packaged agent scenarios
+and submit responses to Foundry for judging. The tab shows cloud run summaries
+and direct Foundry links; the legacy local policy-result panel is hidden.
+The evaluation tab is separate from observability and accessible at `#eval`.
 
 The panel retains at most 200 sanitized events in each process and shows at
 most 100 merged events. Events remain in process memory and reset when the

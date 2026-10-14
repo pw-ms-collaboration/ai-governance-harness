@@ -30,9 +30,18 @@ const policyCaption = document.querySelector("#policy-caption");
 const defaultAction = document.querySelector("#default-action");
 const evidenceControls = document.querySelector("#evidence-controls");
 const privacyControls = document.querySelector("#privacy-controls");
+const runEvaluationButton = document.querySelector("#run-evaluation");
+const evaluationStatus = document.querySelector("#evaluation-status");
+const evaluationError = document.querySelector("#evaluation-error");
+const evaluationResults = document.querySelector("#evaluation-results");
+const evaluationSummary = document.querySelector("#evaluation-summary");
+const evaluationArtifact = document.querySelector("#evaluation-artifact");
+const evaluationBaselines = document.querySelector("#evaluation-baselines");
+const evaluationControls = document.querySelector("#evaluation-controls");
 
 let history = [];
 let governancePaused = false;
+let evaluationTimer = null;
 let governanceBaselineAt = null;
 let governanceRetainedLimit = 0;
 
@@ -114,7 +123,6 @@ function approvalActions(content) {
   group.append(hint);
   return group;
 }
-
 function addMessage(role, content, policyNotice = null) {
   // The backend accepts an approval reply only directly after its prompt.
   setApprovalActionsEnabled(false);
@@ -554,6 +562,116 @@ async function refreshGovernance({ announce = false } = {}) {
   }
 }
 
+function renderEvaluationRows(element, rows, { controls = false } = {}) {
+  element.replaceChildren();
+  for (const result of rows) {
+    const row = document.createElement("tr");
+    appendTableCell(row, controls ? result.control_id : result.row_id.replace("baseline-", ""));
+    appendTableCell(row, result.score === null ? "Not scored" : result.score.toFixed(1));
+    const outcome = document.createElement("td");
+    outcome.append(makeStatusBadge(result.accepted ? "passed" : "failed"));
+    row.append(outcome);
+    const error = result.grader_error || result.error;
+    const detail = controls
+      ? error
+        ? `${error}${error === result.expected_error ? " (expected)" : " (unexpected)"}`
+        : `Expected score: 0.0${result.expected_error ? `; expected error: ${result.expected_error}` : ""}`
+      : error || `Collection: ${result.stage}; worker exit: ${result.child_exit_code ?? "unknown"}`;
+    appendTableCell(row, detail);
+    element.append(row);
+  }
+}
+
+function showEvaluationError(message) {
+  evaluationError.textContent = message;
+  evaluationError.hidden = false;
+}
+
+function renderEvaluation(job) {
+  evaluationError.hidden = true;
+  evaluationError.textContent = "";
+  evaluationResults.hidden = true;
+  runEvaluationButton.disabled = job?.status === "running";
+  runEvaluationButton.textContent = job?.status === "running" ? "Running Eval..." : "Run Eval";
+  evaluationStatus.classList.toggle("busy", job?.status === "running");
+  if (!job) {
+    evaluationStatus.textContent = "No saved evaluation yet.";
+    return;
+  }
+  if (job.status === "running") {
+    evaluationStatus.textContent = `Running isolated evaluation: ${job.run_id}`;
+    evaluationTimer = window.setTimeout(() => loadEvaluation(job.run_id), 1000);
+    return;
+  }
+  evaluationStatus.textContent = `Evaluation ${job.status}: ${job.run_id}`;
+  if (job.status === "error") {
+    showEvaluationError(job.error || "Evaluation did not produce a valid result.");
+    return;
+  }
+  const results = job.results;
+  const baselinesPassed = results.baselines.filter((row) => row.accepted).length;
+  const controlsPassed = results.controls.filter((row) => row.accepted).length;
+  const controlsSummary = results.controls.length
+    ? `Regression controls: ${controlsPassed}/${results.controls.length}.`
+    : "Regression controls not run because the baselines did not pass.";
+  evaluationSummary.replaceChildren(
+    makeStatusBadge(job.status),
+    document.createTextNode(
+      ` Baselines: ${baselinesPassed}/${results.baselines.length}. ${controlsSummary}`,
+    ),
+  );
+  evaluationArtifact.textContent = job.artifact;
+  renderEvaluationRows(evaluationBaselines, results.baselines);
+  renderEvaluationRows(evaluationControls, results.controls, { controls: true });
+  evaluationResults.hidden = false;
+}
+
+async function loadEvaluation(runId = null) {
+  window.clearTimeout(evaluationTimer);
+  try {
+    const url = runId
+      ? `/api/governance/evaluations/${encodeURIComponent(runId)}`
+      : "/api/governance/evaluations";
+    const response = await fetch(url, { headers: { Accept: "application/json" } });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || "Evaluation results are unavailable.");
+    }
+    renderEvaluation(payload);
+  } catch (error) {
+    evaluationStatus.textContent = "Evaluation status unavailable. Reload to reconnect to the saved job.";
+    evaluationStatus.classList.remove("busy");
+    runEvaluationButton.disabled = false;
+    runEvaluationButton.textContent = "Run Eval";
+    showEvaluationError(error.message || "Evaluation results could not be loaded.");
+  }
+}
+
+runEvaluationButton.addEventListener("click", async () => {
+  window.clearTimeout(evaluationTimer);
+  runEvaluationButton.disabled = true;
+  runEvaluationButton.textContent = "Starting Eval...";
+  evaluationError.hidden = true;
+  evaluationResults.hidden = true;
+  evaluationStatus.textContent = "Starting a local evaluation job.";
+  try {
+    const response = await fetch("/api/governance/evaluations", {
+      method: "POST",
+      headers: { Accept: "application/json" },
+    });
+    const payload = await response.json();
+    if (!response.ok && response.status !== 409) {
+      throw new Error(payload.error || "Evaluation could not be started.");
+    }
+    renderEvaluation(payload);
+  } catch (error) {
+    runEvaluationButton.disabled = false;
+    runEvaluationButton.textContent = "Run Eval";
+    evaluationStatus.textContent = "Evaluation could not be started.";
+    showEvaluationError(error.message || "Evaluation could not be started.");
+  }
+});
+
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   clearError();
@@ -671,3 +789,5 @@ window.setInterval(() => {
 
 checkHealth();
 refreshGovernance();
+runEvaluationButton.disabled = true;
+if (!runEvaluationButton.closest("section").hidden) loadEvaluation();

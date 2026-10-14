@@ -49,6 +49,9 @@ from ai_governance_harness.mcp_server.tool_contracts import (
     browser_chat_enabled,
 )
 
+logger = logging.getLogger(__name__)
+_SAFE_ERROR_VALUE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
+
 SYSTEM_INSTRUCTIONS = (
     "You are an internal assistant for business analysts working only with "
     "synthetic in-fund superannuation data. Use get_member_profile for factual "
@@ -125,6 +128,17 @@ def _restrict_tool_payload(tool_name: str, payload: Any) -> Any:
     if tool_name != "get_member_profile" or not isinstance(payload, dict):
         return payload
     return {key: payload[key] for key in PROFILE_FIELDS if key in payload}
+
+
+ChatErrorCode = Literal[
+    "chat_service_error",
+    "governance_denied",
+    "invalid_request",
+    "invalid_model_response",
+    "unsafe_tool_result",
+    "upstream_failure",
+    "model_round_limit",
+]
 
 
 class ChatServiceError(RuntimeError):
@@ -433,6 +447,29 @@ class ChatRequest(BaseModel):
         if value[-1].role != "user":
             raise ValueError("The conversation must end with a user message.")
         return value
+
+
+def _active_advice_request_text(messages: list[ChatMessage]) -> str:
+    """Include prior user intent when the latest turn only supplies a member ID."""
+    latest = messages[-1]
+    if (
+        latest.role != "user"
+        or len(latest.content) > 80
+        or re.search(r"\bMEM-\d{3}\b", latest.content, re.IGNORECASE) is None
+    ):
+        return latest.content
+
+    previous_user = next(
+        (
+            message
+            for message in reversed(messages[:-1])
+            if message.role == "user"
+        ),
+        None,
+    )
+    if previous_user is None:
+        return latest.content
+    return f"{previous_user.content}\n{latest.content}"
 
 
 class PolicyNotice(BaseModel):

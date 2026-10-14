@@ -130,6 +130,7 @@ module managedEnvironment 'br/public:avm/res/app/managed-environment:0.16.0' = {
     name: acaEnvironmentName
     location: location
     internal: false
+    publicNetworkAccess: 'Enabled'
     appLogsConfiguration: {
       destination: 'azure-monitor'
     }
@@ -219,7 +220,7 @@ module mcpApp 'br/public:avm/res/app/container-app:0.23.0' = {
             openIdIssuer: issuer
           }
           validation: {
-            allowedAudiences: [mcpApiAudience]
+            allowedAudiences: [mcpApiAudience, mcpApiClientId]
             defaultAuthorizationPolicy: {
               allowedApplications: [foundryAgentIdentityClientId]
             }
@@ -252,6 +253,7 @@ module mcpApp 'br/public:avm/res/app/container-app:0.23.0' = {
           { name: 'AZURE_AI_PROJECT_REGION', value: location }
           { name: 'MCP_AUTH_TENANT_ID', value: tenantId }
           { name: 'MCP_AUTH_AUDIENCE', value: mcpApiAudience }
+          { name: 'MCP_AUTH_AUDIENCES', value: '${mcpApiAudience},${mcpApiClientId}' }
           { name: 'MCP_AUTH_REQUIRED_ROLE', value: mcpRequiredRole }
           { name: 'MCP_RESOURCE_URL', value: apimMcpUrl }
           { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', secretRef: 'appinsights-connection' }
@@ -306,6 +308,11 @@ module chatApp 'br/public:avm/res/app/container-app:0.23.0' = {
       }
       httpSettings: {
         requireHttps: true
+      }
+      login: {
+        allowedExternalRedirectUrls: [
+          'https://${chatAppName}.${managedEnvironment.outputs.defaultDomain}'
+        ]
       }
       identityProviders: {
         azureActiveDirectory: {
@@ -381,12 +388,12 @@ resource mcpApi 'Microsoft.ApiManagement/service/apis@2025-09-01-preview' = {
     subscriptionRequired: false
     mcpProperties: {
       transportType: 'streamable'
-      endpoints: [
-        {
+      endpoints: any({
+        message: {
           name: 'message'
           uriTemplate: '/mcp'
         }
-      ]
+      })
     }
   }
 }
@@ -396,13 +403,14 @@ resource mcpApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2025-09-01-
   name: 'policy'
   properties: {
     format: 'rawxml'
-    value: '''<policies>
+    value: format('''<policies>
   <inbound>
     <base />
     <validate-jwt header-name="Authorization" require-scheme="Bearer" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized">
-      <openid-config url="${issuer}/.well-known/openid-configuration" />
+      <openid-config url="{0}/.well-known/openid-configuration" />
       <audiences>
-        <audience>${mcpApiAudience}</audience>
+        <audience>{1}</audience>
+        <audience>{2}</audience>
       </audiences>
     </validate-jwt>
     <rate-limit-by-key calls="120" renewal-period="60" counter-key="@(context.Request.IpAddress)" />
@@ -416,7 +424,7 @@ resource mcpApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2025-09-01-
   <on-error>
     <base />
   </on-error>
-</policies>'''
+</policies>''', issuer, mcpApiAudience, mcpApiClientId)
   }
 }
 

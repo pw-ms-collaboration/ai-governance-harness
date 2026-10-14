@@ -75,6 +75,7 @@ def test_given_hosted_application_role_when_loading_settings_then_accepts_role(
     monkeypatch.setenv("AZURE_AI_PROJECT_REGION", "australiaeast")
     monkeypatch.setenv("MCP_AUTH_TENANT_ID", "tenant-123")
     monkeypatch.setenv("MCP_AUTH_AUDIENCE", "api://mcp-server")
+    monkeypatch.setenv("MCP_AUTH_AUDIENCES", "api://mcp-server,mcp-server-client-id")
     monkeypatch.delenv("MCP_AUTH_REQUIRED_SCOPE", raising=False)
     monkeypatch.setenv("MCP_AUTH_REQUIRED_ROLE", "Mcp.Tools.Invoke")
     monkeypatch.setenv("MCP_RESOURCE_URL", "https://mcp.example/mcp")
@@ -85,6 +86,10 @@ def test_given_hosted_application_role_when_loading_settings_then_accepts_role(
     # Assert
     assert settings.auth_required_scope is None
     assert settings.auth_required_role == "Mcp.Tools.Invoke"
+    assert settings.auth_audiences == (
+        "api://mcp-server",
+        "mcp-server-client-id",
+    )
 
 
 def test_given_valid_http_environment_when_loading_then_parses_values(

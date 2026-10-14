@@ -49,6 +49,7 @@ class ServerSettings(BaseModel):
     json_response: bool = False
     auth_tenant_id: str | None = None
     auth_audience: str | None = None
+    auth_audiences: tuple[str, ...] = ()
     auth_required_scope: str | None = None
     auth_required_role: str | None = None
     resource_url: str | None = None
@@ -110,9 +111,12 @@ class ServerSettings(BaseModel):
             bool(permission)
             for permission in (self.auth_required_scope, self.auth_required_role)
         )
-        if not all((self.auth_tenant_id, self.auth_audience, self.resource_url)) or permission_count != 1:
+        audience_values = self.auth_audiences or (
+            (self.auth_audience,) if self.auth_audience else ()
+        )
+        if not all((self.auth_tenant_id, self.resource_url)) or not audience_values or permission_count != 1:
             raise ValueError(
-                "Hosted MCP mode requires tenant, audience, exactly one required scope "
+                "Hosted MCP mode requires tenant, audience(s), exactly one required scope "
                 "or application role, and resource URL settings."
             )
         return self
@@ -126,6 +130,12 @@ class ServerSettings(BaseModel):
             if origins_value
             else cls.model_fields["allowed_origins"].default
         )
+        audiences_value = os.getenv("MCP_AUTH_AUDIENCES")
+        audiences = tuple(
+            audience.strip()
+            for audience in audiences_value.split(",")
+            if audience.strip()
+        ) if audiences_value else ()
         return cls(
             transport=os.getenv("MCP_TRANSPORT", "stdio"),
             host=os.getenv("MCP_HOST", "127.0.0.1"),
@@ -138,6 +148,7 @@ class ServerSettings(BaseModel):
             json_response=_parse_bool(os.getenv("MCP_JSON_RESPONSE"), default=False),
             auth_tenant_id=os.getenv("MCP_AUTH_TENANT_ID") or os.getenv("AZURE_TENANT_ID"),
             auth_audience=os.getenv("MCP_AUTH_AUDIENCE"),
+            auth_audiences=audiences,
             auth_required_scope=os.getenv("MCP_AUTH_REQUIRED_SCOPE"),
             auth_required_role=os.getenv("MCP_AUTH_REQUIRED_ROLE"),
             resource_url=os.getenv("MCP_RESOURCE_URL"),

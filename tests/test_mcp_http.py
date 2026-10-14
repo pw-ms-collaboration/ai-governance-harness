@@ -234,6 +234,30 @@ def test_given_required_application_role_when_getting_governance_then_authentica
     assert response.status_code == 200
 
 
+def test_given_alternate_valid_api_audience_when_getting_governance_then_authenticates() -> None:
+    # Arrange
+    settings = _hosted_settings(
+        auth_audience=None,
+        auth_audiences=("api://mcp-server", "mcp-server-client-id"),
+        auth_required_scope=None,
+        auth_required_role="Mcp.Tools.Invoke",
+    )
+    client = TestClient(build_http_app(settings))
+
+    # Act
+    response = client.get(
+        "/governance/snapshot",
+        headers=_principal_headers(
+            audience="mcp-server-client-id",
+            scope=None,
+            role="Mcp.Tools.Invoke",
+        ),
+    )
+
+    # Assert
+    assert response.status_code == 200
+
+
 def test_given_application_role_mode_when_getting_resource_metadata_then_omits_scopes() -> None:
     # Arrange
     settings = _hosted_settings(

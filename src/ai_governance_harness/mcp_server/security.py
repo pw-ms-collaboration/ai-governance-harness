@@ -152,10 +152,12 @@ def _validate_platform_principal(
         settings.auth_tenant_id or "",
     ):
         return None, "invalid_tenant"
-    if not _contains_claim(
-        claims,
-        ("aud",),
-        settings.auth_audience or "",
+    allowed_audiences = settings.auth_audiences or (
+        (settings.auth_audience,) if settings.auth_audience else ()
+    )
+    if not any(
+        _contains_claim(claims, ("aud",), audience)
+        for audience in allowed_audiences
     ):
         return None, "invalid_audience"
 

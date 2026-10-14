@@ -6,8 +6,10 @@ import json
 import logging
 import statistics
 import time
+from pathlib import Path
 
 import pytest
+import yaml
 
 from ai_governance_harness.governance import (
     GovernanceContext,
@@ -21,7 +23,7 @@ from ai_governance_harness.governance.events import (
     GovernanceEventStore,
     governance_events,
 )
-from ai_governance_harness.governance.models import GovernanceDecision
+from ai_governance_harness.governance.models import GovernanceDecision, PolicyProvenance
 from ai_governance_harness.governance.reliability import ReliabilityGuard
 from ai_governance_harness.governance.sandbox import (
     ExecutionClass,
@@ -76,6 +78,133 @@ def test_policy_allows_known_tool_and_denies_unknown_action() -> None:
     assert denied.action == "deny"
 
 
+@pytest.mark.parametrize(
+    ("point", "action", "data", "rule"),
+    [
+        (LifecyclePoint.INPUT, "chat.input",
+         {"classification_status": "classified", "request_intent": "financial_recommendation",
+          "advice_subject": "identified_member", "product_scope": "superannuation_option",
+          "confidence": "high"},
+         "deny-identified-member-financial-recommendation"),
+        (LifecyclePoint.POST_TOOL, "get_member_profile",
+         {"advice_scan_status": "personal_advice_detected"},
+         "deny-personal-advice-tool-response"),
+        (LifecyclePoint.INPUT, "chat.input",
+         {"classification_status": "classified", "request_intent": "factual_information",
+          "confidence": "high"}, "allow-chat-input"),
+    ],
+)
+def test_given_tagged_rule_when_evaluating_then_attributes_event_and_snapshot(
+    point: LifecyclePoint, action: str, data: dict[str, str], rule: str,
+) -> None:
+    engine = GovernanceEngine(_settings())
+
+    decision = engine.evaluate(point, action, policy_data=data, source="chat")
+    snapshot = build_governance_snapshot(engine, source="chat")
+    merged = merge_governance_snapshots(snapshot, snapshot)
+
+    expected = {
+        "layer": "business-unit", "policy_id": "BU-SUPER-001",
+        "policy_version": "1.0", "source": "superannuation-ba-policy-source.yaml",
+    }
+    assert decision.matched_rule == rule
+    assert decision.provenance is not None
+    assert decision.provenance.model_dump() == expected
+    assert all(event["provenance"] == expected
+               for event in merged["events"]["recent_events"])
+    assert next(item for item in snapshot["policy"]["rules"]
+                if item["name"] == rule)["provenance"] == expected
+
+
+@pytest.mark.parametrize(
+    ("action", "point", "data"),
+    [
+        ("get_member_profile", LifecyclePoint.PRE_TOOL, {}),
+        ("chat.input", LifecyclePoint.INPUT, {"request_intent": "unknown"}),
+        ("shell.execute", LifecyclePoint.PRE_TOOL, {}),
+    ],
+)
+def test_given_unattributed_rule_when_evaluating_then_does_not_infer_bu_origin(
+    action: str, point: LifecyclePoint, data: dict[str, object],
+) -> None:
+    engine = GovernanceEngine(_settings())
+    data["provenance"] = {"policy_id": "caller-supplied"}
+
+    decision = engine.evaluate(point, action, policy_data=data)
+
+    assert decision.provenance is None
+    assert governance_events.snapshot()["recent_events"][0]["provenance"] is None
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("layer", "regulatory"),
+        ("policy_id", "private@example.com"),
+        ("policy_id", "a" * 65),
+        ("policy_version", 1.0),
+        ("policy_version", "a" * 33),
+        ("source", "a" * 124 + ".yaml"),
+        ("source", "../private.yaml"),
+        ("source", "C:\\private.yaml"),
+        ("prompt", "sensitive"),
+    ],
+)
+def test_given_invalid_provenance_when_loading_then_rejects_configuration(
+    tmp_path: Path, field: str, value: object,
+) -> None:
+    document = yaml.safe_load(DEFAULT_POLICY_PATH.read_text(encoding="utf-8"))
+    document["rules"][0]["provenance"][field] = value
+    policy_path = tmp_path / "invalid.yaml"
+    policy_path.write_text(yaml.safe_dump(document), encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        GovernanceEngine(_settings(policy_path=policy_path))
+
+
+def test_given_duplicate_tagged_rule_when_loading_then_rejects_ambiguous_origin(
+    tmp_path: Path,
+) -> None:
+    document = yaml.safe_load(DEFAULT_POLICY_PATH.read_text(encoding="utf-8"))
+    document["rules"].append(dict(document["rules"][0]))
+    policy_path = tmp_path / "duplicate.yaml"
+    policy_path.write_text(yaml.safe_dump(document), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="unique policy rule names"):
+        GovernanceEngine(_settings(policy_path=policy_path))
+
+
+def test_given_invalid_remote_provenance_when_merging_then_drops_event() -> None:
+    engine = GovernanceEngine(_settings())
+    engine.evaluate(
+        LifecyclePoint.INPUT, "chat.input",
+        policy_data={"classification_status": "classified",
+                     "request_intent": "financial_recommendation",
+                     "advice_subject": "identified_member", "confidence": "high"},
+    )
+    snapshot = build_governance_snapshot(engine, source="chat")
+    remote = json.loads(json.dumps(snapshot))
+    remote["events"]["recent_events"][0]["provenance"]["source"] = "../private.yaml"
+
+    merged = merge_governance_snapshots(snapshot, remote)
+
+    assert len(merged["events"]["recent_events"]) == 1
+    assert "../private.yaml" not in json.dumps(merged)
+
+
+def test_given_bu_source_when_loading_then_all_mappings_match_active_provenance() -> None:
+    source_path = DEFAULT_POLICY_PATH.with_name("superannuation-ba-policy-source.yaml")
+    source = yaml.safe_load(source_path.read_text(encoding="utf-8"))
+    engine = GovernanceEngine(_settings())
+    expected = PolicyProvenance(
+        layer=source["policy_layer"], policy_id=source["policy_id"],
+        policy_version=source["version"], source=source_path.name,
+    )
+
+    for name in [item["rule"] for item in source["rule_mappings"]] + source["supporting_rules"]:
+        assert engine.rule_provenance(name) == expected
+
+
 def test_given_denied_policy_when_requiring_allowed_then_exposes_decision() -> None:
     # Arrange
     engine = GovernanceEngine(_settings())
@@ -113,30 +242,96 @@ def test_given_external_denial_when_recording_then_enforces_and_counts_it(
     assert decision.enforcement_mode == "enforce"
     assert snapshot["counts"]["deny"] == 1
     assert snapshot["recent_events"][0]["policy_name"] == "azure-ai-foundry"
+    assert decision.provenance is None
+    assert snapshot["recent_events"][0]["provenance"] is None
 
 
 @pytest.mark.parametrize(
-    ("status", "expected_allowed"),
-    [("passed", True), ("personal_advice_requested", False), ("unknown", False)],
+    ("overrides", "expected_allowed", "expected_rule"),
+    [
+        ({}, True, "allow-chat-input"),
+        (
+            {
+                "request_intent": "financial_recommendation",
+                "advice_subject": "identified_member",
+                "financial_action": "invest",
+                "product_scope": "superannuation_option",
+            },
+            False,
+            "deny-identified-member-financial-recommendation",
+        ),
+        (
+            {
+                "request_intent": "financial_recommendation",
+                "advice_subject": "general_audience",
+                "financial_action": "buy",
+                "product_scope": "external_security",
+            },
+            False,
+            "deny-external-security-recommendation",
+        ),
+        (
+            {"classification_status": "unavailable"},
+            False,
+            "deny-unclassified-chat-input",
+        ),
+        (
+            {"request_intent": "unknown"},
+            False,
+            "deny-unknown-chat-intent",
+        ),
+        (
+            {"confidence": "low"},
+            False,
+            "deny-low-confidence-chat-input",
+        ),
+    ],
 )
-def test_given_advice_request_status_when_evaluating_input_then_enforces_policy(
-    status: str,
+def test_given_semantic_advice_facts_when_evaluating_input_then_enforces_policy(
+    overrides: dict[str, str],
     expected_allowed: bool,
+    expected_rule: str,
 ) -> None:
     # Arrange
     engine = GovernanceEngine(_settings())
+    policy_data = {
+        "classification_status": "classified",
+        "request_intent": "factual_information",
+        "advice_subject": "none",
+        "financial_action": "none",
+        "product_scope": "none",
+        "confidence": "high",
+        **overrides,
+    }
 
     # Act
     decision = engine.evaluate(
         LifecyclePoint.INPUT,
         "chat.input",
-        policy_data={"advice_request_status": status},
+        policy_data=policy_data,
     )
 
     # Assert
     assert decision.allowed is expected_allowed
-    if status == "personal_advice_requested":
-        assert decision.matched_rule == "deny-personal-advice-request"
+    assert decision.matched_rule == expected_rule
+
+
+@pytest.mark.parametrize(
+    "lifecycle_point",
+    [LifecyclePoint.PRE_MODEL, LifecyclePoint.POST_MODEL],
+)
+def test_classifier_model_lifecycle_is_explicitly_allowed(
+    lifecycle_point: LifecyclePoint,
+) -> None:
+    engine = GovernanceEngine(_settings())
+
+    decision = engine.evaluate(
+        lifecycle_point,
+        "foundry.advice_classifier",
+        policy_data={"classification_status": "classified"},
+    )
+
+    assert decision.allowed is True
 
 
 @pytest.mark.parametrize(

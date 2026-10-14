@@ -5,7 +5,7 @@ from __future__ import annotations
 from opentelemetry import metrics, trace
 
 from ai_governance_harness.governance.events import EventSource
-from ai_governance_harness.governance.models import GovernanceDecision
+from ai_governance_harness.governance.models import GovernanceDecision, PolicyProvenance
 
 _meter = metrics.get_meter("ai-governance-harness-governance", "0.1.0")
 tracer = trace.get_tracer("ai-governance-harness-governance", "0.1.0")
@@ -22,6 +22,18 @@ evaluation_duration = _meter.create_histogram(
 )
 
 
+def provenance_attributes(provenance: PolicyProvenance | None) -> dict[str, str]:
+    """Return validated policy identifiers for spans, excluding policy content."""
+    if provenance is None:
+        return {}
+    return {
+        "governance.policy.layer": provenance.layer,
+        "governance.policy.id": provenance.policy_id,
+        "governance.policy.version": provenance.policy_version,
+        "governance.policy.source": provenance.source,
+    }
+
+
 def record_decision_metrics(
     decision: GovernanceDecision,
     *,
@@ -34,5 +46,10 @@ def record_decision_metrics(
         "governance.source": source,
         "governance.enforcement.mode": decision.enforcement_mode,
     }
+    if decision.provenance:
+        attributes.update({
+            "governance.policy.layer": decision.provenance.layer,
+            "governance.policy.id": decision.provenance.policy_id,
+        })
     decision_counter.add(1, attributes)
     evaluation_duration.record(decision.evaluation_ms / 1000, attributes)

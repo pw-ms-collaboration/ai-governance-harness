@@ -5,25 +5,63 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-import httpx
 import pytest
-from mcp.shared.exceptions import MCPError
-from mcp.types import MISSING_REQUIRED_CLIENT_CAPABILITY
-from openai import BadRequestError
 
-from ai_governance_harness.chat.app import build_chat_app
 from ai_governance_harness.chat.config import ChatSettings
 from ai_governance_harness.chat.service import (
+    SYSTEM_INSTRUCTIONS,
     SCOPE_REFUSAL_MESSAGE,
     ChatMessage,
     ChatRequest,
     ChatService,
     ChatServiceError,
     _restrict_tool_payload,
-    _scope_classification_text,
+    _tool_enabled_for_browser_chat,
 )
-from ai_governance_harness.governance import GovernanceEngine, GovernanceSettings
+from ai_governance_harness.guardrails.advice_classifier import (
+    AdviceClassificationFailure,
+    AdviceRequestClassification,
+    FoundryAdviceRequestClassifier,
+)
 from ai_governance_harness.governance.events import governance_events
+
+
+def _classification(
+    *,
+    request_intent: str = "factual_information",
+    advice_subject: str = "none",
+    financial_action: str = "none",
+    product_scope: str = "none",
+    confidence: str = "high",
+) -> AdviceRequestClassification:
+    return AdviceRequestClassification.model_validate(
+        {
+            "classification_status": "classified",
+            "request_intent": request_intent,
+            "advice_subject": advice_subject,
+            "financial_action": financial_action,
+            "product_scope": product_scope,
+            "confidence": confidence,
+        }
+    )
+
+
+@pytest.fixture(autouse=True)
+def _safe_semantic_classifier(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def classify(
+        _self,
+        _model_client,
+        *,
+        current_user_text: str,
+        previous_user_text: str | None,
+    ) -> AdviceRequestClassification:
+        return _classification()
+
+    monkeypatch.setattr(
+        FoundryAdviceRequestClassifier,
+        "classify",
+        classify,
+    )
 
 
 class _FakeToolCall:
@@ -85,13 +123,71 @@ class _GoalHijackModelClient(_FakeModelClient):
         self.chat = SimpleNamespace(completions=_GoalHijackCompletions())
 
 
+class _ContentFilterCompletions:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        message = SimpleNamespace(content=None, tool_calls=None)
+        choice = SimpleNamespace(
+            message=message,
+            finish_reason="content_filter",
+            content_filter_results={
+                "personally_identifiable_information": {
+                    "filtered": True,
+                    "severity": "medium",
+                }
+            },
+        )
+        usage = SimpleNamespace(
+            completion_tokens=200,
+            completion_tokens_details=SimpleNamespace(reasoning_tokens=0),
+        )
+        return SimpleNamespace(choices=[choice], usage=usage)
+
+
+class _ContentFilterModelClient(_FakeModelClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.chat = SimpleNamespace(completions=_ContentFilterCompletions())
+
+
+class _FoundryFilterHttpError(RuntimeError):
+    def __init__(self) -> None:
+        super().__init__("Provider content filter error")
+        self.body = {
+            "code": "content_filter",
+            "param": "prompt",
+            "innererror": {
+                "code": "ResponsibleAIPolicyViolation",
+                "content_filter_result": {
+                    "jailbreak": {
+                        "filtered": True,
+                        "severity": "high",
+                    }
+                },
+            },
+        }
+
+
+class _RejectedByContentFilterCompletions:
+    def create(self, **kwargs):
+        raise _FoundryFilterHttpError()
+
+
+class _RejectedByContentFilterModelClient(_FakeModelClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.chat = SimpleNamespace(
+            completions=_RejectedByContentFilterCompletions()
+        )
+
+
 class _EmptyAfterToolCompletions(_FakeCompletions):
     def create(self, **kwargs):
         self.calls.append(kwargs)
-        if len(self.calls) == 1:
-            message = SimpleNamespace(content=None, tool_calls=[_FakeToolCall()])
-        else:
-            message = SimpleNamespace(content=None, tool_calls=None)
+        message = SimpleNamespace(content=None, tool_calls=None)
         return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
 
@@ -99,6 +195,27 @@ class _EmptyAfterToolModelClient(_FakeModelClient):
     def __init__(self) -> None:
         super().__init__()
         self.chat = SimpleNamespace(completions=_EmptyAfterToolCompletions())
+
+
+class _EmptyJsonThenRecoveryCompletions(_FakeCompletions):
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        if len(self.calls) == 1:
+            message = SimpleNamespace(content="{}", tool_calls=None)
+        else:
+            message = SimpleNamespace(
+                content="The synthetic profile for MEM-001 was retrieved.",
+                tool_calls=None,
+            )
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+
+class _EmptyJsonThenRecoveryModelClient(_FakeModelClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.chat = SimpleNamespace(
+            completions=_EmptyJsonThenRecoveryCompletions()
+        )
 
 
 class _FakeProjectClient:
@@ -116,8 +233,9 @@ class _FakeProjectClient:
 class _FakeMcpClient:
     called_tools: list[tuple[str, dict[str, object]]] = []
 
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, elicitation_callback=None) -> None:
         self.url = url
+        self.elicitation_callback = elicitation_callback
 
     async def __aenter__(self):
         return self
@@ -129,6 +247,12 @@ class _FakeMcpClient:
         profile_tool = SimpleNamespace(
             name="get_member_profile",
             description="Get a member profile.",
+            meta={
+                "ai_governance_harness": {
+                    "browser_chat": {"enabled": True},
+                    "intent": "member_profile",
+                }
+            },
             input_schema={
                 "type": "object",
                 "properties": {"member_id": {"type": "string"}},
@@ -138,6 +262,12 @@ class _FakeMcpClient:
         signals_tool = SimpleNamespace(
             name="get_member_disengagement_signals",
             description="Get churn signals.",
+            meta={
+                "ai_governance_harness": {
+                    "browser_chat": {"enabled": False},
+                    "intent": "member_disengagement_signals",
+                }
+            },
             input_schema={
                 "type": "object",
                 "properties": {"member_id": {"type": "string"}},
@@ -154,25 +284,47 @@ class _FakeMcpClient:
                 "member_id": "MEM-001",
                 "full_name": "Alex Morgan",
                 "age": 34,
-                "recent_contributions": [{"amount": 500.0}],
+                "tenure_years": 6.5,
+                "risk_profile": "Growth",
+                "communication_preference": "email",
                 "account": {
                     "account_id": "ACC-001",
-                    "balance": 150000.0,
+                    "balance": 145000.0,
                     "phase": "Accumulation",
-                    "option_allocation": {"Balanced": 1.0},
+                    "option_allocation": {
+                        "Growth": 0.7,
+                        "Australian Shares": 0.3,
+                    },
                 },
+                "has_closure_inquiry": False,
+                "recent_contributions": [{"amount": 500.0}],
                 "provenance": {"synthetic": True},
             },
         )
 
 
-class _WrappingMcpClient(_FakeMcpClient):
+class _SignalMcpClient(_FakeMcpClient):
+    async def list_tools(self):
+        result = await super().list_tools()
+        result.tools[0].name = "get_member_disengagement_signals"
+        return result
+
+    async def call_tool(self, name: str, arguments: dict[str, object]):
+        self.called_tools.append((name, arguments))
+        return SimpleNamespace(
+            is_error=False,
+            structured_content={
+                "member_id": "MEM-001",
+                "signal_count": 0,
+                "advice_scan_status": "passed",
+            },
+        )
+
+
+class _WrappingMcpClient(_SignalMcpClient):
     async def __aexit__(self, exc_type, exc, traceback) -> None:
         if exc is not None:
             raise ExceptionGroup("MCP task group failed", [exc])
-
-
-_ORIGINAL_IS_IN_SCOPE = ChatService._is_in_scope
 
 
 @pytest.fixture()
@@ -180,34 +332,38 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-@pytest.fixture(autouse=True)
-def classify_as_in_scope(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep existing flows independent of the scope classifier call."""
+def test_browser_tool_metadata_fails_closed_when_missing_or_malformed() -> None:
+    enabled = SimpleNamespace(
+        meta={
+            "ai_governance_harness": {
+                "browser_chat": {"enabled": True},
+                "intent": "member_profile",
+            }
+        }
+    )
+    missing = SimpleNamespace(meta=None)
+    malformed = SimpleNamespace(
+        meta={
+            "ai_governance_harness": {
+                "browser_chat": {"enabled": "true"},
+            }
+        }
+    )
 
-    async def in_scope(self, model_client, text: str) -> bool:
-        return True
+    assert _tool_enabled_for_browser_chat(enabled) is True
+    assert _tool_enabled_for_browser_chat(missing) is False
+    assert _tool_enabled_for_browser_chat(malformed) is False
 
-    monkeypatch.setattr(ChatService, "_is_in_scope", in_scope)
+
+def test_system_instructions_distinguish_profile_and_outreach_intents() -> None:
+    assert "only tool you can use" not in SYSTEM_INSTRUCTIONS
+    assert "Do not substitute a profile response" in SYSTEM_INSTRUCTIONS
+    assert "prepare_member_outreach_case" in SYSTEM_INSTRUCTIONS
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize(
-    ("review", "expected"),
-    [
-        (
-            {"status": "specialist_required", "specialist_team": "complaints",
-             "existing_case_id": "CASE-003"},
-            "Refer to the complaints team",
-        ),
-        ({"status": "duplicate_open", "existing_case_id": "CASE-004"},
-         "Continue existing case CASE-004"),
-        ({"status": "account_exited"}, "account is closed"),
-        ({"status": "unknown"}, "eligibility is not confirmed"),
-        ({"status": "invalid"}, "invalid outreach eligibility"),
-    ],
-)
-async def test_given_blocked_outreach_when_chat_calls_tool_then_returns_staff_handoff(
-    monkeypatch: pytest.MonkeyPatch, review: dict[str, str], expected: str,
+async def test_given_outreach_with_unknown_eligibility_then_policy_denies(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Arrange
     model_client = _FakeModelClient()
@@ -216,6 +372,9 @@ async def test_given_blocked_outreach_when_chat_calls_tool_then_returns_staff_ha
 
     class OutreachCompletions:
         def create(self, **kwargs):
+            assert kwargs["tool_choice"]["function"]["name"] == (
+                "prepare_member_outreach_case"
+            )
             tool_call = _FakeToolCall()
             tool_call.function.name = "prepare_member_outreach_case"
             return SimpleNamespace(choices=[SimpleNamespace(
@@ -233,7 +392,7 @@ async def test_given_blocked_outreach_when_chat_calls_tool_then_returns_staff_ha
             assert name == "get_member_profile"
             return SimpleNamespace(
                 is_error=False,
-                structured_content={"member_id": "MEM-001", "retention_review": review},
+                structured_content={"member_id": "MEM-001"},
             )
 
     model_client.chat.completions = OutreachCompletions()
@@ -243,20 +402,24 @@ async def test_given_blocked_outreach_when_chat_calls_tool_then_returns_staff_ha
     monkeypatch.setattr("ai_governance_harness.chat.service.Client", OutreachMcpClient)
     service = ChatService(ChatSettings(model_deployment="test-model"))
     request = ChatRequest(messages=[ChatMessage(
-        role="user", content="Prepare an outreach case for MEM-001",
+        role="user", content="Prepare an outreach retention case for MEM-001",
     )])
 
     # Act & Assert
-    with pytest.raises(ChatServiceError, match=expected) as error:
+    with pytest.raises(
+        ChatServiceError,
+        match="eligibility is not confirmed",
+    ) as error:
         await service.complete(request)
-    assert error.value.status_code == (502 if review["status"] == "invalid" else 403)
+    assert error.value.code == "governance_denied"
+    assert error.value.status_code == 403
     assert calls == ["get_member_profile"]
     assert model_client.closed
     assert project_client.closed
 
 
 @pytest.mark.anyio
-async def test_given_eligible_outreach_when_chat_calls_tool_then_executes_after_preflight(
+async def test_given_eligible_outreach_request_then_asks_for_approval(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Arrange
@@ -266,6 +429,10 @@ async def test_given_eligible_outreach_when_chat_calls_tool_then_executes_after_
 
     class OutreachCompletions(_FakeCompletions):
         def create(self, **kwargs):
+            if not self.calls:
+                assert kwargs["tool_choice"]["function"]["name"] == (
+                    "prepare_member_outreach_case"
+                )
             result = super().create(**kwargs)
             message = result.choices[0].message
             if message.tool_calls:
@@ -302,68 +469,152 @@ async def test_given_eligible_outreach_when_chat_calls_tool_then_executes_after_
     monkeypatch.setattr("ai_governance_harness.chat.service.Client", OutreachMcpClient)
     service = ChatService(ChatSettings(model_deployment="test-model"))
     request = ChatRequest(messages=[ChatMessage(
-        role="user", content="Prepare an outreach case for MEM-001",
+        role="user", content="Prepare an outreach retention case for MEM-001",
     )])
 
     # Act
     response = await service.complete(request)
 
     # Assert
-    assert calls == ["get_member_profile", "prepare_member_outreach_case"]
-    assert response.tools_used == ["prepare_member_outreach_case"]
+    assert response.message.startswith("Approval required for MEM-001")
+    assert response.tools_used == []
+    assert calls == ["get_member_profile"]
 
 
 @pytest.mark.anyio
-async def test_given_client_without_approval_form_when_outreach_eligible_then_requires_approval(
+async def test_given_explicit_approval_when_outreach_pending_then_executes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Arrange
     model_client = _FakeModelClient()
     project_client = _FakeProjectClient(model_client)
+    calls: list[str] = []
 
     class OutreachCompletions(_FakeCompletions):
         def create(self, **kwargs):
+            if not self.calls:
+                assert kwargs["tool_choice"]["function"]["name"] == (
+                    "prepare_member_outreach_case"
+                )
             result = super().create(**kwargs)
             message = result.choices[0].message
             if message.tool_calls:
-                message.tool_calls[0].function.name = "prepare_member_outreach_case"
+                message.tool_calls[0].function.name = (
+                    "prepare_member_outreach_case"
+                )
             return result
 
-    class NoElicitationMcpClient(_WrappingMcpClient):
+    class NonElicitingMcpClient(_FakeMcpClient):
         async def list_tools(self):
             result = await super().list_tools()
             result.tools[0].name = "prepare_member_outreach_case"
             return result
 
         async def call_tool(self, name: str, arguments: dict[str, object]):
+            calls.append(name)
             if name == "get_member_profile":
                 return SimpleNamespace(
                     is_error=False,
                     structured_content={
                         "member_id": "MEM-001",
-                        "retention_review": {"status": "routine_permitted"},
+                        "retention_review": {
+                            "status": "routine_permitted"
+                        },
                     },
                 )
-            raise MCPError(
-                code=MISSING_REQUIRED_CLIENT_CAPABILITY,
-                message="Client did not declare the form elicitation capability",
+            elicitation = await self.elicitation_callback(
+                None,
+                SimpleNamespace(mode="form"),
+            )
+            assert elicitation.action == "accept"
+            assert elicitation.content == {"approved": True}
+            return SimpleNamespace(
+                is_error=False,
+                structured_content={
+                    "member_id": "MEM-001",
+                    "external_action_executed": False,
+                },
             )
 
     model_client.chat.completions = OutreachCompletions()
     monkeypatch.setattr(
-        "ai_governance_harness.chat.service.get_foundry_client", lambda: project_client,
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
     )
-    monkeypatch.setattr("ai_governance_harness.chat.service.Client", NoElicitationMcpClient)
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.Client",
+        NonElicitingMcpClient,
+    )
     service = ChatService(ChatSettings(model_deployment="test-model"))
-    request = ChatRequest(messages=[ChatMessage(
-        role="user", content="Prepare a retention outreach case for MEM-001",
-    )])
+    request = ChatRequest(
+        messages=[
+            ChatMessage(
+                role="assistant",
+                content=(
+                    "Approval required for MEM-001\n\n"
+                    "Reply **Approve** to prepare the case or **Decline** to stop."
+                ),
+            ),
+            ChatMessage(
+                role="user",
+                content="Approve",
+            )
+        ]
+    )
 
-    # Act & Assert
-    with pytest.raises(ChatServiceError, match="requires staff approval") as error:
-        await service.complete(request)
-    assert error.value.code == "approval_required"
-    assert error.value.status_code == 409
+    # Act
+    response = await service.complete(request)
+
+    # Assert
+    assert response.tools_used == ["prepare_member_outreach_case"]
+    assert calls == ["get_member_profile", "prepare_member_outreach_case"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    [
+        ("Decline", "was declined"),
+        ("Tell me more", "Reply **Approve**"),
+    ],
+)
+async def test_given_non_approval_when_outreach_pending_then_does_not_execute(
+    monkeypatch: pytest.MonkeyPatch,
+    answer: str,
+    expected: str,
+) -> None:
+    # Arrange
+    model_client = _FakeModelClient()
+    project_client = _FakeProjectClient(model_client)
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.Client",
+        _FakeMcpClient,
+    )
+    service = ChatService(ChatSettings(model_deployment="test-model"))
+    request = ChatRequest(
+        messages=[
+            ChatMessage(
+                role="assistant",
+                content=(
+                    "Approval required for MEM-001\n\n"
+                    "Reply **Approve** to prepare the case or **Decline** to stop."
+                ),
+            ),
+            ChatMessage(role="user", content=answer),
+        ]
+    )
+
+    # Act
+    response = await service.complete(request)
+
+    # Assert
+    assert expected in response.message
+    assert response.tools_used == []
+    assert model_client.chat.completions.calls == []
 
 
 @pytest.mark.anyio
@@ -407,12 +658,25 @@ async def test_given_personal_advice_request_when_completing_then_blocks_before_
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Arrange
-    def unexpected_foundry_call():
-        raise AssertionError("Foundry must not be called for a denied input.")
+    model_client = _FakeModelClient()
+    project_client = _FakeProjectClient(model_client)
+
+    async def classify(*_args, **_kwargs):
+        return _classification(
+            request_intent="financial_recommendation",
+            advice_subject="identified_member",
+            financial_action="invest",
+            product_scope="superannuation_option",
+        )
 
     monkeypatch.setattr(
         "ai_governance_harness.chat.service.get_foundry_client",
-        unexpected_foundry_call,
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        FoundryAdviceRequestClassifier,
+        "classify",
+        classify,
     )
     service = ChatService(ChatSettings(model_deployment="test-model"))
     request = ChatRequest(
@@ -435,7 +699,112 @@ async def test_given_personal_advice_request_when_completing_then_blocks_before_
     assert error.value.code == "governance_denied"
     assert error.value.status_code == 403
     assert error.value.details["action"] == "chat.input"
-    assert error.value.details["matched_rule"] == "deny-personal-advice-request"
+    assert (
+        error.value.details["matched_rule"]
+        == "deny-identified-member-financial-recommendation"
+    )
+    assert model_client.chat.completions.calls == []
+    assert model_client.closed is True
+    assert project_client.closed is True
+
+
+@pytest.mark.anyio
+async def test_given_share_recommendation_when_completing_then_policy_denies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model_client = _FakeModelClient()
+    project_client = _FakeProjectClient(model_client)
+    request_text = "Which shares should I buy?"
+
+    async def classify(*_args, **_kwargs):
+        return _classification(
+            request_intent="financial_recommendation",
+            advice_subject="general_audience",
+            financial_action="buy",
+            product_scope="external_security",
+        )
+
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        FoundryAdviceRequestClassifier,
+        "classify",
+        classify,
+    )
+    service = ChatService(ChatSettings(model_deployment="test-model"))
+    request = ChatRequest(
+        messages=[ChatMessage(role="user", content=request_text)]
+    )
+
+    with pytest.raises(ChatServiceError) as error:
+        await service.complete(request)
+
+    assert error.value.code == "governance_denied"
+    assert error.value.details["action"] == "chat.input"
+    assert (
+        error.value.details["matched_rule"]
+        == "deny-external-security-recommendation"
+    )
+    assert model_client.chat.completions.calls == []
+    assert request_text not in json.dumps(governance_events.snapshot())
+
+
+@pytest.mark.anyio
+async def test_given_mixed_outreach_and_stock_advice_then_denies_before_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    model_client = _FakeModelClient()
+    project_client = _FakeProjectClient(model_client)
+
+    async def classify(*_args, **_kwargs):
+        return _classification(
+            request_intent="financial_recommendation",
+            advice_subject="identified_member",
+            financial_action="invest",
+            product_scope="external_security",
+        )
+
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        FoundryAdviceRequestClassifier,
+        "classify",
+        classify,
+    )
+    service = ChatService(ChatSettings(model_deployment="test-model"))
+    request = ChatRequest(
+        messages=[
+            ChatMessage(
+                role="user",
+                content=(
+                    "Okay if I can't create a retention case for this customer "
+                    "MEM-003, should they invest in Microsoft stock?"
+                ),
+            )
+        ]
+    )
+
+    # Act
+    with pytest.raises(ChatServiceError) as error:
+        await service.complete(request)
+
+    # Assert
+    assert error.value.code == "governance_denied"
+    assert error.value.status_code == 403
+    assert error.value.details["action"] == "chat.input"
+    assert error.value.details["matched_rule"] in {
+        "deny-identified-member-financial-recommendation",
+        "deny-external-security-recommendation",
+    }
+    assert model_client.chat.completions.calls == []
+    snapshot = json.dumps(governance_events.snapshot())
+    assert "Microsoft stock" not in snapshot
+    assert "MEM-003" not in snapshot
 
 
 @pytest.mark.anyio
@@ -443,12 +812,34 @@ async def test_given_member_id_follow_up_to_advice_request_then_blocks_before_mo
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Arrange
-    def unexpected_foundry_call():
-        raise AssertionError("Foundry must not be called for a denied input.")
+    model_client = _FakeModelClient()
+    project_client = _FakeProjectClient(model_client)
+    classifier_context: dict[str, str | None] = {}
+
+    async def classify(
+        _self,
+        _model_client,
+        *,
+        current_user_text: str,
+        previous_user_text: str | None,
+    ):
+        classifier_context["current"] = current_user_text
+        classifier_context["previous"] = previous_user_text
+        return _classification(
+            request_intent="financial_recommendation",
+            advice_subject="identified_member",
+            financial_action="invest",
+            product_scope="superannuation_option",
+        )
 
     monkeypatch.setattr(
         "ai_governance_harness.chat.service.get_foundry_client",
-        unexpected_foundry_call,
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        FoundryAdviceRequestClassifier,
+        "classify",
+        classify,
     )
     service = ChatService(ChatSettings(model_deployment="test-model"))
     request = ChatRequest(
@@ -475,7 +866,122 @@ async def test_given_member_id_follow_up_to_advice_request_then_blocks_before_mo
     # Assert
     assert error.value.code == "governance_denied"
     assert error.value.details["action"] == "chat.input"
-    assert error.value.details["matched_rule"] == "deny-personal-advice-request"
+    assert (
+        error.value.details["matched_rule"]
+        == "deny-identified-member-financial-recommendation"
+    )
+    assert classifier_context == {
+        "current": "MEM-001",
+        "previous": (
+            "Given this customer's account balance, give me some financial "
+            "recommendations on how to grow their balance"
+        ),
+    }
+    assert model_client.chat.completions.calls == []
+
+
+@pytest.mark.anyio
+async def test_given_classifier_failure_then_surfaces_distinct_technical_stop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model_client = _FakeModelClient()
+    project_client = _FakeProjectClient(model_client)
+
+    async def classify(*_args, **_kwargs):
+        raise AdviceClassificationFailure("invalid_response")
+
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        FoundryAdviceRequestClassifier,
+        "classify",
+        classify,
+    )
+    service = ChatService(ChatSettings(model_deployment="test-model"))
+    request = ChatRequest(
+        messages=[ChatMessage(role="user", content="Show MEM-001")]
+    )
+
+    with pytest.raises(ChatServiceError) as error:
+        await service.complete(request)
+
+    assert error.value.code == "classification_unavailable"
+    assert error.value.status_code == 503
+    assert error.value.details["classification_reason"] == "invalid_response"
+    assert error.value.details["matched_rule"] == "deny-unclassified-chat-input"
+    assert model_client.chat.completions.calls == []
+    assert model_client.closed is True
+    assert project_client.closed is True
+
+
+@pytest.mark.anyio
+async def test_given_classifier_timeout_then_fails_closed_as_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model_client = _FakeModelClient()
+    project_client = _FakeProjectClient(model_client)
+
+    async def classify(*_args, **_kwargs):
+        raise TimeoutError
+
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        FoundryAdviceRequestClassifier,
+        "classify",
+        classify,
+    )
+    service = ChatService(ChatSettings(model_deployment="test-model"))
+    request = ChatRequest(
+        messages=[ChatMessage(role="user", content="Show MEM-001")]
+    )
+
+    with pytest.raises(ChatServiceError) as error:
+        await service.complete(request)
+
+    assert error.value.code == "classification_unavailable"
+    assert error.value.details["classification_reason"] == "unavailable"
+    assert error.value.details["matched_rule"] == "deny-unclassified-chat-input"
+    assert model_client.chat.completions.calls == []
+
+
+@pytest.mark.anyio
+async def test_given_low_confidence_classification_then_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model_client = _FakeModelClient()
+    project_client = _FakeProjectClient(model_client)
+
+    async def classify(*_args, **_kwargs):
+        return _classification(
+            request_intent="other_safe",
+            confidence="low",
+        )
+
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        FoundryAdviceRequestClassifier,
+        "classify",
+        classify,
+    )
+    service = ChatService(ChatSettings(model_deployment="test-model"))
+    request = ChatRequest(
+        messages=[ChatMessage(role="user", content="Please help.")]
+    )
+
+    with pytest.raises(ChatServiceError) as error:
+        await service.complete(request)
+
+    assert error.value.code == "classification_unavailable"
+    assert error.value.details["classification_reason"] == "low_confidence"
+    assert error.value.details["matched_rule"] == "deny-low-confidence-chat-input"
 
 
 @pytest.mark.anyio
@@ -513,6 +1019,10 @@ async def test_given_member_question_when_completing_then_calls_mcp_and_foundry(
     ]
     assert response.tools_used == ["get_member_profile"]
     assert "synthetic profile" in response.message
+    assert "Balance: $145,000.00" in response.message
+    assert "No email address or phone number is recorded." in response.message
+    assert "Age:" not in response.message
+    assert "Closure inquiry" not in response.message
     assert "GENERAL ADVICE WARNING" not in response.message
     assert project_client.closed is True
     assert model_client.closed is True
@@ -521,22 +1031,6 @@ async def test_given_member_question_when_completing_then_calls_mcp_and_foundry(
         for tool in model_client.chat.completions.calls[0]["tools"]
     ]
     assert offered_tools == ["get_member_profile"]
-    tool_message = next(
-        message
-        for message in model_client.chat.completions.calls[1]["messages"]
-        if message.get("role") == "tool"
-    )
-    assert json.loads(tool_message["content"]) == {
-        "member_id": "MEM-001",
-        "full_name": "Alex Morgan",
-        "account": {
-            "account_id": "ACC-001",
-            "balance": 150000.0,
-            "phase": "Accumulation",
-            "option_allocation": {"Balanced": 1.0},
-        },
-        "provenance": {"synthetic": True},
-    }
 
 
 def test_restrict_tool_payload_keeps_profile_fields_and_drops_contributions() -> None:
@@ -607,6 +1101,123 @@ async def test_given_known_error_wrapped_by_mcp_when_completing_then_preserves_e
     assert str(error.value) == "The model returned an empty response."
     assert model_client.closed is True
     assert project_client.closed is True
+
+
+@pytest.mark.anyio
+async def test_given_empty_json_response_when_retried_then_returns_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    _FakeMcpClient.called_tools = []
+    model_client = _EmptyJsonThenRecoveryModelClient()
+    project_client = _FakeProjectClient(model_client)
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.Client",
+        _FakeMcpClient,
+    )
+    service = ChatService(
+        ChatSettings(
+            model_deployment="test-model",
+            mcp_url="http://127.0.0.1:8000/mcp",
+        )
+    )
+    request = ChatRequest(
+        messages=[
+            ChatMessage(role="user", content="Show the member profile")
+        ]
+    )
+
+    # Act
+    response = await service.complete(request)
+
+    # Assert
+    assert len(model_client.chat.completions.calls) == 2
+    recovery_call = model_client.chat.completions.calls[1]
+    recovery_message = recovery_call["messages"][-1]
+    assert recovery_message["role"] == "system"
+    assert "previous model response was empty" in recovery_message["content"]
+    assert recovery_call["tool_choice"] == "none"
+    assert recovery_call["reasoning_effort"] == "minimal"
+    assert recovery_call["verbosity"] == "low"
+    assert response.message.startswith("The synthetic profile for MEM-001")
+    assert response.tools_used == []
+
+
+@pytest.mark.anyio
+async def test_given_foundry_content_filter_when_completing_then_surfaces_stop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    model_client = _ContentFilterModelClient()
+    project_client = _FakeProjectClient(model_client)
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.Client",
+        _FakeMcpClient,
+    )
+    service = ChatService(ChatSettings(model_deployment="test-model"))
+    request = ChatRequest(
+        messages=[ChatMessage(role="user", content="Show MEM-001")]
+    )
+
+    # Act
+    with pytest.raises(ChatServiceError) as error:
+        await service.complete(request)
+
+    # Assert
+    assert error.value.code == "model_content_filtered"
+    assert error.value.status_code == 422
+    assert error.value.details == {
+        "finish_reason": "content_filter",
+        "completion_tokens": "200",
+        "reasoning_tokens": "0",
+        "content_filter_category": "personally_identifiable_information",
+        "content_filter_severity": "medium",
+    }
+    assert len(model_client.chat.completions.calls) == 1
+
+
+@pytest.mark.anyio
+async def test_given_foundry_filter_http_error_then_surfaces_safe_details(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    model_client = _RejectedByContentFilterModelClient()
+    project_client = _FakeProjectClient(model_client)
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.Client",
+        _FakeMcpClient,
+    )
+    service = ChatService(ChatSettings(model_deployment="test-model"))
+    request = ChatRequest(
+        messages=[ChatMessage(role="user", content="Show MEM-001")]
+    )
+
+    # Act
+    with pytest.raises(ChatServiceError) as error:
+        await service.complete(request)
+
+    # Assert
+    assert error.value.code == "model_content_filtered"
+    assert error.value.status_code == 422
+    assert error.value.details == {
+        "foundry_error_code": "content_filter",
+        "content_filter_stage": "prompt",
+        "foundry_inner_error_code": "ResponsibleAIPolicyViolation",
+        "content_filter_category": "jailbreak",
+        "content_filter_severity": "high",
+    }
 
 
 @pytest.mark.anyio
@@ -737,132 +1348,3 @@ async def test_given_in_scope_answer_when_completing_then_has_no_policy_notice(
 
     # Assert
     assert response.policy_notice is None
-
-
-class _ClassifierCompletions:
-    def __init__(self, label: str) -> None:
-        self.label = label
-        self.calls: list[dict[str, object]] = []
-
-    def create(self, **kwargs):
-        self.calls.append(kwargs)
-        message = SimpleNamespace(content=self.label, tool_calls=None)
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
-
-
-class _ClassifierModelClient(_FakeModelClient):
-    def __init__(self, label: str) -> None:
-        super().__init__()
-        self.chat = SimpleNamespace(completions=_ClassifierCompletions(label))
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize(
-    ("label", "expected"),
-    [
-        ("IN_SCOPE", True),
-        ("OUT_OF_SCOPE", False),
-        ("maybe", False),
-        ("", False),
-    ],
-)
-async def test_given_classifier_label_when_checking_scope_then_fails_closed(
-    monkeypatch: pytest.MonkeyPatch,
-    label: str,
-    expected: bool,
-) -> None:
-    # Arrange
-    monkeypatch.setattr(ChatService, "_is_in_scope", _ORIGINAL_IS_IN_SCOPE)
-    model_client = _ClassifierModelClient(label)
-    service = ChatService(ChatSettings(model_deployment="test-model"))
-
-    # Act
-    in_scope = await service._is_in_scope(model_client, "Show MEM-001")
-
-    # Assert
-    assert in_scope is expected
-    assert "tools" not in model_client.chat.completions.calls[0]
-
-
-def test_given_short_confirmation_when_building_scope_text_then_includes_previous_turn() -> None:
-    # Arrange
-    messages = [
-        ChatMessage(role="user", content="Prepare an outreach case"),
-        ChatMessage(
-            role="assistant",
-            content="Do you want me to prepare an outreach case for MEM-001?",
-        ),
-        ChatMessage(role="user", content="yes"),
-    ]
-
-    # Act
-    text = _scope_classification_text(messages)
-
-    # Assert
-    assert text == (
-        "user: Prepare an outreach case\n"
-        "assistant: Do you want me to prepare an outreach case for MEM-001?\n"
-        "latest user: yes"
-    )
-
-
-def test_given_long_request_when_building_scope_text_then_uses_latest_only() -> None:
-    # Arrange
-    latest = (
-        "Show the account balance, phase and investment option allocation "
-        "for MEM-001 and MEM-002"
-    )
-    assert len(latest) > 80
-    messages = [
-        ChatMessage(role="user", content="What were MEM-002 contributions?"),
-        ChatMessage(role="assistant", content="Sorry, I can't assist."),
-        ChatMessage(role="user", content=latest),
-    ]
-
-    # Act
-    text = _scope_classification_text(messages)
-
-    # Assert
-    assert text == latest
-
-
-@pytest.mark.anyio
-async def test_given_out_of_scope_classification_when_completing_then_refuses_before_tools(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Arrange
-    _FakeMcpClient.called_tools = []
-    monkeypatch.setattr(ChatService, "_is_in_scope", _ORIGINAL_IS_IN_SCOPE)
-    model_client = _ClassifierModelClient("OUT_OF_SCOPE")
-    project_client = _FakeProjectClient(model_client)
-    monkeypatch.setattr(
-        "ai_governance_harness.chat.service.get_foundry_client",
-        lambda: project_client,
-    )
-    monkeypatch.setattr(
-        "ai_governance_harness.chat.service.Client",
-        _FakeMcpClient,
-    )
-    service = ChatService(
-        ChatSettings(
-            model_deployment="test-model",
-            mcp_url="http://127.0.0.1:8000/mcp",
-        )
-    )
-    request = ChatRequest(
-        messages=[ChatMessage(role="user", content="What is the weather today?")]
-    )
-
-    # Act
-    response = await service.complete(request)
-
-    # Assert
-    assert response.message == SCOPE_REFUSAL_MESSAGE
-    assert response.tools_used == []
-    assert response.policy_notice is not None
-    assert response.policy_notice.rule == "deny-out-of-scope-request"
-    assert response.policy_notice.decision == "deny"
-    assert len(model_client.chat.completions.calls) == 1
-    assert _FakeMcpClient.called_tools == []
-    assert project_client.closed is True
-    assert model_client.closed is True

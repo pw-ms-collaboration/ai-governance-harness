@@ -50,6 +50,35 @@ async def test_given_server_when_listing_tools_then_exposes_exact_read_only_surf
         "prepare_member_outreach_case",
     }
     assert all(tool.annotations and tool.annotations.read_only_hint for tool in result.tools)
+    tools = {tool.name: tool for tool in result.tools}
+    expected_browser_exposure = {
+        "get_member_profile": True,
+        "get_member_disengagement_signals": False,
+        "get_cohort_churn_analytics": False,
+        "get_fum_outflow_summary": False,
+        "prepare_member_outreach_case": True,
+    }
+    for name, enabled in expected_browser_exposure.items():
+        harness_meta = tools[name].meta["ai_governance_harness"]
+        assert harness_meta["browser_chat"]["enabled"] is enabled
+        assert harness_meta["intent"]
+        assert isinstance(harness_meta["requires_approval"], bool)
+
+    assert (
+        tools["prepare_member_outreach_case"]
+        .meta["ai_governance_harness"]["requires_approval"]
+        is True
+    )
+
+    assert "Do not use this tool to prepare" in tools[
+        "get_member_profile"
+    ].description
+    assert "prepare, open, create, or start" in tools[
+        "prepare_member_outreach_case"
+    ].description
+    assert "Do not substitute a profile response" in tools[
+        "prepare_member_outreach_case"
+    ].description
 
 
 @pytest.mark.anyio

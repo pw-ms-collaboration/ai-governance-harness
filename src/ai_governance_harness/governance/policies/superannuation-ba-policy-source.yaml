@@ -1,0 +1,42 @@
+# Source documentation and traceability only; not a toolkit execution policy.
+kind: SyntheticBusinessUnitPolicySource
+policy_id: BU-SUPER-001
+version: "1.0"
+business_unit: superannuation-ba
+title: Factual member insights without personal financial advice
+status: synthetic-demo
+policy_layer: business-unit
+restriction: >
+  The BA assistant may retrieve and summarise factual in-fund member information
+  and provide general educational information. It must not provide personalised
+  financial product recommendations based on a member's circumstances.
+regulatory_claim: >
+  This fictional internal policy labels the demo's existing advice boundary.
+  It is not an APRA CPS requirement, legal interpretation, or compliance certification.
+runtime_policy: default.yaml
+rule_mappings:
+  - rule: deny-identified-member-financial-recommendation
+    purpose: Deny classified financial recommendations for an identified member before the answering model call.
+  - rule: deny-personal-advice-tool-response
+    purpose: Deny tool responses containing detected personal-advice phrasing.
+supporting_rules:
+  - allow-chat-input
+  - allow-member-profile-result
+  - allow-member-signals-result
+  - allow-cohort-analytics-result
+  - allow-fum-summary-result
+  - allow-approved-outreach-case-result
+examples:
+  - request: Show me the profile for MEM-001.
+    expected_input_decision: allow
+  - request: What investment option should member MEM-001 choose?
+    expected_input_decision: deny
+limitations:
+  - Runtime rule provenance is validated and attached only when a mapped rule matches.
+  - The governance panel, traces and logs show attribution; metrics include layer and policy ID only.
+  - This source is documentation, not an executable policy or an automatically ingested rule set.
+  - Passed scans mean no configured pattern matched, not a legal classification.
+  - Request intent is now classified through Foundry before input policy evaluation and requires Azure access.
+  - Final chat-response sanitisation is a separate guardrail, not either denial rule.
+  - Missing or unknown scan status fails closed without a matched BU denial rule.
+  - Editing this source does not change enforcement; runtime rules need explicit updates and tests.

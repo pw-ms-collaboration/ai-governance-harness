@@ -21,6 +21,7 @@ from pydantic import (
     field_validator,
 )
 
+from ai_governance_harness.chat import genai_telemetry
 from ai_governance_harness.chat.config import ChatSettings
 from ai_governance_harness.foundry_client import get_foundry_client
 from ai_governance_harness.governance import (
@@ -714,6 +715,10 @@ class ChatService:
 
     async def complete(self, request: ChatRequest) -> ChatResponse:
         """Complete one chat turn without persisting conversation content."""
+        with genai_telemetry.invoke_agent_span(model=self._settings.model_deployment):
+            return await self._complete(request)
+
+    async def _complete(self, request: ChatRequest) -> ChatResponse:
         if len(request.messages) > self._settings.max_messages:
             raise ChatServiceError(
                 "The conversation is too long.",
@@ -953,18 +958,25 @@ class ChatService:
                                 reasoning_effort="minimal",
                                 verbosity="low",
                             )
-                        try:
-                            completion = await anyio.to_thread.run_sync(
-                                lambda: model_client.chat.completions.create(
-                                    **completion_options,
+                        with genai_telemetry.inference_span(
+                            model=self._settings.model_deployment,
+                            model_client=model_client,
+                            max_tokens=self._settings.max_output_tokens,
+                        ) as inference:
+                            try:
+                                completion = await anyio.to_thread.run_sync(
+                                    lambda: model_client.chat.completions.create(
+                                        **completion_options,
+                                    )
                                 )
-                            )
-                        except APIStatusError as exc:
-                            guardrail_code = _foundry_guardrail_code(exc)
-                            if guardrail_code is None:
-                                raise
-                            return None, guardrail_code
-                        return completion, None
+                            except APIStatusError as exc:
+                                guardrail_code = _foundry_guardrail_code(exc)
+                                if guardrail_code is None:
+                                    raise
+                                inference.fail(guardrail_code)
+                                return None, guardrail_code
+                            inference.record_response(completion)
+                            return completion, None
 
                     completion, guardrail_code = await self._foundry_reliability.call(
                         request_completion,
@@ -1095,9 +1107,16 @@ class ChatService:
                             )
 
                             async def read_retention_profile() -> Any:
-                                return await mcp_client.call_tool(
-                                    "get_member_profile", {"member_id": member_id},
-                                )
+                                with genai_telemetry.execute_tool_span(
+                                    tool_name="get_member_profile",
+                                    call_id=None,
+                                ) as profile_execution:
+                                    profile = await mcp_client.call_tool(
+                                        "get_member_profile", {"member_id": member_id},
+                                    )
+                                    if profile.is_error:
+                                        profile_execution.fail("tool_error")
+                                    return profile
 
                             profile_result = await self._mcp_reliability.call(
                                 read_retention_profile,
@@ -1159,7 +1178,14 @@ class ChatService:
                             )
 
                         async def call_tool() -> Any:
-                            return await mcp_client.call_tool(tool_name, arguments)
+                            with genai_telemetry.execute_tool_span(
+                                tool_name=tool_name,
+                                call_id=getattr(tool_call, "id", None),
+                            ) as tool_execution:
+                                result = await mcp_client.call_tool(tool_name, arguments)
+                                if result.is_error:
+                                    tool_execution.fail("tool_error")
+                                return result
 
                         result = await self._mcp_reliability.call(call_tool)
                         self._governance.require_allowed(

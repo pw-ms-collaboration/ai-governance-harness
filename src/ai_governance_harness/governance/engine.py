@@ -160,6 +160,10 @@ class GovernanceEngine:
                     "governance.decision",
                     toolkit_decision.action,
                 )
+                span.set_attribute(
+                    "governance.rule.name",
+                    toolkit_decision.matched_rule or "unmatched",
+                )
                 provenance = self.rule_provenance(toolkit_decision.matched_rule)
                 span.set_attributes(provenance_attributes(provenance))
         except Exception:

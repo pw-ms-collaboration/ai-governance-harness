@@ -45,6 +45,9 @@ def record_decision_metrics(
         "governance.decision": decision.action,
         "governance.source": source,
         "governance.enforcement.mode": decision.enforcement_mode,
+        # Rule and policy names come from bounded policy configuration, not user input.
+        "governance.rule.name": decision.matched_rule or "unmatched",
+        "governance.policy.name": decision.policy_name or "unknown",
     }
     if decision.provenance:
         attributes.update({

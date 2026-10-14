@@ -171,6 +171,8 @@ def test_given_sensitive_inputs_when_evaluating_then_export_is_metadata_only(
         ]
         assert {item["governance.decision"] for item in attributes} == {"allow", "deny"}
         assert all(item["governance.source"] == "chat" for item in attributes)
+        assert all(item["governance.rule.name"] for item in attributes)
+        assert all(item["governance.policy.name"] for item in attributes)
         finished_spans = spans.get_finished_spans()
         assert len(finished_spans) == 2
         serialized = json.dumps(

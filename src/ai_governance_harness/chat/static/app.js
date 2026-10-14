@@ -73,7 +73,51 @@ const circuitStatePresentation = {
   },
 };
 
+// Must match _OUTREACH_APPROVAL_HEADING in chat/service.py.
+const APPROVAL_HEADING = "Approval required for ";
+
+function setApprovalActionsEnabled(enabled) {
+  messagesElement.querySelectorAll(".approval-actions button").forEach((button) => {
+    button.disabled = !enabled;
+  });
+}
+
+function sendApprovalReply(reply, chosen) {
+  if (input.disabled) {
+    return;
+  }
+  setApprovalActionsEnabled(false);
+  chosen.setAttribute("aria-pressed", "true");
+  input.value = reply;
+  characterCount.textContent = `${reply.length} / 4000`;
+  form.requestSubmit();
+}
+
+function approvalActions(content) {
+  const memberId = content.slice(APPROVAL_HEADING.length).split(/\s/, 1)[0];
+  const group = document.createElement("div");
+  group.className = "approval-actions";
+  group.setAttribute("role", "group");
+  group.setAttribute("aria-label", `Outreach case approval for ${memberId}`);
+  for (const [reply, className] of [["Approve", "approve"], ["Decline", "danger-secondary"]]) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = className;
+    button.textContent = reply;
+    button.setAttribute("aria-pressed", "false");
+    button.addEventListener("click", () => sendApprovalReply(reply, button));
+    group.append(button);
+  }
+  const hint = document.createElement("p");
+  hint.className = "approval-hint";
+  hint.textContent = "Or type Approve or Decline below.";
+  group.append(hint);
+  return group;
+}
+
 function addMessage(role, content, policyNotice = null) {
+  // The backend accepts an approval reply only directly after its prompt.
+  setApprovalActionsEnabled(false);
   const item = document.createElement("li");
   item.className = `message ${role}`;
 
@@ -92,6 +136,9 @@ function addMessage(role, content, policyNotice = null) {
     notice.className = "policy-notice";
     notice.textContent = `Policy break: rule ${rule} in ${policy} (${decision}).`;
     article.append(notice);
+  }
+  if (role === "assistant" && content.startsWith(APPROVAL_HEADING)) {
+    article.append(approvalActions(content));
   }
   item.append(article);
   messagesElement.append(item);
@@ -541,6 +588,16 @@ form.addEventListener("submit", async (event) => {
     const failedTurn = history.at(-1);
     if (failedTurn?.role === "user" && failedTurn.content === content) {
       history.pop();
+    }
+    const lastTurn = history.at(-1);
+    if (lastTurn?.role === "assistant" && lastTurn.content.startsWith(APPROVAL_HEADING)) {
+      const latestActions = messagesElement.querySelectorAll(".approval-actions");
+      latestActions[latestActions.length - 1]
+        ?.querySelectorAll("button")
+        .forEach((button) => {
+          button.disabled = false;
+          button.setAttribute("aria-pressed", "false");
+        });
     }
     showError(error.message || "The chat service could not be reached.");
   } finally {

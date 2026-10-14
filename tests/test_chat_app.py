@@ -9,8 +9,11 @@ from starlette.testclient import TestClient
 
 from ai_governance_harness.chat.app import STATIC_DIR, build_chat_app
 from ai_governance_harness.chat.config import ChatSettings
-from ai_governance_harness.chat.service import ChatRequest, ChatResponse
-from ai_governance_harness.chat.service import ChatServiceError
+from ai_governance_harness.chat.service import (
+    ChatRequest,
+    ChatResponse,
+    ChatServiceError,
+)
 
 
 class _FakeChatService:

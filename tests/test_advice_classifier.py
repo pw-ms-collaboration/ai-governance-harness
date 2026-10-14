@@ -87,6 +87,7 @@ async def test_classifier_returns_closed_policy_facts() -> None:
     assert call["verbosity"] == "low"
     assert call["max_completion_tokens"] == 400
     assert "tools" not in call
+    assert "which shares should I buy" in call["messages"][0]["content"]
     response_format = call["response_format"]
     assert response_format["type"] == "json_schema"
     assert response_format["json_schema"]["strict"] is True

@@ -709,6 +709,49 @@ async def test_given_personal_advice_request_when_completing_then_blocks_before_
 
 
 @pytest.mark.anyio
+async def test_given_share_recommendation_when_completing_then_policy_denies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model_client = _FakeModelClient()
+    project_client = _FakeProjectClient(model_client)
+    request_text = "Which shares should I buy?"
+
+    async def classify(*_args, **_kwargs):
+        return _classification(
+            request_intent="financial_recommendation",
+            advice_subject="general_audience",
+            financial_action="buy",
+            product_scope="external_security",
+        )
+
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        FoundryAdviceRequestClassifier,
+        "classify",
+        classify,
+    )
+    service = ChatService(ChatSettings(model_deployment="test-model"))
+    request = ChatRequest(
+        messages=[ChatMessage(role="user", content=request_text)]
+    )
+
+    with pytest.raises(ChatServiceError) as error:
+        await service.complete(request)
+
+    assert error.value.code == "governance_denied"
+    assert error.value.details["action"] == "chat.input"
+    assert (
+        error.value.details["matched_rule"]
+        == "deny-external-security-recommendation"
+    )
+    assert model_client.chat.completions.calls == []
+    assert request_text not in json.dumps(governance_events.snapshot())
+
+
+@pytest.mark.anyio
 async def test_given_mixed_outreach_and_stock_advice_then_denies_before_model(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

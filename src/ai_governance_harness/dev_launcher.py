@@ -108,6 +108,8 @@ def main() -> int:
             "MCP_PORT": str(mcp_port),
             "MCP_HOSTED": "false",
             "MCP_SERVER_URL": f"http://{mcp_host}:{mcp_port}/mcp",
+            "CHAT_USE_PROMPT_AGENT": "false",
+            "AZURE_CREDENTIAL_MODE": os.getenv("AZURE_CREDENTIAL_MODE", "azure-cli"),
             "CHAT_HOST": chat_host,
             "CHAT_PORT": str(chat_port),
         }

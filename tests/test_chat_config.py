@@ -13,6 +13,7 @@ def test_given_environment_when_loading_then_parses_service_settings(
 ) -> None:
     # Arrange
     monkeypatch.setenv("AZURE_AI_MODEL_DEPLOYMENT_NAME", "model-name")
+    monkeypatch.setenv("CHAT_USE_PROMPT_AGENT", "true")
     monkeypatch.setenv("FOUNDRY_AGENT_NAME", "member-wealth-insights-agent")
     monkeypatch.setenv("MCP_SERVER_URL", "http://127.0.0.1:9000/mcp")
     monkeypatch.setenv("CHAT_PORT", "8081")
@@ -25,6 +26,34 @@ def test_given_environment_when_loading_then_parses_service_settings(
     assert settings.agent_name == "member-wealth-insights-agent"
     assert settings.mcp_url == "http://127.0.0.1:9000/mcp"
     assert settings.port == 8081
+
+
+def test_given_prompt_agent_name_when_prompt_agent_mode_is_disabled_then_uses_local_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    monkeypatch.setenv("AZURE_AI_MODEL_DEPLOYMENT_NAME", "model-name")
+    monkeypatch.setenv("CHAT_USE_PROMPT_AGENT", "false")
+    monkeypatch.setenv("FOUNDRY_AGENT_NAME", "member-wealth-insights-agent")
+
+    # Act
+    settings = ChatSettings.from_environment()
+
+    # Assert
+    assert settings.agent_name is None
+
+
+def test_given_prompt_agent_mode_without_agent_name_when_loading_then_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    monkeypatch.setenv("AZURE_AI_MODEL_DEPLOYMENT_NAME", "model-name")
+    monkeypatch.setenv("CHAT_USE_PROMPT_AGENT", "true")
+    monkeypatch.delenv("FOUNDRY_AGENT_NAME", raising=False)
+
+    # Act & Assert
+    with pytest.raises(ValueError, match="FOUNDRY_AGENT_NAME is required"):
+        ChatSettings.from_environment()
 
 
 @pytest.mark.parametrize(

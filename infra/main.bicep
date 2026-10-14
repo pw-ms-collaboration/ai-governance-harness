@@ -345,6 +345,8 @@ module chatApp 'br/public:avm/res/app/container-app:0.23.0' = {
           { name: 'CHAT_PORT', value: '8080' }
           { name: 'CHAT_ALLOWED_ORIGINS', value: 'https://${chatAppName}.${managedEnvironment.outputs.defaultDomain}' }
           { name: 'MCP_SERVER_URL', value: apimMcpUrl }
+          { name: 'CHAT_USE_PROMPT_AGENT', value: 'true' }
+          { name: 'FOUNDRY_AGENT_NAME', value: foundryAgentName }
           { name: 'MCP_HOSTED', value: 'true' }
           { name: 'MCP_ENVIRONMENT', value: 'production' }
           { name: 'GOVERNANCE_ENABLED', value: 'true' }
@@ -352,10 +354,10 @@ module chatApp 'br/public:avm/res/app/container-app:0.23.0' = {
           { name: 'GOVERNANCE_SANDBOX_PROVIDER', value: 'none' }
           { name: 'AZURE_TENANT_ID', value: tenantId }
           { name: 'AZURE_CLIENT_ID', value: foundryWorkloadIdentity.outputs.clientId }
+          { name: 'AZURE_CREDENTIAL_MODE', value: 'default' }
           { name: 'AZURE_AI_PROJECT_ENDPOINT', value: foundryProjectEndpoint }
           { name: 'AZURE_AI_PROJECT_REGION', value: location }
           { name: 'AZURE_AI_MODEL_DEPLOYMENT_NAME', value: foundryModelDeploymentName }
-          { name: 'FOUNDRY_AGENT_NAME', value: foundryAgentName }
           { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', secretRef: 'appinsights-connection' }
         ]
       }

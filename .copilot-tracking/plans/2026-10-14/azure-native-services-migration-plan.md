@@ -334,7 +334,9 @@ Requirements:
 
 Details:
 * The [infra/main.bicep](../../../infra/main.bicep) Container Apps modules override the Dockerfile's local `ai-governance-dev` command with separate `ai-governance-chat` and `ai-governance-mcp` entry points.
-* `ChatSettings` supports optional `FOUNDRY_AGENT_NAME`. When configured, `ChatService` invokes the named Prompt Agent with the SDK-supported Responses API `agent_reference`; when unset, the direct Chat Completions/MCP route remains available for rollback. The existing remote agent MCP tool and identity are not yet configured or validated end to end.
+* `ChatSettings` enables the Prompt Agent route only when `CHAT_USE_PROMPT_AGENT=true` and `FOUNDRY_AGENT_NAME` is set. The local launcher forces the flag to `false`; the direct Chat Completions/MCP route remains the local default and rollback path.
+* Local development defaults to `AzureCliCredential` so `.env` service-principal credentials cannot silently override the signed-in demo identity. ACA explicitly selects `DefaultAzureCredential` to resolve the workload managed identity.
+* ACA sets `CHAT_USE_PROMPT_AGENT=true` and the existing agent name. The remote agent MCP tool and identity are not yet configured or validated end to end.
 * Keep the browser-facing same-origin API. The browser must not call Foundry, APIM, or MCP directly.
 
 References:
@@ -672,6 +674,7 @@ Dependencies:
 | Field | Record |
 |---|---|
 | Planning execution and readiness | Partial; D5-D7 are confirmed. Both Bicep templates compile, the optional Prompt Agent adapter is covered, and 171 repository tests pass. The ACR bootstrap succeeded. Full-template What-If predicts 9 creates and 19 ignores with the ACR ignored; role assignments remain disabled. No other resources were applied. The existing `AZURE_CLIENT_ID` remains a separate workload service principal. |
+| Planning execution and readiness | Partial; D5-D7 are confirmed. Both Bicep templates compile, the 176-test suite and local synthetic chat smoke pass, and the ACR bootstrap succeeded. Full-template What-If predicts 9 creates and 19 ignores with the ACR ignored; role assignments remain disabled. No other resources were applied. Local CLI credentials and hosted managed identity are explicitly separated. |
 | Blockers | Configure the remote Foundry Agent MCP tool and assign `Mcp.Tools.Invoke` to its identity; pass deployed Prompt Agent/MCP smoke tests; produce the final image; configure chat EasyAuth secret/redirect; obtain RBAC-authorized full deployment. VNet/private networking and durable audit are deferred. |
 | Latest critique | Not run. |
 | Relevant research | Not activated; supplied architecture, prior planning artifacts, and repository code establish the current design delta. |

@@ -3,7 +3,7 @@
 import os
 import sys
 from dotenv import load_dotenv
-from azure.identity import DefaultAzureCredential
+from azure.identity import AzureCliCredential, DefaultAzureCredential
 from azure.ai.projects import AIProjectClient
 
 # Load environment variables from .env file if present
@@ -11,12 +11,17 @@ load_dotenv()
 
 
 def get_azure_credential():
-    """Instantiate an Azure credential targeting the configured tenant if specified.
+    """Instantiate the explicitly selected Azure credential for this process.
 
-    When AZURE_TENANT_ID is provided, routes token requests to that specific
-    tenant (via AzureCliCredential or DefaultAzureCredential with AZURE_TENANT_ID).
+    Local demos can use the signed-in Azure CLI identity, while hosted deployments
+    use DefaultAzureCredential to resolve their managed identity.
     """
     tenant_id = os.getenv("AZURE_TENANT_ID")
+    credential_mode = os.getenv("AZURE_CREDENTIAL_MODE", "default").strip().lower()
+    if credential_mode == "azure-cli":
+        return AzureCliCredential(tenant_id=tenant_id)
+    if credential_mode != "default":
+        raise ValueError("AZURE_CREDENTIAL_MODE must be 'azure-cli' or 'default'.")
     if tenant_id:
         # DefaultAzureCredential does not take tenant_id directly in its constructor,
         # but respects AZURE_TENANT_ID in the environment for underlying credentials.

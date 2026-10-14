@@ -75,6 +75,12 @@ class ChatSettings(BaseModel):
     @classmethod
     def from_environment(cls) -> Self:
         """Load chat settings from environment variables."""
+        use_prompt_agent = os.getenv("CHAT_USE_PROMPT_AGENT", "false").strip().lower()
+        if use_prompt_agent not in {"true", "false"}:
+            raise ValueError("CHAT_USE_PROMPT_AGENT must be 'true' or 'false'.")
+        agent_name = os.getenv("FOUNDRY_AGENT_NAME") if use_prompt_agent == "true" else None
+        if use_prompt_agent == "true" and not agent_name:
+            raise ValueError("FOUNDRY_AGENT_NAME is required when Prompt Agent mode is enabled.")
         origins_value = os.getenv("CHAT_ALLOWED_ORIGINS")
         origins = (
             tuple(origins_value.split(","))
@@ -86,7 +92,7 @@ class ChatSettings(BaseModel):
             port=int(os.getenv("CHAT_PORT", "8080")),
             mcp_url=os.getenv("MCP_SERVER_URL", "http://127.0.0.1:8001/mcp"),
             model_deployment=os.getenv("AZURE_AI_MODEL_DEPLOYMENT_NAME", ""),
-            agent_name=os.getenv("FOUNDRY_AGENT_NAME"),
+            agent_name=agent_name,
             allowed_origins=origins,
             max_messages=int(os.getenv("CHAT_MAX_MESSAGES", "20")),
             max_message_length=int(os.getenv("CHAT_MAX_MESSAGE_LENGTH", "4000")),

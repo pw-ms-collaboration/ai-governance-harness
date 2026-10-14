@@ -21,7 +21,9 @@ controls:
     evidence:
       - bounded workload context
       - hosted tenant, audience, and scope validation
-    limitation: Hosted end-user identity propagation remains deployment work.
+      - local mock staff role matrix at MCP and local boundaries
+      - local mock RS256 validation and per-request OBO forwarding
+    limitation: Local mock identity only. Real Entra Agent ID, role assignment and hosted validation remain deferred to ADR 0008.
   - id: ASI04
     title: Agentic Supply Chain Vulnerabilities
     status: partial

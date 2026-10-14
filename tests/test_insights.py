@@ -12,6 +12,18 @@ from starlette.testclient import TestClient
 from ai_governance_harness.chat import insights
 from ai_governance_harness.chat.app import build_chat_app
 from ai_governance_harness.chat.config import ChatSettings
+from ai_governance_harness.identity.constants import INTERACTIVE_ID
+
+pytestmark = pytest.mark.usefixtures("mock_chat_environment")
+
+
+def _settings(**overrides):
+    return ChatSettings(**{
+        "model_deployment": "test",
+        "sidecar_url": "http://127.0.0.1:8002",
+        "interactive_agent_id": INTERACTIVE_ID,
+        **overrides,
+    })
 
 APP_ID = UUID("ae56da30-d77c-4183-9c7c-f1bc7e29cf16")
 
@@ -208,7 +220,7 @@ async def test_given_failed_query_when_retrying_then_failure_is_not_cached(
 
 
 def test_given_unconfigured_history_when_requested_then_visible_error() -> None:
-    client = TestClient(build_chat_app(ChatSettings(model_deployment="test")))
+    client = TestClient(build_chat_app(_settings()))
 
     response = client.get("/api/observability/history")
 
@@ -218,7 +230,7 @@ def test_given_unconfigured_history_when_requested_then_visible_error() -> None:
 
 @pytest.mark.parametrize("hours", ["0", "100", "text", "1h; traces", "-1"])
 def test_given_invalid_window_when_requested_then_rejects(hours: str) -> None:
-    client = TestClient(build_chat_app(ChatSettings(model_deployment="test")))
+    client = TestClient(build_chat_app(_settings()))
 
     response = client.get("/api/observability/history", params={"hours": hours})
 
@@ -226,9 +238,8 @@ def test_given_invalid_window_when_requested_then_rejects(hours: str) -> None:
 
 
 def test_given_nonlocal_binding_when_requested_then_rejects() -> None:
-    client = TestClient(build_chat_app(ChatSettings(model_deployment="test", host="0.0.0.0")))
-
-    assert client.get("/api/observability/history").status_code == 403
+    with pytest.raises(ValueError, match="loopback"):
+        _settings(host="0.0.0.0")
 
 
 def test_given_valid_history_when_requested_then_returns_no_store_response(
@@ -238,7 +249,7 @@ def test_given_valid_history_when_requested_then_returns_no_store_response(
         return {"hours": hours, "rows": [], "cached": False}
 
     monkeypatch.setattr(insights.InsightsHistory, "snapshot", snapshot)
-    client = TestClient(build_chat_app(ChatSettings(model_deployment="test")))
+    client = TestClient(build_chat_app(_settings()))
 
     response = client.get("/api/observability/history?hours=4")
 
@@ -248,7 +259,7 @@ def test_given_valid_history_when_requested_then_returns_no_store_response(
 
 
 def test_given_ui_when_loaded_then_has_history_controls_and_static_script() -> None:
-    client = TestClient(build_chat_app(ChatSettings(model_deployment="test")))
+    client = TestClient(build_chat_app(_settings()))
 
     page = client.get("/")
     script = client.get("/static/insights.js")
@@ -417,7 +428,7 @@ def test_given_history_when_requested_then_includes_configured_token_pricing(
         return {"hours": hours, "rows": [], "cached": False}
 
     monkeypatch.setattr(insights.InsightsHistory, "snapshot", snapshot)
-    settings = ChatSettings(model_deployment="gpt-5", token_price_output_per_million=8.0)
+    settings = _settings(model_deployment="gpt-5", token_price_output_per_million=8.0)
     client = TestClient(build_chat_app(settings))
 
     pricing = client.get("/api/observability/history?hours=1").json()["pricing"]
@@ -432,7 +443,7 @@ def test_given_history_when_requested_then_includes_configured_token_pricing(
 
 
 def test_given_ui_when_loaded_then_has_tokenomics_panel() -> None:
-    client = TestClient(build_chat_app(ChatSettings(model_deployment="test")))
+    client = TestClient(build_chat_app(_settings()))
 
     page = client.get("/").text
     script = client.get("/static/insights.js").text

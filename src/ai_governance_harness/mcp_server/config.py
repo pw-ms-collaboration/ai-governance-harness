@@ -12,6 +12,8 @@ from ai_governance_harness.guardrails.sovereignty import (
     SovereigntyGuardrail,
     SovereigntyViolationError,
 )
+from ai_governance_harness.identity.config import require_loopback_url
+from ai_governance_harness.mock_identity_guard import require_mock_identity_allowed
 
 load_dotenv()
 
@@ -53,6 +55,11 @@ class ServerSettings(BaseModel):
     auth_required_scope: str | None = None
     auth_required_role: str | None = None
     auth_snapshot_role: str | None = None
+    principal_source: Literal["easy_auth", "jwt"] | None = None
+    jwt_issuer: str | None = None
+    jwt_jwks_url: str | None = None
+    interactive_agent_id: str | None = None
+    reporting_agent_id: str | None = None
     resource_url: str | None = None
     max_request_body_size: int = Field(default=1_048_576, ge=1, le=4_194_304)
     rate_limit_capacity: int = Field(default=60, ge=1, le=10_000)
@@ -100,6 +107,7 @@ class ServerSettings(BaseModel):
         """Fail closed when hosted configuration lacks sovereignty controls."""
         if not self.hosted:
             return self
+
         if self.transport != "streamable-http":
             raise ValueError("Hosted MCP mode requires the streamable-http transport.")
         if not self.region:
@@ -120,6 +128,43 @@ class ServerSettings(BaseModel):
                 "Hosted MCP mode requires tenant, audience(s), exactly one required scope "
                 "or application role, and resource URL settings."
             )
+        return self
+
+    @model_validator(mode="after")
+    def validate_identity_source(self) -> Self:
+        """Require an authenticated source for HTTP without affecting stdio."""
+        if self.transport == "stdio":
+            return self
+        source = self.principal_source or ("easy_auth" if self.hosted else "jwt")
+        object.__setattr__(self, "principal_source", source)
+        audiences = self.auth_audiences or (
+            (self.auth_audience,) if self.auth_audience else ()
+        )
+        if not all((
+            self.auth_tenant_id,
+            audiences,
+            self.auth_required_scope or self.auth_required_role,
+        )):
+            raise ValueError("HTTP MCP requires tenant, audience, and a scope or role.")
+        if source == "easy_auth":
+            if not self.hosted:
+                raise ValueError("Easy Auth requires a trusted hosted boundary.")
+            if bool(self.interactive_agent_id) != bool(self.reporting_agent_id):
+                raise ValueError("Both agent IDs must be configured together.")
+        else:
+            if not self.interactive_agent_id or not self.reporting_agent_id:
+                raise ValueError("JWT trust requires both agent IDs.")
+            if self.interactive_agent_id == self.reporting_agent_id:
+                raise ValueError("Interactive and reporting agent IDs must differ.")
+            if not self.auth_audience:
+                raise ValueError("JWT trust requires one configured audience.")
+            if self.hosted or self.environment not in {"local", "development", "test"}:
+                raise ValueError("Mock JWT trust is restricted to local environments.")
+            require_mock_identity_allowed("mcp-jwt", bind_host=self.host)
+            if not self.jwt_issuer or not self.jwt_jwks_url:
+                raise ValueError("JWT trust requires issuer and JWKS URLs.")
+            require_loopback_url(self.jwt_issuer)
+            require_loopback_url(self.jwt_jwks_url)
         return self
 
     @classmethod
@@ -153,6 +198,11 @@ class ServerSettings(BaseModel):
             auth_required_scope=os.getenv("MCP_AUTH_REQUIRED_SCOPE"),
             auth_required_role=os.getenv("MCP_AUTH_REQUIRED_ROLE"),
             auth_snapshot_role=os.getenv("MCP_AUTH_SNAPSHOT_ROLE"),
+            principal_source=os.getenv("MCP_PRINCIPAL_SOURCE") or None,
+            jwt_issuer=os.getenv("MCP_JWT_ISSUER") or None,
+            jwt_jwks_url=os.getenv("MCP_JWT_JWKS_URL") or None,
+            interactive_agent_id=os.getenv("AGENT_ID_INTERACTIVE_ID") or None,
+            reporting_agent_id=os.getenv("AGENT_ID_REPORTING_ID") or None,
             resource_url=os.getenv("MCP_RESOURCE_URL"),
             max_request_body_size=int(
                 os.getenv("MCP_MAX_REQUEST_BODY_SIZE", "1048576")

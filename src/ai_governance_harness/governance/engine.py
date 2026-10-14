@@ -115,6 +115,7 @@ class GovernanceEngine:
         source: EventSource = "system",
     ) -> GovernanceDecision:
         """Evaluate one minimum-necessary in-memory policy snapshot."""
+        context = context or get_governance_context()
         if not self.settings.enabled:
             decision = GovernanceDecision(
                 allowed=True,
@@ -124,20 +125,18 @@ class GovernanceEngine:
                 policy_digest=self.policy_digest,
                 enforcement_mode="disabled",
             )
-            return self._record_decision(decision, action=action, source=source)
+            return self._record_decision(decision, action=action, source=source, context=context)
 
         if self._engine is None:
             decision = self._failure_decision(
                 lifecycle_point,
                 "Governance policy engine is unavailable.",
             )
-            return self._record_decision(decision, action=action, source=source)
+            return self._record_decision(decision, action=action, source=source, context=context)
 
         snapshot: dict[str, Any] = {
             "action": {"type": action},
-            "governance": (
-                context or get_governance_context()
-            ).to_policy_context(),
+            "governance": context.to_policy_context(),
         }
         if policy_data:
             snapshot["data"] = dict(policy_data)
@@ -151,6 +150,8 @@ class GovernanceEngine:
                     lifecycle_point.value,
                 )
                 span.set_attribute("governance.source", source)
+                for name, value in context.identity_attributes().items():
+                    span.set_attribute(f"governance.{name}", value)
                 toolkit_decision = self._engine.evaluate(
                     self.settings.agent_id,
                     snapshot,
@@ -167,7 +168,7 @@ class GovernanceEngine:
                 provenance = self.rule_provenance(toolkit_decision.matched_rule)
                 span.set_attributes(provenance_attributes(provenance))
         except Exception:
-            logger.exception(
+            logger.error(
                 "Governance policy evaluation failed",
                 extra={
                     "governance_point": lifecycle_point.value,
@@ -180,7 +181,7 @@ class GovernanceEngine:
                 lifecycle_point,
                 "Governance policy evaluation failed.",
             )
-            return self._record_decision(decision, action=action, source=source)
+            return self._record_decision(decision, action=action, source=source, context=context)
 
         decision = GovernanceDecision(
             allowed=toolkit_decision.allowed,
@@ -204,13 +205,14 @@ class GovernanceEngine:
                 "decision_rule": decision.matched_rule,
                 "policy_name": decision.policy_name,
                 "latency_ms": round(decision.evaluation_ms, 2),
+                **context.identity_attributes(),
                 **{
                     key.replace("governance.", "").replace(".", "_"): value
                     for key, value in provenance_attributes(decision.provenance).items()
                 },
             },
         )
-        return self._record_decision(decision, action=action, source=source)
+        return self._record_decision(decision, action=action, source=source, context=context)
 
     def require_allowed(
         self,
@@ -256,7 +258,9 @@ class GovernanceEngine:
             policy_digest=self.policy_digest,
             enforcement_mode="enforce",
         )
-        return self._record_decision(decision, action=action, source=source)
+        return self._record_decision(
+            decision, action=action, source=source, context=get_governance_context(),
+        )
 
     @staticmethod
     def _record_decision(
@@ -264,8 +268,9 @@ class GovernanceEngine:
         *,
         action: str,
         source: EventSource,
+        context: GovernanceContext,
     ) -> GovernanceDecision:
-        governance_events.record(decision, action=action, source=source)
+        governance_events.record(decision, action=action, source=source, context=context)
         record_decision_metrics(decision, source=source)
         return decision
 

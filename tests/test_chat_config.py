@@ -6,6 +6,9 @@ import pytest
 from pydantic import ValidationError
 
 from ai_governance_harness.chat.config import ChatSettings
+from ai_governance_harness.identity.constants import INTERACTIVE_ID
+
+pytestmark = pytest.mark.usefixtures("mock_chat_environment")
 
 
 def test_given_environment_when_loading_then_parses_service_settings(

@@ -15,7 +15,7 @@ from ai_governance_harness.mcp_server.server import mcp
 
 
 def test_given_http_settings_when_running_server_then_uses_session_json_transport(
-    monkeypatch,
+    monkeypatch, mock_mcp_settings,
 ) -> None:
     # Arrange
     app = object()
@@ -28,8 +28,7 @@ def test_given_http_settings_when_running_server_then_uses_session_json_transpor
         "run",
         lambda application, **kwargs: calls.append((application, kwargs)),
     )
-    settings = ServerSettings(
-        transport="streamable-http",
+    settings = mock_mcp_settings(
         host="127.0.0.1",
         port=8765,
         mcp_path="/custom-mcp",
@@ -75,6 +74,8 @@ def _hosted_settings(**overrides: object) -> ServerSettings:
         "auth_required_scope": "Mcp.Tools.Read",
         "resource_url": "https://mcp.example/mcp",
         "allowed_origins": ("https://chat.example",),
+        "interactive_agent_id": "interactive-agent",
+        "reporting_agent_id": "reporting-agent",
     }
     values.update(overrides)
     return ServerSettings(**values)
@@ -93,6 +94,12 @@ def _principal_headers(
     ]
     if scope is not None:
         claims.append({"typ": "scp", "val": scope})
+    claims.extend([
+        {"typ": "oid", "val": "opaque-principal-id"},
+        {"typ": "azp", "val": "interactive-agent"},
+        {"typ": "idtyp", "val": "user"},
+        {"typ": "xms_act_fct", "val": "11"},
+    ])
     if role is not None:
         claims.append({"typ": "roles", "val": role})
     principal = {"claims": claims}
@@ -144,8 +151,10 @@ def test_given_public_operational_paths_when_unauthenticated_then_remain_availab
     }
 
 
-def test_given_local_mode_when_getting_governance_then_snapshot_is_available() -> None:
-    settings = ServerSettings(transport="streamable-http", hosted=False)
+def test_given_local_mode_when_getting_governance_then_snapshot_is_available(mock_mcp_settings, monkeypatch) -> None:
+    from ai_governance_harness.identity.verification import JwtVerifier
+    monkeypatch.setattr(JwtVerifier, "refresh", lambda self: False)
+    settings = mock_mcp_settings()
     client = TestClient(build_http_app(settings))
 
     response = client.get("/governance/snapshot")

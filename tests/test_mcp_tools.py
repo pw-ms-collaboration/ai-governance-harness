@@ -1,6 +1,7 @@
 """Unit tests for sandboxed MCP data gateway tools."""
 
 import pytest
+
 from ai_governance_harness.mcp_server import (
     MemberNotFoundError,
     get_member_profile,
@@ -8,6 +9,8 @@ from ai_governance_harness.mcp_server import (
     get_cohort_churn_analytics,
     get_fum_outflow_summary,
 )
+
+pytestmark = pytest.mark.usefixtures("local_persona")
 
 
 def test_get_member_profile_success():

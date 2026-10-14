@@ -9,6 +9,9 @@ from uuid import UUID
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from ai_governance_harness.identity.config import require_loopback_url
+from ai_governance_harness.identity.constants import INTERACTIVE_ID
+from ai_governance_harness.mock_identity_guard import require_mock_identity_allowed
 
 load_dotenv()
 
@@ -25,6 +28,8 @@ class ChatSettings(BaseModel):
     mcp_snapshot_audience: str | None = None
     model_deployment: str
     agent_name: str | None = None
+    sidecar_url: str = "http://127.0.0.1:8002"
+    interactive_agent_id: str = INTERACTIVE_ID
     application_insights_app_id: UUID | None = None
     allowed_origins: tuple[str, ...] = (
         "http://127.0.0.1:8080",
@@ -42,7 +47,7 @@ class ChatSettings(BaseModel):
     token_price_cached_input_per_million: float = Field(default=0.125, ge=0, le=1_000)
     token_price_output_per_million: float = Field(default=10.0, ge=0, le=1_000)
 
-    @field_validator("host", "model_deployment")
+    @field_validator("host", "model_deployment", "interactive_agent_id")
     @classmethod
     def validate_non_empty(cls, value: str) -> str:
         """Reject empty host and model values."""
@@ -95,6 +100,14 @@ class ChatSettings(BaseModel):
                 raise ValueError("MCP snapshot audience must not be empty.")
         return self
 
+    @model_validator(mode="after")
+    def validate_mock_identity(self) -> Self:
+        """The MVP trusts only an explicitly enabled loopback mock sidecar."""
+        require_loopback_url(self.sidecar_url)
+        require_loopback_url(self.mcp_url)
+        require_mock_identity_allowed("chat", bind_host=self.host)
+        return self
+
     @classmethod
     def from_environment(cls) -> Self:
         """Load chat settings from environment variables."""
@@ -119,6 +132,8 @@ class ChatSettings(BaseModel):
             mcp_snapshot_audience=os.getenv("MCP_GOVERNANCE_SNAPSHOT_AUDIENCE"),
             model_deployment=os.getenv("AZURE_AI_MODEL_DEPLOYMENT_NAME", ""),
             agent_name=agent_name,
+            sidecar_url=os.getenv("AGENT_ID_SIDECAR_URL", ""),
+            interactive_agent_id=os.getenv("AGENT_ID_INTERACTIVE_ID", ""),
             application_insights_app_id=UUID(app_id) if app_id else None,
             allowed_origins=origins,
             max_messages=int(os.getenv("CHAT_MAX_MESSAGES", "20")),

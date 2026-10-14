@@ -11,11 +11,21 @@ import time
 import uuid
 from collections import OrderedDict
 from dataclasses import dataclass
+from dataclasses import asdict
 from typing import Any
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
+from starlette.concurrency import run_in_threadpool
+from ai_governance_harness.identity.claims import (
+    NormalizedIdentity,
+    Rejection,
+    normalize_claims,
+)
+from ai_governance_harness.identity.constants import STAFF_ROLES
+from ai_governance_harness.identity.tokens import InvalidIdentityToken, bearer_token
+from ai_governance_harness.identity.verification import JwtVerifier
 
 from ai_governance_harness.governance.context import (
     GovernanceContext,
@@ -132,18 +142,18 @@ def _contains_claim(
 def _validate_platform_principal(
     request: Request,
     settings: ServerSettings,
-) -> tuple[str | None, str]:
+) -> NormalizedIdentity | Rejection:
     if request.headers.get("x-ms-client-principal-idp", "").lower() != "aad":
-        return None, "invalid_identity_provider"
+        return Rejection("invalid_platform_principal")
 
     principal_id = request.headers.get("x-ms-client-principal-id")
     encoded_principal = request.headers.get("x-ms-client-principal")
     if not principal_id or not encoded_principal:
-        return None, "missing_platform_principal"
+        return Rejection("invalid_platform_principal")
 
     principal = _decode_principal(encoded_principal)
     if principal is None:
-        return None, "invalid_platform_principal"
+        return Rejection("invalid_platform_principal")
     claims = _claim_values(principal)
 
     if not _contains_claim(
@@ -151,19 +161,22 @@ def _validate_platform_principal(
         ("tid", "http://schemas.microsoft.com/identity/claims/tenantid"),
         settings.auth_tenant_id or "",
     ):
-        return None, "invalid_tenant"
+        return Rejection("invalid_tenant")
     allowed_audiences = settings.auth_audiences or (
         (settings.auth_audience,) if settings.auth_audience else ()
     )
-    if not any(
-        _contains_claim(claims, ("aud",), audience)
-        for audience in allowed_audiences
-    ):
-        return None, "invalid_audience"
+    matched_audience = next(
+        (audience for audience in allowed_audiences
+         if _contains_claim(claims, ("aud",), audience)),
+        None,
+    )
+    if matched_audience is None:
+        return Rejection("invalid_audience")
 
+    request_path = request.scope.get("path", "")
     required_role = (
         settings.auth_snapshot_role
-        if request.url.path in _LOCAL_OPERATIONAL_PATHS and settings.auth_snapshot_role
+        if request_path in _LOCAL_OPERATIONAL_PATHS and settings.auth_snapshot_role
         else settings.auth_required_role
     )
     if required_role:
@@ -175,23 +188,49 @@ def _validate_platform_principal(
             ),
             required_role,
         ):
-            return None, "missing_role"
+            return Rejection("invalid_platform_principal")
     else:
         scope_values = claims.get("scp", set())
         required_scope = settings.auth_required_scope or ""
         if not any(required_scope in value.split() for value in scope_values):
-            return None, "missing_scope"
-
-    principal_key = hashlib.sha256(principal_id.encode("utf-8")).hexdigest()
-    return principal_key, "authenticated"
+            return Rejection("invalid_platform_principal")
+    aliases = {
+        "http://schemas.microsoft.com/identity/claims/objectidentifier": "oid",
+        "http://schemas.microsoft.com/ws/2008/06/identity/claims/role": "roles",
+        "http://schemas.microsoft.com/identity/claims/scope": "scp",
+    }
+    normalized: dict[str, object] = {}
+    for name, values in claims.items():
+        name = aliases.get(name, name)
+        if name in normalized:
+            return Rejection("invalid_platform_principal")
+        if name in {"roles", "xms_act_fct", "xms_sub_fct"}:
+            normalized[name] = [part for value in values for part in value.split()]
+        elif len(values) == 1:
+            normalized[name] = next(iter(values))
+        else:
+            return Rejection("invalid_platform_principal")
+    if not settings.interactive_agent_id or not settings.reporting_agent_id:
+        role_values = normalized.get("roles", [])
+        staff_roles = [role for role in role_values if role in STAFF_ROLES]
+        staff_role = STAFF_ROLES[staff_roles[0]] if len(staff_roles) == 1 else "none"
+        return NormalizedIdentity(
+            actor="interactive",
+            token_type="user",
+            staff_role=staff_role,
+            principal_hash=hashlib.sha256(principal_id.encode("utf-8")).hexdigest(),
+        )
+    identity_settings = settings.model_copy(update={"auth_audience": matched_audience})
+    return normalize_claims(normalized, settings=identity_settings)
 
 
 class RequestSecurityMiddleware(BaseHTTPMiddleware):
     """Reject unsafe MCP HTTP requests before protocol dispatch."""
 
-    def __init__(self, app: Any, settings: ServerSettings) -> None:
+    def __init__(self, app: Any, settings: ServerSettings, verifier: JwtVerifier | None = None) -> None:
         super().__init__(app)
         self._settings = settings
+        self._verifier = verifier
         self._limiter = TokenBucketRateLimiter(
             settings.rate_limit_capacity,
             settings.rate_limit_refill_per_second,
@@ -206,6 +245,7 @@ class RequestSecurityMiddleware(BaseHTTPMiddleware):
         token = correlation_id_context.set(correlation_id)
         governance_token = set_governance_context(
             GovernanceContext(
+                boundary="mcp",
                 workload_id="ai-governance-harness",
                 environment=self._settings.environment,
                 correlation_id=correlation_id,
@@ -298,35 +338,35 @@ class RequestSecurityMiddleware(BaseHTTPMiddleware):
                 status_code=400,
             )
 
-        principal_key = "local-development"
-        if self._settings.hosted:
-            principal_key, auth_outcome = _validate_platform_principal(
-                request,
-                self._settings,
+        if self._settings.principal_source == "easy_auth":
+            identity = _validate_platform_principal(request, self._settings)
+        else:
+            try:
+                token = bearer_token(request.headers.getlist("authorization"))
+                if self._verifier is None:
+                    raise InvalidIdentityToken("invalid_token")
+                claims = await run_in_threadpool(self._verifier.verify, token)
+                identity = normalize_claims(claims, settings=self._settings)
+            except InvalidIdentityToken:
+                identity = Rejection("invalid_token")
+        rejected = isinstance(identity, Rejection)
+        emit_audit_event(
+            "mcp.authentication",
+            outcome="rejected" if rejected else "success",
+            settings=self._settings,
+            authentication_outcome=identity.reason if rejected else "authenticated",
+        )
+        if isinstance(identity, Rejection):
+            return JSONResponse(
+                {"error": "Authentication is required."},
+                status_code=401, headers={"WWW-Authenticate": "Bearer"},
             )
-            emit_audit_event(
-                "mcp.authentication",
-                outcome="success" if principal_key else "rejected",
-                settings=self._settings,
-                authentication_outcome=auth_outcome,
-            )
-            current_context = get_governance_context()
-            set_governance_context(
-                current_context.model_copy(
-                    update={
-                        "principal_hash": principal_key,
-                        "authentication_outcome": (
-                            "authenticated" if principal_key else "rejected"
-                        ),
-                    }
-                )
-            )
-            if principal_key is None:
-                return JSONResponse(
-                    {"error": "Authentication is required."},
-                    status_code=401,
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
+        context = get_governance_context().model_copy(update={
+            **asdict(identity), "boundary": "mcp", "authentication_outcome": "authenticated",
+        })
+        request.state.governance_context = context
+        set_governance_context(context)
+        principal_key = identity.principal_hash
 
         allowed, retry_after = self._limiter.allow(principal_key)
         if not allowed:

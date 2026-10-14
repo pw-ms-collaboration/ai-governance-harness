@@ -93,11 +93,22 @@ def test_given_hosted_application_role_when_loading_settings_then_accepts_role(
 
 
 def test_given_valid_http_environment_when_loading_then_parses_values(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, mock_mcp_settings,
 ) -> None:
     # Arrange
     monkeypatch.setenv("MCP_TRANSPORT", "streamable-http")
-    monkeypatch.setenv("MCP_HOST", "0.0.0.0")
+    settings_template = mock_mcp_settings()
+    for name, value in {
+        "MCP_JWT_ISSUER": settings_template.jwt_issuer,
+        "MCP_JWT_JWKS_URL": settings_template.jwt_jwks_url,
+        "MCP_AUTH_TENANT_ID": settings_template.auth_tenant_id,
+        "MCP_AUTH_AUDIENCE": settings_template.auth_audience,
+        "MCP_AUTH_REQUIRED_SCOPE": settings_template.auth_required_scope,
+        "AGENT_ID_INTERACTIVE_ID": settings_template.interactive_agent_id,
+        "AGENT_ID_REPORTING_ID": settings_template.reporting_agent_id,
+    }.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("MCP_HOST", "127.0.0.1")
     monkeypatch.setenv("MCP_PORT", "8080")
     monkeypatch.setenv("MCP_PATH", "/governance/mcp/")
     monkeypatch.setenv(
@@ -109,7 +120,8 @@ def test_given_valid_http_environment_when_loading_then_parses_values(
     settings = ServerSettings.from_environment()
 
     # Assert
-    assert settings.host == "0.0.0.0"
+    assert settings.host == "127.0.0.1"
+    assert settings.principal_source == "jwt"
     assert settings.port == 8080
     assert settings.mcp_path == "/governance/mcp"
     assert settings.allowed_origins == (

@@ -19,6 +19,10 @@ related:
     relation: influenced-by
   - path: 0005-present-governance-through-a-same-origin-observability-panel.md
     relation: influences
+  - path: 0009-enforce-agent-and-staff-identity-through-governance-policy-context.md
+    relation: influenced-by
+  - path: 0010-use-a-local-only-mock-entra-agent-id-issuer-for-the-mvp.md
+    relation: influenced-by
 asr_triggers:
   - kind: security
     evidence: Request context contains opaque principal hashes rather than raw claims.
@@ -81,6 +85,21 @@ Choose option 1. Policy decisions emit lifecycle point, sanitized action,
 decision, matched rule, digest, enforcement mode, source, and latency. Identity
 is reduced to bounded workload metadata and an opaque principal hash.
 
+**Amendment (2026-10-14, agent identity):**
+
+* ADR 0009 adds four identity fields to governance context, and they may
+  appear in policy decisions, events, and telemetry: `boundary`, `actor`,
+  `token_type`, and `staff_role`. Each is a closed enum; no other identity
+  field is added.
+* `principal_hash` stays a SHA-256 of the user `oid` (OBO) or agent `oid`
+  (app-only).
+* Raw `oid`, `azp`, UPN, `xms_par_app_azp`, bearer tokens, and mock persona
+  tokens (ADR 0010) are used only in memory and are never emitted.
+* Both processes can export to Application Insights when
+  `APPLICATIONINSIGHTS_CONNECTION_STRING` is set. The same allowlist applies to
+  exported spans, metrics, and logs, and `Authorization` headers must never be
+  recorded by HTTP instrumentation.
+
 | Driver | Bounded metadata | Full payloads | Aggregates only | Local database |
 |--------|------------------|---------------|-----------------|----------------|
 | Privacy | Strong | Weak | Strong | Medium |
@@ -96,12 +115,16 @@ is reduced to bounded workload metadata and an opaque principal hash.
 * Good, because malformed MCP events cannot be reflected into the browser.
 * Bad, because deep incident reconstruction requires external approved telemetry later.
 * Bad, because principal hashes correlate activity within their intended scope.
+* Bad, because staff role and agent actor labels, while bounded, reveal which role made each decision.
 * Neutral, because metrics and traces remain useful but intentionally omit payload detail.
 
 ### Confirmation
 
 Tests must inject sensitive-looking prompts, actions, identities, and malformed
 remote events and prove they do not appear in serialized logs or snapshots.
+Identity tests must also inject bearer tokens, raw `oid`/`azp` values, and
+mock persona tokens and prove that only the four enum fields and the principal
+hash appear.
 
 ## Pros and Cons of the Options
 
@@ -145,6 +168,8 @@ flowchart LR
 | Remote snapshot contains extra fields | Use strict Pydantic validation with unknown fields forbidden. |
 | Event volume consumes memory | Bound each process store and merged response. |
 | Hash becomes a stable cross-system identifier | Scope its use to governance correlation and never expose source claims. |
+| Bearer token captured by HTTP instrumentation or exported to Application Insights | Never record `Authorization` headers; add an export test that injects a token marker. |
+| Identity enum drifts into free text | Validate the four fields as closed enums before they enter context. |
 
 ## Rollback / Exit Strategy
 
@@ -167,3 +192,4 @@ corrected. Do not disable governance to resolve an observability issue.
 3. Restart both services after a leakage fix to clear memory.
 4. For durable telemetry, write a new ADR defining retention, access, encryption, deletion, and residency.
 5. Add any new field to privacy tests before exposing it.
+6. The agent identity fields allowed by the 2026-10-14 amendment are `boundary`, `actor`, `token_type`, and `staff_role` only; adding another identity field requires a new ADR.

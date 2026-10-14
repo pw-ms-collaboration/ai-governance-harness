@@ -100,6 +100,7 @@ def test_given_export_failure_when_configuring_then_error_is_not_hidden(
         telemetry.configure_azure_export(service_name="chat", environment="test")
 
 
+@pytest.mark.usefixtures("mock_chat_environment")
 def test_given_chat_startup_when_running_then_export_precedes_app_creation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -123,6 +124,7 @@ def test_given_chat_startup_when_running_then_export_precedes_app_creation(
     assert calls == ["export", "app"]
 
 
+@pytest.mark.usefixtures("mcp_caller")
 def test_given_sensitive_inputs_when_evaluating_then_export_is_metadata_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -203,6 +205,7 @@ def test_given_mcp_settings_when_configuring_then_existing_role_is_preserved(
         "service_name": "ai-governance-harness-mcp",
         "environment": "test",
         "region": None,
+        "manual_only": True,
     }]
 
 

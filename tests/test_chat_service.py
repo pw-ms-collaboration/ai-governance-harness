@@ -8,6 +8,8 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from openai import BadRequestError
+from ai_governance_harness.governance import GovernanceEngine, GovernanceSettings
 
 from ai_governance_harness.chat import service as service_module
 from ai_governance_harness.chat.config import ChatSettings
@@ -28,6 +30,19 @@ from ai_governance_harness.guardrails.advice_classifier import (
     FoundryAdviceRequestClassifier,
 )
 from ai_governance_harness.governance.events import governance_events
+
+pytestmark = pytest.mark.usefixtures("chat_caller", "mock_chat_environment")
+
+
+def _settings(**overrides):
+    from ai_governance_harness.identity.constants import INTERACTIVE_ID
+
+    return ChatSettings(
+        model_deployment="test-model",
+        sidecar_url="http://127.0.0.1:8002",
+        interactive_agent_id=INTERACTIVE_ID,
+        **overrides,
+    )
 
 
 @pytest.mark.parametrize("hosted", [False, True])
@@ -274,9 +289,7 @@ class _RejectedByContentFilterCompletions:
 class _RejectedByContentFilterModelClient(_FakeModelClient):
     def __init__(self) -> None:
         super().__init__()
-        self.chat = SimpleNamespace(
-            completions=_RejectedByContentFilterCompletions()
-        )
+        self.chat = SimpleNamespace(completions=_RejectedByContentFilterCompletions())
 
 
 class _EmptyAfterToolCompletions(_FakeCompletions):
@@ -308,9 +321,7 @@ class _EmptyJsonThenRecoveryCompletions(_FakeCompletions):
 class _EmptyJsonThenRecoveryModelClient(_FakeModelClient):
     def __init__(self) -> None:
         super().__init__()
-        self.chat = SimpleNamespace(
-            completions=_EmptyJsonThenRecoveryCompletions()
-        )
+        self.chat = SimpleNamespace(completions=_EmptyJsonThenRecoveryCompletions())
 
 
 class _FakeProjectClient:
@@ -359,7 +370,7 @@ class _FakeMcpClient:
             description="Get churn signals.",
             meta={
                 "ai_governance_harness": {
-                    "browser_chat": {"enabled": False},
+                    "browser_chat": {"enabled": True},
                     "intent": "member_disengagement_signals",
                 }
             },
@@ -369,7 +380,26 @@ class _FakeMcpClient:
                 "required": ["member_id"],
             },
         )
-        return SimpleNamespace(tools=[profile_tool, signals_tool])
+        other_tools = [
+            SimpleNamespace(
+                name=name,
+                description=name,
+                input_schema={"type": "object"},
+                meta={
+                    "ai_governance_harness": {
+                        "browser_chat": {"enabled": name != "unrelated_tool"},
+                        "intent": name,
+                    }
+                },
+            )
+            for name in (
+                "get_cohort_churn_analytics",
+                "get_fum_outflow_summary",
+                "prepare_member_outreach_case",
+                "unrelated_tool",
+            )
+        ]
+        return SimpleNamespace(tools=[profile_tool, signals_tool, *other_tools])
 
     async def call_tool(self, name: str, arguments: dict[str, object]):
         self.called_tools.append((name, arguments))
@@ -570,6 +600,7 @@ def test_system_instructions_distinguish_profile_and_outreach_intents() -> None:
 
 @pytest.mark.anyio
 async def test_given_outreach_with_unknown_eligibility_then_policy_denies(
+    caller_identity,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Arrange
@@ -584,9 +615,13 @@ async def test_given_outreach_with_unknown_eligibility_then_policy_denies(
             )
             tool_call = _FakeToolCall()
             tool_call.function.name = "prepare_member_outreach_case"
-            return SimpleNamespace(choices=[SimpleNamespace(
-                message=SimpleNamespace(content=None, tool_calls=[tool_call]),
-            )])
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content=None, tool_calls=[tool_call]),
+                    )
+                ]
+            )
 
     class OutreachMcpClient(_FakeMcpClient):
         async def list_tools(self):
@@ -604,20 +639,26 @@ async def test_given_outreach_with_unknown_eligibility_then_policy_denies(
 
     model_client.chat.completions = OutreachCompletions()
     monkeypatch.setattr(
-        "ai_governance_harness.chat.service.get_foundry_client", lambda: project_client,
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
     )
     monkeypatch.setattr("ai_governance_harness.chat.service.Client", OutreachMcpClient)
-    service = ChatService(ChatSettings(model_deployment="test-model"))
-    request = ChatRequest(messages=[ChatMessage(
-        role="user", content="Prepare an outreach retention case for MEM-001",
-    )])
+    service = ChatService(_settings())
+    request = ChatRequest(
+        messages=[
+            ChatMessage(
+                role="user",
+                content="Prepare an outreach retention case for MEM-001",
+            )
+        ]
+    )
 
     # Act & Assert
     with pytest.raises(
         ChatServiceError,
         match="eligibility is not confirmed",
     ) as error:
-        await service.complete(request)
+        await service.complete(request, caller_identity)
     assert error.value.code == "governance_denied"
     assert error.value.status_code == 403
     assert calls == ["get_member_profile"]
@@ -627,6 +668,7 @@ async def test_given_outreach_with_unknown_eligibility_then_policy_denies(
 
 @pytest.mark.anyio
 async def test_given_eligible_outreach_request_then_asks_for_approval(
+    caller_identity,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Arrange
@@ -665,22 +707,29 @@ async def test_given_eligible_outreach_request_then_asks_for_approval(
             return SimpleNamespace(
                 is_error=False,
                 structured_content={
-                    "member_id": "MEM-001", "external_action_executed": False,
+                    "member_id": "MEM-001",
+                    "external_action_executed": False,
                 },
             )
 
     model_client.chat.completions = OutreachCompletions()
     monkeypatch.setattr(
-        "ai_governance_harness.chat.service.get_foundry_client", lambda: project_client,
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
     )
     monkeypatch.setattr("ai_governance_harness.chat.service.Client", OutreachMcpClient)
-    service = ChatService(ChatSettings(model_deployment="test-model"))
-    request = ChatRequest(messages=[ChatMessage(
-        role="user", content="Prepare an outreach retention case for MEM-001",
-    )])
+    service = ChatService(_settings())
+    request = ChatRequest(
+        messages=[
+            ChatMessage(
+                role="user",
+                content="Prepare an outreach retention case for MEM-001",
+            )
+        ]
+    )
 
     # Act
-    response = await service.complete(request)
+    response = await service.complete(request, caller_identity)
 
     # Assert
     assert response.message.startswith("Approval required for MEM-001")
@@ -690,6 +739,7 @@ async def test_given_eligible_outreach_request_then_asks_for_approval(
 
 @pytest.mark.anyio
 async def test_given_explicit_approval_when_outreach_pending_then_executes(
+    caller_identity,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Arrange
@@ -706,9 +756,7 @@ async def test_given_explicit_approval_when_outreach_pending_then_executes(
             result = super().create(**kwargs)
             message = result.choices[0].message
             if message.tool_calls:
-                message.tool_calls[0].function.name = (
-                    "prepare_member_outreach_case"
-                )
+                message.tool_calls[0].function.name = "prepare_member_outreach_case"
             return result
 
     class NonElicitingMcpClient(_FakeMcpClient):
@@ -724,9 +772,7 @@ async def test_given_explicit_approval_when_outreach_pending_then_executes(
                     is_error=False,
                     structured_content={
                         "member_id": "MEM-001",
-                        "retention_review": {
-                            "status": "routine_permitted"
-                        },
+                        "retention_review": {"status": "routine_permitted"},
                     },
                 )
             elicitation = await self.elicitation_callback(
@@ -752,7 +798,7 @@ async def test_given_explicit_approval_when_outreach_pending_then_executes(
         "ai_governance_harness.chat.service.Client",
         NonElicitingMcpClient,
     )
-    service = ChatService(ChatSettings(model_deployment="test-model"))
+    service = ChatService(_settings())
     request = ChatRequest(
         messages=[
             ChatMessage(
@@ -765,12 +811,12 @@ async def test_given_explicit_approval_when_outreach_pending_then_executes(
             ChatMessage(
                 role="user",
                 content="Approve",
-            )
+            ),
         ]
     )
 
     # Act
-    response = await service.complete(request)
+    response = await service.complete(request, caller_identity)
 
     # Assert
     assert response.tools_used == ["prepare_member_outreach_case"]
@@ -786,6 +832,7 @@ async def test_given_explicit_approval_when_outreach_pending_then_executes(
     ],
 )
 async def test_given_non_approval_when_outreach_pending_then_does_not_execute(
+    caller_identity,
     monkeypatch: pytest.MonkeyPatch,
     answer: str,
     expected: str,
@@ -801,7 +848,7 @@ async def test_given_non_approval_when_outreach_pending_then_does_not_execute(
         "ai_governance_harness.chat.service.Client",
         _FakeMcpClient,
     )
-    service = ChatService(ChatSettings(model_deployment="test-model"))
+    service = ChatService(_settings())
     request = ChatRequest(
         messages=[
             ChatMessage(
@@ -816,7 +863,7 @@ async def test_given_non_approval_when_outreach_pending_then_does_not_execute(
     )
 
     # Act
-    response = await service.complete(request)
+    response = await service.complete(request, caller_identity)
 
     # Assert
     assert expected in response.message
@@ -827,6 +874,7 @@ async def test_given_non_approval_when_outreach_pending_then_does_not_execute(
 @pytest.mark.anyio
 async def test_given_mcp_personal_advice_when_completing_then_blocks_before_next_model_call(
     monkeypatch: pytest.MonkeyPatch,
+    caller_identity,
 ) -> None:
     # Arrange
     model_client = _FakeModelClient()
@@ -846,12 +894,12 @@ async def test_given_mcp_personal_advice_when_completing_then_blocks_before_next
         lambda: project_client,
     )
     monkeypatch.setattr("ai_governance_harness.chat.service.Client", AdviceMcpClient)
-    service = ChatService(ChatSettings(model_deployment="test-model"))
+    service = ChatService(_settings())
     request = ChatRequest(messages=[ChatMessage(role="user", content="Show MEM-001")])
 
     # Act & Assert
     with pytest.raises(ChatServiceError, match="Governance policy denied") as error:
-        await service.complete(request)
+        await service.complete(request, caller_identity)
     assert error.value.code == "governance_denied"
     assert error.value.status_code == 403
     assert error.value.details["matched_rule"] == "deny-personal-advice-tool-response"
@@ -865,6 +913,7 @@ async def test_given_mcp_personal_advice_when_completing_then_blocks_before_next
 async def test_given_personal_advice_request_when_completing_then_blocks_before_model(
     monkeypatch: pytest.MonkeyPatch,
     agent_name: str | None,
+    caller_identity,
 ) -> None:
     # Arrange
     model_client = _FakeAgentModelClient()
@@ -887,9 +936,7 @@ async def test_given_personal_advice_request_when_completing_then_blocks_before_
         "classify",
         classify,
     )
-    service = ChatService(
-        ChatSettings(model_deployment="test-model", agent_name=agent_name)
-    )
+    service = ChatService(_settings(agent_name=agent_name))
     request = ChatRequest(
         messages=[
             ChatMessage(
@@ -904,7 +951,7 @@ async def test_given_personal_advice_request_when_completing_then_blocks_before_
 
     # Act
     with pytest.raises(ChatServiceError) as error:
-        await service.complete(request)
+        await service.complete(request, caller_identity)
 
     # Assert
     assert error.value.code == "governance_denied"
@@ -922,6 +969,7 @@ async def test_given_personal_advice_request_when_completing_then_blocks_before_
 
 @pytest.mark.anyio
 async def test_given_share_recommendation_when_completing_then_policy_denies(
+    caller_identity,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     model_client = _FakeModelClient()
@@ -945,19 +993,16 @@ async def test_given_share_recommendation_when_completing_then_policy_denies(
         "classify",
         classify,
     )
-    service = ChatService(ChatSettings(model_deployment="test-model"))
-    request = ChatRequest(
-        messages=[ChatMessage(role="user", content=request_text)]
-    )
+    service = ChatService(_settings())
+    request = ChatRequest(messages=[ChatMessage(role="user", content=request_text)])
 
     with pytest.raises(ChatServiceError) as error:
-        await service.complete(request)
+        await service.complete(request, caller_identity)
 
     assert error.value.code == "governance_denied"
     assert error.value.details["action"] == "chat.input"
     assert (
-        error.value.details["matched_rule"]
-        == "deny-external-security-recommendation"
+        error.value.details["matched_rule"] == "deny-external-security-recommendation"
     )
     assert model_client.chat.completions.calls == []
     assert request_text not in json.dumps(governance_events.snapshot())
@@ -965,6 +1010,7 @@ async def test_given_share_recommendation_when_completing_then_policy_denies(
 
 @pytest.mark.anyio
 async def test_given_mixed_outreach_and_stock_advice_then_denies_before_model(
+    caller_identity,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Arrange
@@ -988,7 +1034,7 @@ async def test_given_mixed_outreach_and_stock_advice_then_denies_before_model(
         "classify",
         classify,
     )
-    service = ChatService(ChatSettings(model_deployment="test-model"))
+    service = ChatService(_settings())
     request = ChatRequest(
         messages=[
             ChatMessage(
@@ -1003,7 +1049,7 @@ async def test_given_mixed_outreach_and_stock_advice_then_denies_before_model(
 
     # Act
     with pytest.raises(ChatServiceError) as error:
-        await service.complete(request)
+        await service.complete(request, caller_identity)
 
     # Assert
     assert error.value.code == "governance_denied"
@@ -1022,6 +1068,7 @@ async def test_given_mixed_outreach_and_stock_advice_then_denies_before_model(
 @pytest.mark.anyio
 async def test_given_member_id_follow_up_to_advice_request_then_blocks_before_model(
     monkeypatch: pytest.MonkeyPatch,
+    caller_identity,
 ) -> None:
     # Arrange
     model_client = _FakeModelClient()
@@ -1055,7 +1102,7 @@ async def test_given_member_id_follow_up_to_advice_request_then_blocks_before_mo
         "classify",
         classify,
     )
-    service = ChatService(ChatSettings(model_deployment="test-model"))
+    service = ChatService(_settings())
     request = ChatRequest(
         messages=[
             ChatMessage(
@@ -1075,7 +1122,7 @@ async def test_given_member_id_follow_up_to_advice_request_then_blocks_before_mo
 
     # Act
     with pytest.raises(ChatServiceError) as error:
-        await service.complete(request)
+        await service.complete(request, caller_identity)
 
     # Assert
     assert error.value.code == "governance_denied"
@@ -1097,6 +1144,7 @@ async def test_given_member_id_follow_up_to_advice_request_then_blocks_before_mo
 
 @pytest.mark.anyio
 async def test_given_classifier_failure_then_surfaces_distinct_technical_stop(
+    caller_identity,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     model_client = _FakeModelClient()
@@ -1114,13 +1162,11 @@ async def test_given_classifier_failure_then_surfaces_distinct_technical_stop(
         "classify",
         classify,
     )
-    service = ChatService(ChatSettings(model_deployment="test-model"))
-    request = ChatRequest(
-        messages=[ChatMessage(role="user", content="Show MEM-001")]
-    )
+    service = ChatService(_settings())
+    request = ChatRequest(messages=[ChatMessage(role="user", content="Show MEM-001")])
 
     with pytest.raises(ChatServiceError) as error:
-        await service.complete(request)
+        await service.complete(request, caller_identity)
 
     assert error.value.code == "classification_unavailable"
     assert error.value.status_code == 503
@@ -1133,6 +1179,7 @@ async def test_given_classifier_failure_then_surfaces_distinct_technical_stop(
 
 @pytest.mark.anyio
 async def test_given_classifier_timeout_then_fails_closed_as_unavailable(
+    caller_identity,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     model_client = _FakeModelClient()
@@ -1150,13 +1197,11 @@ async def test_given_classifier_timeout_then_fails_closed_as_unavailable(
         "classify",
         classify,
     )
-    service = ChatService(ChatSettings(model_deployment="test-model"))
-    request = ChatRequest(
-        messages=[ChatMessage(role="user", content="Show MEM-001")]
-    )
+    service = ChatService(_settings())
+    request = ChatRequest(messages=[ChatMessage(role="user", content="Show MEM-001")])
 
     with pytest.raises(ChatServiceError) as error:
-        await service.complete(request)
+        await service.complete(request, caller_identity)
 
     assert error.value.code == "classification_unavailable"
     assert error.value.details["classification_reason"] == "unavailable"
@@ -1166,6 +1211,7 @@ async def test_given_classifier_timeout_then_fails_closed_as_unavailable(
 
 @pytest.mark.anyio
 async def test_given_low_confidence_classification_then_fails_closed(
+    caller_identity,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     model_client = _FakeModelClient()
@@ -1186,13 +1232,11 @@ async def test_given_low_confidence_classification_then_fails_closed(
         "classify",
         classify,
     )
-    service = ChatService(ChatSettings(model_deployment="test-model"))
-    request = ChatRequest(
-        messages=[ChatMessage(role="user", content="Please help.")]
-    )
+    service = ChatService(_settings())
+    request = ChatRequest(messages=[ChatMessage(role="user", content="Please help.")])
 
     with pytest.raises(ChatServiceError) as error:
-        await service.complete(request)
+        await service.complete(request, caller_identity)
 
     assert error.value.code == "classification_unavailable"
     assert error.value.details["classification_reason"] == "low_confidence"
@@ -1202,6 +1246,7 @@ async def test_given_low_confidence_classification_then_fails_closed(
 @pytest.mark.anyio
 async def test_given_member_question_when_completing_then_calls_mcp_and_foundry(
     monkeypatch: pytest.MonkeyPatch,
+    caller_identity,
 ) -> None:
     # Arrange
     _FakeMcpClient.called_tools = []
@@ -1216,17 +1261,14 @@ async def test_given_member_question_when_completing_then_calls_mcp_and_foundry(
         _FakeMcpClient,
     )
     service = ChatService(
-        ChatSettings(
-            model_deployment="test-model",
+        _settings(
             mcp_url="http://127.0.0.1:8000/mcp",
         )
     )
-    request = ChatRequest(
-        messages=[ChatMessage(role="user", content="Show MEM-001")]
-    )
+    request = ChatRequest(messages=[ChatMessage(role="user", content="Show MEM-001")])
 
     # Act
-    response = await service.complete(request)
+    response = await service.complete(request, caller_identity)
 
     # Assert
     assert _FakeMcpClient.called_tools == [
@@ -1245,7 +1287,16 @@ async def test_given_member_question_when_completing_then_calls_mcp_and_foundry(
         tool["function"]["name"]
         for tool in model_client.chat.completions.calls[0]["tools"]
     ]
-    assert offered_tools == ["get_member_profile"]
+    assert set(offered_tools) == {
+        "get_member_profile",
+        "get_member_disengagement_signals",
+        "get_cohort_churn_analytics",
+        "get_fum_outflow_summary",
+        "prepare_member_outreach_case",
+    }
+    assert len(model_client.chat.completions.calls) == 1
+    assert "145,000" in response.message
+    assert "recent_contributions" not in response.message
 
 
 def test_restrict_tool_payload_keeps_profile_fields_and_drops_contributions() -> None:
@@ -1279,12 +1330,15 @@ def test_restrict_tool_payload_leaves_other_tools_unchanged() -> None:
     payload = {"member_id": "MEM-002", "churn_risk_score": 0.5}
 
     # Act / Assert
-    assert _restrict_tool_payload("get_member_disengagement_signals", payload) == payload
+    assert (
+        _restrict_tool_payload("get_member_disengagement_signals", payload) == payload
+    )
 
 
 @pytest.mark.anyio
 async def test_given_known_error_wrapped_by_mcp_when_completing_then_preserves_error(
     monkeypatch: pytest.MonkeyPatch,
+    caller_identity,
 ) -> None:
     # Arrange
     model_client = _EmptyAfterToolModelClient()
@@ -1298,18 +1352,15 @@ async def test_given_known_error_wrapped_by_mcp_when_completing_then_preserves_e
         _WrappingMcpClient,
     )
     service = ChatService(
-        ChatSettings(
-            model_deployment="test-model",
+        _settings(
             mcp_url="http://127.0.0.1:8000/mcp",
         )
     )
-    request = ChatRequest(
-        messages=[ChatMessage(role="user", content="Show MEM-001")]
-    )
+    request = ChatRequest(messages=[ChatMessage(role="user", content="Show MEM-001")])
 
     # Act
     with pytest.raises(ChatServiceError) as error:
-        await service.complete(request)
+        await service.complete(request, caller_identity)
 
     # Assert
     assert error.value.code == "invalid_model_response"
@@ -1320,6 +1371,7 @@ async def test_given_known_error_wrapped_by_mcp_when_completing_then_preserves_e
 
 @pytest.mark.anyio
 async def test_given_empty_json_response_when_retried_then_returns_answer(
+    caller_identity,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Arrange
@@ -1335,19 +1387,16 @@ async def test_given_empty_json_response_when_retried_then_returns_answer(
         _FakeMcpClient,
     )
     service = ChatService(
-        ChatSettings(
-            model_deployment="test-model",
+        _settings(
             mcp_url="http://127.0.0.1:8000/mcp",
         )
     )
     request = ChatRequest(
-        messages=[
-            ChatMessage(role="user", content="Show the member profile")
-        ]
+        messages=[ChatMessage(role="user", content="Show the member profile")]
     )
 
     # Act
-    response = await service.complete(request)
+    response = await service.complete(request, caller_identity)
 
     # Assert
     assert len(model_client.chat.completions.calls) == 2
@@ -1364,6 +1413,7 @@ async def test_given_empty_json_response_when_retried_then_returns_answer(
 
 @pytest.mark.anyio
 async def test_given_foundry_content_filter_when_completing_then_surfaces_stop(
+    caller_identity,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Arrange
@@ -1377,14 +1427,12 @@ async def test_given_foundry_content_filter_when_completing_then_surfaces_stop(
         "ai_governance_harness.chat.service.Client",
         _FakeMcpClient,
     )
-    service = ChatService(ChatSettings(model_deployment="test-model"))
-    request = ChatRequest(
-        messages=[ChatMessage(role="user", content="Show MEM-001")]
-    )
+    service = ChatService(_settings())
+    request = ChatRequest(messages=[ChatMessage(role="user", content="Show MEM-001")])
 
     # Act
     with pytest.raises(ChatServiceError) as error:
-        await service.complete(request)
+        await service.complete(request, caller_identity)
 
     # Assert
     assert error.value.code == "model_content_filtered"
@@ -1401,6 +1449,7 @@ async def test_given_foundry_content_filter_when_completing_then_surfaces_stop(
 
 @pytest.mark.anyio
 async def test_given_foundry_filter_http_error_then_surfaces_safe_details(
+    caller_identity,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Arrange
@@ -1414,14 +1463,12 @@ async def test_given_foundry_filter_http_error_then_surfaces_safe_details(
         "ai_governance_harness.chat.service.Client",
         _FakeMcpClient,
     )
-    service = ChatService(ChatSettings(model_deployment="test-model"))
-    request = ChatRequest(
-        messages=[ChatMessage(role="user", content="Show MEM-001")]
-    )
+    service = ChatService(_settings())
+    request = ChatRequest(messages=[ChatMessage(role="user", content="Show MEM-001")])
 
     # Act
     with pytest.raises(ChatServiceError) as error:
-        await service.complete(request)
+        await service.complete(request, caller_identity)
 
     # Assert
     assert error.value.code == "model_content_filtered"
@@ -1438,6 +1485,7 @@ async def test_given_foundry_filter_http_error_then_surfaces_safe_details(
 @pytest.mark.anyio
 async def test_given_goal_hijack_when_model_selects_unknown_tool_then_fails_closed(
     monkeypatch: pytest.MonkeyPatch,
+    caller_identity,
 ) -> None:
     # Arrange
     _FakeMcpClient.called_tools = []
@@ -1452,8 +1500,7 @@ async def test_given_goal_hijack_when_model_selects_unknown_tool_then_fails_clos
         _FakeMcpClient,
     )
     service = ChatService(
-        ChatSettings(
-            model_deployment="test-model",
+        _settings(
             mcp_url="http://127.0.0.1:8000/mcp",
         )
     )
@@ -1470,7 +1517,7 @@ async def test_given_goal_hijack_when_model_selects_unknown_tool_then_fails_clos
 
     # Act / Assert
     with pytest.raises(ChatServiceError, match="Governance policy denied") as error:
-        await service.complete(request)
+        await service.complete(request, caller_identity)
     assert error.value.code == "governance_denied"
     assert error.value.status_code == 403
     assert error.value.details["action"] == "shell.execute"
@@ -1488,6 +1535,55 @@ class _RefusalCompletions:
         return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize("mode", ["error", "finish_reason"])
+async def test_given_foundry_filter_when_completing_then_records_caller_denial(
+    monkeypatch,
+    caller_identity,
+    caplog,
+    mode,
+):
+    class FilteredCompletions:
+        def create(self, **kwargs):
+            if mode == "error":
+                raise BadRequestError(
+                    "private-filter-prompt",
+                    response=httpx.Response(
+                        400, request=httpx.Request("POST", "https://example.test")
+                    ),
+                    body={"error": {"code": "content_filter"}},
+                )
+            return SimpleNamespace(
+                choices=[SimpleNamespace(finish_reason="content_filter")]
+            )
+
+    model_client = _FakeModelClient()
+    model_client.chat.completions = FilteredCompletions()
+    project = _FakeProjectClient(model_client)
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client", lambda: project
+    )
+    monkeypatch.setattr("ai_governance_harness.chat.service.Client", _FakeMcpClient)
+    service = ChatService(_settings())
+    service._governance = GovernanceEngine(GovernanceSettings(environment="test"))
+    governance_events.clear()
+    request = ChatRequest(messages=[ChatMessage(role="user", content="Show MEM-001")])
+
+    with pytest.raises(ChatServiceError) as error:
+        await service.complete(request, caller_identity)
+
+    assert error.value.code == (
+        "model_content_filtered" if mode == "finish_reason" else "governance_denied"
+    )
+    if mode == "error":
+        assert error.value.details["matched_rule"] == "content_filter"
+    event = governance_events.snapshot()["recent_events"][0]
+    assert event["policy_name"] == "azure-ai-foundry"
+    assert event["boundary"] == "chat" and event["actor"] == "interactive"
+    assert "private-filter-prompt" not in caplog.text + json.dumps(event)
+    assert model_client.closed and project.closed
+
+
 class _RefusalModelClient(_FakeModelClient):
     def __init__(self) -> None:
         super().__init__()
@@ -1497,6 +1593,7 @@ class _RefusalModelClient(_FakeModelClient):
 @pytest.mark.anyio
 async def test_given_out_of_scope_question_when_refused_then_reports_policy_break(
     monkeypatch: pytest.MonkeyPatch,
+    caller_identity,
 ) -> None:
     # Arrange
     _FakeMcpClient.called_tools = []
@@ -1511,8 +1608,7 @@ async def test_given_out_of_scope_question_when_refused_then_reports_policy_brea
         _FakeMcpClient,
     )
     service = ChatService(
-        ChatSettings(
-            model_deployment="test-model",
+        _settings(
             mcp_url="http://127.0.0.1:8000/mcp",
         )
     )
@@ -1521,7 +1617,7 @@ async def test_given_out_of_scope_question_when_refused_then_reports_policy_brea
     )
 
     # Act
-    response = await service.complete(request)
+    response = await service.complete(request, caller_identity)
 
     # Assert
     assert response.policy_notice is not None
@@ -1535,6 +1631,7 @@ async def test_given_out_of_scope_question_when_refused_then_reports_policy_brea
 @pytest.mark.anyio
 async def test_given_in_scope_answer_when_completing_then_has_no_policy_notice(
     monkeypatch: pytest.MonkeyPatch,
+    caller_identity,
 ) -> None:
     # Arrange
     _FakeMcpClient.called_tools = []
@@ -1549,17 +1646,14 @@ async def test_given_in_scope_answer_when_completing_then_has_no_policy_notice(
         _FakeMcpClient,
     )
     service = ChatService(
-        ChatSettings(
-            model_deployment="test-model",
+        _settings(
             mcp_url="http://127.0.0.1:8000/mcp",
         )
     )
-    request = ChatRequest(
-        messages=[ChatMessage(role="user", content="Show MEM-001")]
-    )
+    request = ChatRequest(messages=[ChatMessage(role="user", content="Show MEM-001")])
 
     # Act
-    response = await service.complete(request)
+    response = await service.complete(request, caller_identity)
 
     # Assert
     assert response.policy_notice is None
@@ -1606,13 +1700,25 @@ def genai_exporters(monkeypatch: pytest.MonkeyPatch):
     spans = InMemorySpanExporter()
     trace_provider = TracerProvider()
     trace_provider.add_span_processor(SimpleSpanProcessor(spans))
-    monkeypatch.setattr(genai_telemetry, "tracer", trace_provider.get_tracer("genai-test"))
+    monkeypatch.setattr(
+        genai_telemetry, "tracer", trace_provider.get_tracer("genai-test")
+    )
     for attribute, factory, metric in (
-        ("operation_duration", meter.create_histogram, "gen_ai.client.operation.duration"),
-        ("input_token_usage", meter.create_counter,
-         "gen_ai.client.inference.usage.input_tokens"),
-        ("output_token_usage", meter.create_counter,
-         "gen_ai.client.inference.usage.output_tokens"),
+        (
+            "operation_duration",
+            meter.create_histogram,
+            "gen_ai.client.operation.duration",
+        ),
+        (
+            "input_token_usage",
+            meter.create_counter,
+            "gen_ai.client.inference.usage.input_tokens",
+        ),
+        (
+            "output_token_usage",
+            meter.create_counter,
+            "gen_ai.client.inference.usage.output_tokens",
+        ),
         ("tool_duration", meter.create_histogram, "gen_ai.execute_tool.duration"),
         ("agent_duration", meter.create_histogram, "gen_ai.invoke_agent.duration"),
     ):
@@ -1624,7 +1730,9 @@ def genai_exporters(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.mark.anyio
 async def test_given_tool_turn_when_completing_then_emits_genai_semconv_without_content(
-    monkeypatch: pytest.MonkeyPatch, genai_exporters,
+    caller_identity,
+    monkeypatch: pytest.MonkeyPatch,
+    genai_exporters,
 ) -> None:
     # Arrange
     spans, reader = genai_exporters
@@ -1635,11 +1743,11 @@ async def test_given_tool_turn_when_completing_then_emits_genai_semconv_without_
         lambda: _FakeProjectClient(model_client),
     )
     monkeypatch.setattr("ai_governance_harness.chat.service.Client", _FakeMcpClient)
-    service = ChatService(ChatSettings(model_deployment="test-model"))
+    service = ChatService(_settings())
     request = ChatRequest(messages=[ChatMessage(role="user", content="Show MEM-001")])
 
     # Act
-    await service.complete(request)
+    await service.complete(request, caller_identity)
 
     # Assert
     finished = {span.name: span for span in spans.get_finished_spans()}
@@ -1679,7 +1787,9 @@ async def test_given_tool_turn_when_completing_then_emits_genai_semconv_without_
     }
     # Profile lookups are formatted directly, so only one inference call is made.
     assert len(model_client.chat.completions.calls) == 1
-    input_points = metrics["gen_ai.client.inference.usage.input_tokens"].data.data_points
+    input_points = metrics[
+        "gen_ai.client.inference.usage.input_tokens"
+    ].data.data_points
     assert sum(point.value for point in input_points) == 120
     assert all(
         point.attributes["gen_ai.token.modality"] == "text" for point in input_points
@@ -1688,7 +1798,9 @@ async def test_given_tool_turn_when_completing_then_emits_genai_semconv_without_
 
 @pytest.mark.anyio
 async def test_given_unknown_tool_when_completing_then_agent_span_records_error_type(
-    monkeypatch: pytest.MonkeyPatch, genai_exporters,
+    caller_identity,
+    monkeypatch: pytest.MonkeyPatch,
+    genai_exporters,
 ) -> None:
     spans, _ = genai_exporters
     monkeypatch.setattr(
@@ -1696,15 +1808,17 @@ async def test_given_unknown_tool_when_completing_then_agent_span_records_error_
         lambda: _FakeProjectClient(_GoalHijackModelClient()),
     )
     monkeypatch.setattr("ai_governance_harness.chat.service.Client", _FakeMcpClient)
-    service = ChatService(ChatSettings(model_deployment="test-model"))
+    service = ChatService(_settings())
 
     with pytest.raises(ChatServiceError) as error:
         await service.complete(
-            ChatRequest(messages=[ChatMessage(role="user", content="Show MEM-001")])
+            ChatRequest(messages=[ChatMessage(role="user", content="Show MEM-001")]),
+            caller_identity,
         )
 
     agent = next(
-        span for span in spans.get_finished_spans()
+        span
+        for span in spans.get_finished_spans()
         if span.name.startswith("invoke_agent ")
     )
     assert agent.attributes["error.type"] == error.value.code

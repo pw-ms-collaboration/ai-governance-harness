@@ -6,6 +6,7 @@ from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
+from starlette.concurrency import run_in_threadpool
 
 from ai_governance_harness.governance import get_governance_engine
 from ai_governance_harness.governance.sandbox import SandboxGuard
@@ -13,10 +14,23 @@ from ai_governance_harness.governance.snapshot import build_governance_snapshot
 from ai_governance_harness.mcp_server.config import ServerSettings
 from ai_governance_harness.mcp_server.security import RequestSecurityMiddleware
 from ai_governance_harness.mcp_server.server import mcp
+from ai_governance_harness.identity.verification import JwtVerifier
 
 
 def build_http_app(settings: ServerSettings) -> Starlette:
     """Build the session-based MCP HTTP app and its public operational routes."""
+    verifier = None
+    if settings.principal_source == "jwt":
+        if not (settings.jwt_issuer and settings.jwt_jwks_url and settings.auth_audience and settings.auth_tenant_id):
+            raise ValueError("JWT configuration is incomplete.")
+        verifier = JwtVerifier(
+            issuer=settings.jwt_issuer,
+            jwks_url=settings.jwt_jwks_url,
+            audience=settings.auth_audience,
+            tenant=settings.auth_tenant_id,
+            timeout=min(get_governance_engine().settings.operation_timeout_seconds, 5),
+        )
+        verifier.refresh()
 
     async def liveness(_: Request) -> JSONResponse:
         return JSONResponse({"status": "live"})
@@ -24,11 +38,17 @@ def build_http_app(settings: ServerSettings) -> Starlette:
     async def readiness(_: Request) -> JSONResponse:
         governance = get_governance_engine()
         sandbox = SandboxGuard(governance.settings)
-        ready = governance.ready and sandbox.ready
+        if verifier is not None and not verifier.ready:
+            await run_in_threadpool(verifier.refresh)
+        ready = governance.ready and sandbox.ready and (verifier is None or verifier.ready)
         status = "ready" if ready else "not_ready"
         return JSONResponse(
             {
                 "status": status,
+                "identity": {
+                    "principal_source": settings.principal_source,
+                    "jwks": "not_required" if verifier is None else ("loaded" if verifier.ready else "unavailable"),
+                },
                 "governance": {
                     "status": status,
                     "enforcement": (
@@ -106,5 +126,5 @@ def build_http_app(settings: ServerSettings) -> Starlette:
             ),
         ]
     )
-    app.add_middleware(RequestSecurityMiddleware, settings=settings)
+    app.add_middleware(RequestSecurityMiddleware, settings=settings, verifier=verifier)
     return app

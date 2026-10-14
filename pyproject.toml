@@ -22,6 +22,7 @@ dependencies = [
     "opentelemetry-api>=1.39.0,<2.0.0",
     "openai>=3.24.0,<4.0.0",
     "python-dotenv>=1.0.0",
+    "PyJWT[crypto]>=2.15.1,<3",
     "pyyaml>=6.0.0,<7.0.0",
     "pydantic>=2.0.0",
     "starlette>=1.0.0,<2.0.0",
@@ -33,6 +34,8 @@ ai-governance-mcp = "ai_governance_harness.mcp_server.__main__:main"
 ai-governance-chat = "ai_governance_harness.chat.__main__:main"
 ai-governance-dev = "ai_governance_harness.dev_launcher:main"
 ai-governance-audit = "ai_governance_harness.security_audit:main"
+ai-governance-identity = "ai_governance_harness.identity.__main__:main"
+ai-governance-report = "ai_governance_harness.report:main"
 
 [project.optional-dependencies]
 dev = [

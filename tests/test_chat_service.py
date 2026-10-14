@@ -7,6 +7,8 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from mcp.shared.exceptions import MCPError
+from mcp.types import MISSING_REQUIRED_CLIENT_CAPABILITY
 from openai import BadRequestError
 
 from ai_governance_harness.chat.app import build_chat_app
@@ -18,6 +20,7 @@ from ai_governance_harness.chat.service import (
     ChatService,
     ChatServiceError,
     _restrict_tool_payload,
+    _scope_classification_text,
 )
 from ai_governance_harness.governance import GovernanceEngine, GovernanceSettings
 from ai_governance_harness.governance.events import governance_events
@@ -169,9 +172,22 @@ class _WrappingMcpClient(_FakeMcpClient):
             raise ExceptionGroup("MCP task group failed", [exc])
 
 
+_ORIGINAL_IS_IN_SCOPE = ChatService._is_in_scope
+
+
 @pytest.fixture()
 def anyio_backend() -> str:
     return "asyncio"
+
+
+@pytest.fixture(autouse=True)
+def classify_as_in_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep existing flows independent of the scope classifier call."""
+
+    async def in_scope(self, model_client, text: str) -> bool:
+        return True
+
+    monkeypatch.setattr(ChatService, "_is_in_scope", in_scope)
 
 
 @pytest.mark.anyio
@@ -295,6 +311,59 @@ async def test_given_eligible_outreach_when_chat_calls_tool_then_executes_after_
     # Assert
     assert calls == ["get_member_profile", "prepare_member_outreach_case"]
     assert response.tools_used == ["prepare_member_outreach_case"]
+
+
+@pytest.mark.anyio
+async def test_given_client_without_approval_form_when_outreach_eligible_then_requires_approval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    model_client = _FakeModelClient()
+    project_client = _FakeProjectClient(model_client)
+
+    class OutreachCompletions(_FakeCompletions):
+        def create(self, **kwargs):
+            result = super().create(**kwargs)
+            message = result.choices[0].message
+            if message.tool_calls:
+                message.tool_calls[0].function.name = "prepare_member_outreach_case"
+            return result
+
+    class NoElicitationMcpClient(_WrappingMcpClient):
+        async def list_tools(self):
+            result = await super().list_tools()
+            result.tools[0].name = "prepare_member_outreach_case"
+            return result
+
+        async def call_tool(self, name: str, arguments: dict[str, object]):
+            if name == "get_member_profile":
+                return SimpleNamespace(
+                    is_error=False,
+                    structured_content={
+                        "member_id": "MEM-001",
+                        "retention_review": {"status": "routine_permitted"},
+                    },
+                )
+            raise MCPError(
+                code=MISSING_REQUIRED_CLIENT_CAPABILITY,
+                message="Client did not declare the form elicitation capability",
+            )
+
+    model_client.chat.completions = OutreachCompletions()
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client", lambda: project_client,
+    )
+    monkeypatch.setattr("ai_governance_harness.chat.service.Client", NoElicitationMcpClient)
+    service = ChatService(ChatSettings(model_deployment="test-model"))
+    request = ChatRequest(messages=[ChatMessage(
+        role="user", content="Prepare a retention outreach case for MEM-001",
+    )])
+
+    # Act & Assert
+    with pytest.raises(ChatServiceError, match="requires staff approval") as error:
+        await service.complete(request)
+    assert error.value.code == "approval_required"
+    assert error.value.status_code == 409
 
 
 @pytest.mark.anyio
@@ -668,3 +737,132 @@ async def test_given_in_scope_answer_when_completing_then_has_no_policy_notice(
 
     # Assert
     assert response.policy_notice is None
+
+
+class _ClassifierCompletions:
+    def __init__(self, label: str) -> None:
+        self.label = label
+        self.calls: list[dict[str, object]] = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        message = SimpleNamespace(content=self.label, tool_calls=None)
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+
+class _ClassifierModelClient(_FakeModelClient):
+    def __init__(self, label: str) -> None:
+        super().__init__()
+        self.chat = SimpleNamespace(completions=_ClassifierCompletions(label))
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("label", "expected"),
+    [
+        ("IN_SCOPE", True),
+        ("OUT_OF_SCOPE", False),
+        ("maybe", False),
+        ("", False),
+    ],
+)
+async def test_given_classifier_label_when_checking_scope_then_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    label: str,
+    expected: bool,
+) -> None:
+    # Arrange
+    monkeypatch.setattr(ChatService, "_is_in_scope", _ORIGINAL_IS_IN_SCOPE)
+    model_client = _ClassifierModelClient(label)
+    service = ChatService(ChatSettings(model_deployment="test-model"))
+
+    # Act
+    in_scope = await service._is_in_scope(model_client, "Show MEM-001")
+
+    # Assert
+    assert in_scope is expected
+    assert "tools" not in model_client.chat.completions.calls[0]
+
+
+def test_given_short_confirmation_when_building_scope_text_then_includes_previous_turn() -> None:
+    # Arrange
+    messages = [
+        ChatMessage(role="user", content="Prepare an outreach case"),
+        ChatMessage(
+            role="assistant",
+            content="Do you want me to prepare an outreach case for MEM-001?",
+        ),
+        ChatMessage(role="user", content="yes"),
+    ]
+
+    # Act
+    text = _scope_classification_text(messages)
+
+    # Assert
+    assert text == (
+        "user: Prepare an outreach case\n"
+        "assistant: Do you want me to prepare an outreach case for MEM-001?\n"
+        "latest user: yes"
+    )
+
+
+def test_given_long_request_when_building_scope_text_then_uses_latest_only() -> None:
+    # Arrange
+    latest = (
+        "Show the account balance, phase and investment option allocation "
+        "for MEM-001 and MEM-002"
+    )
+    assert len(latest) > 80
+    messages = [
+        ChatMessage(role="user", content="What were MEM-002 contributions?"),
+        ChatMessage(role="assistant", content="Sorry, I can't assist."),
+        ChatMessage(role="user", content=latest),
+    ]
+
+    # Act
+    text = _scope_classification_text(messages)
+
+    # Assert
+    assert text == latest
+
+
+@pytest.mark.anyio
+async def test_given_out_of_scope_classification_when_completing_then_refuses_before_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    _FakeMcpClient.called_tools = []
+    monkeypatch.setattr(ChatService, "_is_in_scope", _ORIGINAL_IS_IN_SCOPE)
+    model_client = _ClassifierModelClient("OUT_OF_SCOPE")
+    project_client = _FakeProjectClient(model_client)
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.Client",
+        _FakeMcpClient,
+    )
+    service = ChatService(
+        ChatSettings(
+            model_deployment="test-model",
+            mcp_url="http://127.0.0.1:8000/mcp",
+        )
+    )
+    request = ChatRequest(
+        messages=[ChatMessage(role="user", content="What is the weather today?")]
+    )
+
+    # Act
+    response = await service.complete(request)
+
+    # Assert
+    assert response.message == SCOPE_REFUSAL_MESSAGE
+    assert response.tools_used == []
+    assert response.policy_notice is not None
+    assert response.policy_notice.rule == "deny-out-of-scope-request"
+    assert response.policy_notice.decision == "deny"
+    assert len(model_client.chat.completions.calls) == 1
+    assert _FakeMcpClient.called_tools == []
+    assert project_client.closed is True
+    assert model_client.closed is True

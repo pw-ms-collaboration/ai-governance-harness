@@ -150,6 +150,129 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("review", "expected"),
+    [
+        (
+            {"status": "specialist_required", "specialist_team": "complaints",
+             "existing_case_id": "CASE-003"},
+            "Refer to the complaints team",
+        ),
+        ({"status": "duplicate_open", "existing_case_id": "CASE-004"},
+         "Continue existing case CASE-004"),
+        ({"status": "account_exited"}, "account is closed"),
+        ({"status": "unknown"}, "eligibility is not confirmed"),
+        ({"status": "invalid"}, "invalid outreach eligibility"),
+    ],
+)
+async def test_given_blocked_outreach_when_chat_calls_tool_then_returns_staff_handoff(
+    monkeypatch: pytest.MonkeyPatch, review: dict[str, str], expected: str,
+) -> None:
+    # Arrange
+    model_client = _FakeModelClient()
+    project_client = _FakeProjectClient(model_client)
+    calls: list[str] = []
+
+    class OutreachCompletions:
+        def create(self, **kwargs):
+            tool_call = _FakeToolCall()
+            tool_call.function.name = "prepare_member_outreach_case"
+            return SimpleNamespace(choices=[SimpleNamespace(
+                message=SimpleNamespace(content=None, tool_calls=[tool_call]),
+            )])
+
+    class OutreachMcpClient(_FakeMcpClient):
+        async def list_tools(self):
+            result = await super().list_tools()
+            result.tools[0].name = "prepare_member_outreach_case"
+            return result
+
+        async def call_tool(self, name: str, arguments: dict[str, object]):
+            calls.append(name)
+            assert name == "get_member_profile"
+            return SimpleNamespace(
+                is_error=False,
+                structured_content={"member_id": "MEM-001", "retention_review": review},
+            )
+
+    model_client.chat.completions = OutreachCompletions()
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client", lambda: project_client,
+    )
+    monkeypatch.setattr("ai_governance_harness.chat.service.Client", OutreachMcpClient)
+    service = ChatService(ChatSettings(model_deployment="test-model"))
+    request = ChatRequest(messages=[ChatMessage(
+        role="user", content="Prepare an outreach case for MEM-001",
+    )])
+
+    # Act & Assert
+    with pytest.raises(ChatServiceError, match=expected) as error:
+        await service.complete(request)
+    assert error.value.status_code == (502 if review["status"] == "invalid" else 403)
+    assert calls == ["get_member_profile"]
+    assert model_client.closed
+    assert project_client.closed
+
+
+@pytest.mark.anyio
+async def test_given_eligible_outreach_when_chat_calls_tool_then_executes_after_preflight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    model_client = _FakeModelClient()
+    project_client = _FakeProjectClient(model_client)
+    calls: list[str] = []
+
+    class OutreachCompletions(_FakeCompletions):
+        def create(self, **kwargs):
+            result = super().create(**kwargs)
+            message = result.choices[0].message
+            if message.tool_calls:
+                message.tool_calls[0].function.name = "prepare_member_outreach_case"
+            return result
+
+    class OutreachMcpClient(_FakeMcpClient):
+        async def list_tools(self):
+            result = await super().list_tools()
+            result.tools[0].name = "prepare_member_outreach_case"
+            return result
+
+        async def call_tool(self, name: str, arguments: dict[str, object]):
+            calls.append(name)
+            if name == "get_member_profile":
+                return SimpleNamespace(
+                    is_error=False,
+                    structured_content={
+                        "member_id": "MEM-001",
+                        "retention_review": {"status": "routine_permitted"},
+                    },
+                )
+            return SimpleNamespace(
+                is_error=False,
+                structured_content={
+                    "member_id": "MEM-001", "external_action_executed": False,
+                },
+            )
+
+    model_client.chat.completions = OutreachCompletions()
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client", lambda: project_client,
+    )
+    monkeypatch.setattr("ai_governance_harness.chat.service.Client", OutreachMcpClient)
+    service = ChatService(ChatSettings(model_deployment="test-model"))
+    request = ChatRequest(messages=[ChatMessage(
+        role="user", content="Prepare an outreach case for MEM-001",
+    )])
+
+    # Act
+    response = await service.complete(request)
+
+    # Assert
+    assert calls == ["get_member_profile", "prepare_member_outreach_case"]
+    assert response.tools_used == ["prepare_member_outreach_case"]
+
+
+@pytest.mark.anyio
 async def test_given_mcp_personal_advice_when_completing_then_blocks_before_next_model_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

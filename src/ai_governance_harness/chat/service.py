@@ -12,7 +12,7 @@ from typing import Any, Literal, Protocol
 
 import anyio
 from mcp import Client
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from ai_governance_harness.chat.config import ChatSettings
 from ai_governance_harness.foundry_client import get_foundry_client
@@ -22,6 +22,7 @@ from ai_governance_harness.governance import (
     get_governance_engine,
 )
 from ai_governance_harness.governance.reliability import ReliabilityGuard
+from ai_governance_harness.governance.retention import RetentionReview
 from ai_governance_harness.governance.snapshot import (
     build_governance_snapshot,
     merge_governance_snapshots,
@@ -395,15 +396,10 @@ class ChatService:
                     )
                     for tool_call in assistant_message.tool_calls:
                         tool_name = tool_call.function.name
-                        self._governance.require_allowed(
-                            LifecyclePoint.PRE_TOOL,
-                            tool_name,
-                            policy_data={
-                                "tool_known": tool_name in tool_by_name,
-                            },
-                            source="chat",
-                        )
                         if tool_name not in tool_by_name:
+                            self._governance.require_allowed(
+                                LifecyclePoint.PRE_TOOL, tool_name, source="chat",
+                            )
                             raise ChatServiceError(
                                 "The model selected an unknown tool.",
                                 code="invalid_model_response",
@@ -420,6 +416,81 @@ class ChatService:
                                 "The model returned invalid tool arguments.",
                                 code="invalid_model_response",
                             )
+
+                        policy_data: dict[str, object] = {
+                            "tool_known": tool_name in tool_by_name,
+                        }
+                        review: RetentionReview | None = None
+                        if tool_name == "prepare_member_outreach_case":
+                            member_id = arguments.get("member_id")
+                            if not isinstance(member_id, str) or not re.fullmatch(
+                                r"MEM-\d{3}", member_id,
+                            ):
+                                raise ChatServiceError(
+                                    "The model returned an invalid member identifier.",
+                                    code="invalid_model_response",
+                                )
+                            self._governance.require_allowed(
+                                LifecyclePoint.PRE_TOOL,
+                                "get_member_profile",
+                                source="chat",
+                            )
+
+                            async def read_retention_profile() -> Any:
+                                return await mcp_client.call_tool(
+                                    "get_member_profile", {"member_id": member_id},
+                                )
+
+                            profile_result = await self._mcp_reliability.call(
+                                read_retention_profile,
+                            )
+                            self._governance.require_allowed(
+                                LifecyclePoint.POST_TOOL,
+                                "get_member_profile",
+                                policy_data=tool_response_policy_data(
+                                    profile_result.structured_content,
+                                ),
+                                source="chat",
+                            )
+                            profile = profile_result.structured_content
+                            if (
+                                profile_result.is_error
+                                or not isinstance(profile, dict)
+                                or profile.get("member_id") != member_id
+                            ):
+                                raise ChatServiceError(
+                                    "Outreach eligibility could not be verified. "
+                                    "Staff must check the internal member record.",
+                                    code="governance_denied",
+                                    status_code=403,
+                                )
+                            try:
+                                review = RetentionReview.model_validate(
+                                    profile.get("retention_review", {"status": "unknown"}),
+                                )
+                            except ValidationError:
+                                raise ChatServiceError(
+                                    "The tool returned invalid outreach eligibility. "
+                                    "Staff must verify the internal case records.",
+                                    code="unsafe_tool_result",
+                                ) from None
+                            policy_data.update(review.policy_data())
+                        try:
+                            self._governance.require_allowed(
+                                LifecyclePoint.PRE_TOOL,
+                                tool_name,
+                                policy_data=policy_data,
+                                source="chat",
+                            )
+                        except GovernanceDeniedError as exc:
+                            if review is not None and review.status != "routine_permitted":
+                                raise ChatServiceError(
+                                    review.staff_message(),
+                                    code="governance_denied",
+                                    status_code=403,
+                                    details=_governance_error_details(exc),
+                                ) from exc
+                            raise
 
                         async def call_tool() -> Any:
                             return await mcp_client.call_tool(tool_name, arguments)

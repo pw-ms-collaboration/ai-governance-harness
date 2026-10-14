@@ -133,10 +133,26 @@ def _call_gateway(tool_name: str, operation: Callable[[], ResultT]) -> ResultT:
     return result
 
 
-def _resolve_outreach_approval() -> Elicit[OutreachCaseApproval]:
+def _check_outreach_eligibility(member_id: str) -> None:
+    try:
+        gateway_tools.require_member_outreach_eligible(member_id)
+    except GovernanceDeniedError as exc:
+        emit_audit_event(
+            "mcp.retention.eligibility",
+            outcome="denied",
+            tool_name="prepare_member_outreach_case",
+        )
+        review = gateway_tools.get_default_gateway().retention_review(member_id)
+        raise ToolError(review.staff_message()) from exc
+    except gateway_tools.MemberNotFoundError as exc:
+        raise ToolError("Requested member was not found.") from exc
+
+
+def _resolve_outreach_approval(member_id: str) -> Elicit[OutreachCaseApproval]:
+    _check_outreach_eligibility(member_id)
     return Elicit(
         message=(
-            "Approve preparation of a read-only synthetic member outreach case. "
+            f"Approve preparation of a read-only synthetic outreach case for {member_id}. "
             "The result may include synthetic disengagement signals, but no "
             "message, notification, or other external action will be executed."
         ),
@@ -196,19 +212,16 @@ def prepare_member_outreach_case(
         Resolve(_resolve_outreach_approval),
     ],
 ) -> dict[str, Any]:
-    """Prepare a synthetic outreach case after explicit MCP form approval.
+    """Prepare an eligible synthetic outreach case after MCP form approval.
 
-    This tool never sends a message or performs another external action.
+    Existing cases and specialist restrictions are checked before approval and
+    rechecked before preparation. Referrals are staff-facing instructions only.
+    This tool never persists a case, sends a message or performs external contact.
 
     Args:
         member_id: Synthetic identifier in the form `MEM-001`.
     """
-    engine = get_governance_engine()
-    engine.require_allowed(
-        LifecyclePoint.PRE_TOOL,
-        "prepare_member_outreach_case",
-        source="mcp",
-    )
+    _check_outreach_eligibility(member_id)
     if approval.action == "decline":
         emit_audit_event(
             "mcp.elicitation",
@@ -246,6 +259,7 @@ def prepare_member_outreach_case(
                 "mechanism": "mcp_form_elicitation",
             },
             "external_action_executed": False,
+            "case_persisted": False,
             "disengagement_signals": signals,
         }
         return result

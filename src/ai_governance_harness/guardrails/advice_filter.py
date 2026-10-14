@@ -39,6 +39,12 @@ PROHIBITED_ADVICE_PATTERNS = [
 
 PERSONAL_ADVICE_REQUEST_PATTERNS = [
     re.compile(
+        r"\b(?:which|what)\s+(?:shares?|stocks?|equities|etfs?|funds?|"
+        r"investments?|investment\s+options?)\s+should\s+(?:i|we)\s+"
+        r"(?:buy|purchase|choose|invest\s+in)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
         r"\b(?:this|the|a)\s+(?:customer|member|client)(?:'s)?\b"
         r"[\s\S]{0,160}\b(?:recommend(?:ation)?s?|advice|how\s+to\s+grow)\b",
         re.IGNORECASE,

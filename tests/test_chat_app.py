@@ -5,11 +5,12 @@ from __future__ import annotations
 from html.parser import HTMLParser
 from pathlib import Path
 
+import pytest
 from starlette.testclient import TestClient
 
 from ai_governance_harness.chat.app import STATIC_DIR, build_chat_app
 from ai_governance_harness.chat.config import ChatSettings
-from ai_governance_harness.chat.service import ChatRequest, ChatResponse
+from ai_governance_harness.chat.service import ChatRequest, ChatResponse, ChatService
 from ai_governance_harness.chat.service import ChatServiceError
 
 
@@ -148,9 +149,33 @@ def test_given_governance_denial_when_posting_then_returns_policy_error() -> Non
     }
 
 
-def test_given_personal_advice_request_when_posting_then_policy_denies_input() -> None:
+@pytest.mark.parametrize(
+    "request_text",
+    [
+        "Given this customer's account balance, give me some financial "
+        "recommendations on how to grow their balance",
+        "which shares should I buy?",
+    ],
+)
+def test_given_personal_advice_request_when_posting_then_policy_denies_input(
+    request_text: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # Arrange
-    client = TestClient(build_chat_app(_settings()))
+    def unexpected_foundry_call() -> None:
+        raise AssertionError("Foundry must not be called for a denied input.")
+
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        unexpected_foundry_call,
+    )
+    service = ChatService(_settings())
+    monkeypatch.setattr(
+        service,
+        "_read_mcp_snapshot",
+        lambda: {"schema": "ai-governance-observability/v1", "status": "ready"},
+    )
+    client = TestClient(build_chat_app(_settings(), service))
 
     # Act
     response = client.post(
@@ -160,14 +185,12 @@ def test_given_personal_advice_request_when_posting_then_policy_denies_input() -
             "messages": [
                 {
                     "role": "user",
-                    "content": (
-                        "Given this customer's account balance, give me some "
-                        "financial recommendations on how to grow their balance"
-                    ),
+                    "content": request_text,
                 }
             ]
         },
     )
+    snapshot_response = client.get("/api/governance/snapshot")
 
     # Assert
     assert response.status_code == 403
@@ -177,6 +200,16 @@ def test_given_personal_advice_request_when_posting_then_policy_denies_input() -
         == "deny-personal-advice-request"
     )
     assert response.json()["error"]["correlation_id"] == "advice-request-test"
+    assert snapshot_response.status_code == 200
+    snapshot = snapshot_response.json()
+    event = snapshot["events"]["recent_events"][0]
+    assert event["source"] == "chat"
+    assert event["action"] == "chat.input"
+    assert event["decision"] == "deny"
+    assert event["allowed"] is False
+    assert event["matched_rule"] == "deny-personal-advice-request"
+    assert snapshot["events"]["counts"]["deny"] >= 1
+    assert request_text not in snapshot_response.text
 
 
 def test_given_upstream_failure_when_posting_then_returns_distinct_error() -> None:

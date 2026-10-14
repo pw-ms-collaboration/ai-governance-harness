@@ -199,12 +199,21 @@ class FoundryAdviceRequestClassifier:
                 store=False,
             )
 
-        try:
-            completion = await anyio.to_thread.run_sync(create_completion)
-        except Exception as error:
-            if _is_content_filter_error(error):
-                raise AdviceClassificationFailure("filtered") from error
-            raise
+        # Imported lazily: the chat package imports this module during start-up.
+        from ai_governance_harness.chat import genai_telemetry
+
+        with genai_telemetry.inference_span(
+            model=self._model,
+            model_client=model_client,
+            max_tokens=self._max_output_tokens,
+        ) as inference:
+            try:
+                completion = await anyio.to_thread.run_sync(create_completion)
+            except Exception as error:
+                if _is_content_filter_error(error):
+                    raise AdviceClassificationFailure("filtered") from error
+                raise
+            inference.record_response(completion)
         choices = getattr(completion, "choices", None)
         if not choices:
             raise AdviceClassificationFailure("invalid_response")

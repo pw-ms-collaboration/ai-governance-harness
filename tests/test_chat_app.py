@@ -333,3 +333,124 @@ def test_governance_snapshot_returns_sanitized_service_view() -> None:
     assert response.status_code == 200
     assert response.json()["status"] == "partial"
     assert response.json()["services"][1]["status"] == "unavailable"
+
+
+class _PanelParser(HTMLParser):
+    """Record which tab panel contains each element ID."""
+
+    _VOID = frozenset({"br", "hr", "img", "input", "link", "meta"})
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stack: list[str | None] = []
+        self.panel_of: dict[str, str | None] = {}
+        self.tabs: list[dict[str, str | None]] = []
+        self.panels: dict[str, dict[str, str | None]] = {}
+
+    def handle_starttag(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
+    ) -> None:
+        values = dict(attrs)
+        if values.get("role") == "tab":
+            self.tabs.append(values)
+        if values.get("role") == "tabpanel" and values.get("id"):
+            self.panels[values["id"]] = values
+        current = values["id"] if values.get("role") == "tabpanel" else (
+            self.stack[-1] if self.stack else None
+        )
+        if values.get("id"):
+            self.panel_of[values["id"]] = current
+        if tag not in self._VOID:
+            self.stack.append(current)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag not in self._VOID and self.stack:
+            self.stack.pop()
+
+
+def test_given_ui_when_loaded_then_chat_and_observability_are_separate_tabs() -> None:
+    # Arrange
+    parser = _PanelParser()
+
+    # Act
+    parser.feed((STATIC_DIR / "index.html").read_text(encoding="utf-8"))
+
+    # Assert
+    assert [tab["id"] for tab in parser.tabs] == ["tab-chat", "tab-observability"]
+    assert [tab["aria-controls"] for tab in parser.tabs] == [
+        "panel-chat",
+        "panel-observability",
+    ]
+    assert parser.tabs[0]["aria-selected"] == "true"
+    assert "hidden" not in parser.panels["panel-chat"]
+    assert "hidden" in parser.panels["panel-observability"]
+    assert parser.panel_of["chat-input"] == "panel-chat"
+    assert parser.panel_of["governance-title"] == "panel-observability"
+    assert parser.panel_of["insights-title"] == "panel-observability"
+
+
+def test_given_tab_script_when_requested_then_served_as_javascript() -> None:
+    # Arrange
+    client = TestClient(build_chat_app(_settings(), _FakeChatService()))
+
+    # Act
+    response = client.get("/static/tabs.js")
+
+    # Assert
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/javascript")
+    assert "innerHTML" not in response.text
+
+
+def test_given_flow_script_when_requested_then_served_without_html_injection() -> None:
+    # Arrange
+    client = TestClient(build_chat_app(_settings(), _FakeChatService()))
+
+    # Act
+    response = client.get("/static/flow.js")
+
+    # Assert
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/javascript")
+    assert "innerHTML" not in response.text
+    assert "/api/governance/snapshot" in response.text
+
+
+def test_given_observability_tab_when_loaded_then_request_flow_shows_every_outcome() -> None:
+    # Arrange
+    client = TestClient(build_chat_app(_settings(), _FakeChatService()))
+
+    # Act
+    html = client.get("/").text
+
+    # Assert
+    observability = html.split('id="panel-observability"', 1)[1]
+    assert 'aria-labelledby="flow-title"' in observability
+    for outcome in ("allow", "deny", "approval", "other"):
+        assert f'id="flow-count-{outcome}"' in observability
+        assert f'id="flow-out-{outcome}"' in observability
+    assert 'id="flow-ticker"' in observability
+    assert 'aria-live="polite"' in observability
+    assert "/static/flow.js" in html
+
+
+def test_given_approval_prompt_when_rendered_then_buttons_send_backend_replies() -> None:
+    # Arrange
+    from ai_governance_harness.chat.service import (
+        _APPROVE_RESPONSES,
+        _DECLINE_RESPONSES,
+        _OUTREACH_APPROVAL_HEADING,
+    )
+
+    # Act
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    # Assert
+    assert f'const APPROVAL_HEADING = "{_OUTREACH_APPROVAL_HEADING}";' in script
+    assert '["Approve", "approve"]' in script
+    assert '["Decline", "danger-secondary"]' in script
+    assert "approve" in _APPROVE_RESPONSES
+    assert "decline" in _DECLINE_RESPONSES
+    assert "innerHTML" not in script

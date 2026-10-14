@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from ai_governance_harness.chat.config import ChatSettings
@@ -1348,3 +1349,149 @@ async def test_given_in_scope_answer_when_completing_then_has_no_policy_notice(
 
     # Assert
     assert response.policy_notice is None
+
+
+class _UsageCompletions(_FakeCompletions):
+    def create(self, **kwargs):
+        completion = super().create(**kwargs)
+        choice = completion.choices[0]
+        choice.finish_reason = "tool_calls" if choice.message.tool_calls else "stop"
+        completion.id = f"chatcmpl-{len(self.calls)}"
+        completion.model = "gpt-4o-mini-2024-07-18"
+        completion.usage = SimpleNamespace(
+            prompt_tokens=120,
+            completion_tokens=30,
+            prompt_tokens_details=SimpleNamespace(cached_tokens=0),
+            completion_tokens_details=SimpleNamespace(reasoning_tokens=12),
+        )
+        return completion
+
+
+class _UsageModelClient(_FakeModelClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.chat = SimpleNamespace(completions=_UsageCompletions())
+        self.base_url = httpx.URL("https://example.services.ai.azure.com/openai/v1/")
+
+
+@pytest.fixture()
+def genai_exporters(monkeypatch: pytest.MonkeyPatch):
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+
+    from ai_governance_harness.chat import genai_telemetry
+
+    reader = InMemoryMetricReader()
+    meter_provider = MeterProvider(metric_readers=[reader])
+    meter = meter_provider.get_meter("genai-test")
+    spans = InMemorySpanExporter()
+    trace_provider = TracerProvider()
+    trace_provider.add_span_processor(SimpleSpanProcessor(spans))
+    monkeypatch.setattr(genai_telemetry, "tracer", trace_provider.get_tracer("genai-test"))
+    for attribute, factory, metric in (
+        ("operation_duration", meter.create_histogram, "gen_ai.client.operation.duration"),
+        ("input_token_usage", meter.create_counter,
+         "gen_ai.client.inference.usage.input_tokens"),
+        ("output_token_usage", meter.create_counter,
+         "gen_ai.client.inference.usage.output_tokens"),
+        ("tool_duration", meter.create_histogram, "gen_ai.execute_tool.duration"),
+        ("agent_duration", meter.create_histogram, "gen_ai.invoke_agent.duration"),
+    ):
+        monkeypatch.setattr(genai_telemetry, attribute, factory(metric))
+    yield spans, reader
+    meter_provider.shutdown()
+    trace_provider.shutdown()
+
+
+@pytest.mark.anyio
+async def test_given_tool_turn_when_completing_then_emits_genai_semconv_without_content(
+    monkeypatch: pytest.MonkeyPatch, genai_exporters,
+) -> None:
+    # Arrange
+    spans, reader = genai_exporters
+    _FakeMcpClient.called_tools = []
+    model_client = _UsageModelClient()
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: _FakeProjectClient(model_client),
+    )
+    monkeypatch.setattr("ai_governance_harness.chat.service.Client", _FakeMcpClient)
+    service = ChatService(ChatSettings(model_deployment="test-model"))
+    request = ChatRequest(messages=[ChatMessage(role="user", content="Show MEM-001")])
+
+    # Act
+    await service.complete(request)
+
+    # Assert
+    finished = {span.name: span for span in spans.get_finished_spans()}
+    agent = finished["invoke_agent superannuation-governance-assistant"]
+    inference = finished["chat test-model"]
+    tool = finished["execute_tool get_member_profile"]
+    assert agent.attributes["gen_ai.operation.name"] == "invoke_agent"
+    assert inference.kind.name == "CLIENT"
+    assert inference.parent.span_id == agent.context.span_id
+    assert tool.parent.span_id == agent.context.span_id
+    assert inference.attributes["gen_ai.provider.name"] == "azure.ai.openai"
+    assert inference.attributes["gen_ai.usage.input_tokens"] == 120
+    assert inference.attributes["gen_ai.usage.output_tokens"] == 30
+    assert inference.attributes["gen_ai.usage.reasoning.output_tokens"] == 12
+    assert inference.attributes["server.address"] == "example.services.ai.azure.com"
+    assert inference.attributes["server.port"] == 443
+    assert tool.attributes["gen_ai.tool.call.id"] == "call-1"
+    assert tool.attributes["gen_ai.tool.type"] == "extension"
+    assert all("error.type" not in span.attributes for span in finished.values())
+    serialized = json.dumps(
+        [dict(span.attributes) for span in finished.values()], default=str
+    )
+    for content in ("MEM-001", "Alex Morgan", "Show", "content"):
+        assert content not in serialized
+    metrics = {
+        metric.name: metric
+        for resource in reader.get_metrics_data().resource_metrics
+        for scope in resource.scope_metrics
+        for metric in scope.metrics
+    }
+    assert set(metrics) == {
+        "gen_ai.client.operation.duration",
+        "gen_ai.client.inference.usage.input_tokens",
+        "gen_ai.client.inference.usage.output_tokens",
+        "gen_ai.execute_tool.duration",
+        "gen_ai.invoke_agent.duration",
+    }
+    # Profile lookups are formatted directly, so only one inference call is made.
+    assert len(model_client.chat.completions.calls) == 1
+    input_points = metrics["gen_ai.client.inference.usage.input_tokens"].data.data_points
+    assert sum(point.value for point in input_points) == 120
+    assert all(
+        point.attributes["gen_ai.token.modality"] == "text" for point in input_points
+    )
+
+
+@pytest.mark.anyio
+async def test_given_unknown_tool_when_completing_then_agent_span_records_error_type(
+    monkeypatch: pytest.MonkeyPatch, genai_exporters,
+) -> None:
+    spans, _ = genai_exporters
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: _FakeProjectClient(_GoalHijackModelClient()),
+    )
+    monkeypatch.setattr("ai_governance_harness.chat.service.Client", _FakeMcpClient)
+    service = ChatService(ChatSettings(model_deployment="test-model"))
+
+    with pytest.raises(ChatServiceError) as error:
+        await service.complete(
+            ChatRequest(messages=[ChatMessage(role="user", content="Show MEM-001")])
+        )
+
+    agent = next(
+        span for span in spans.get_finished_spans()
+        if span.name.startswith("invoke_agent ")
+    )
+    assert agent.attributes["error.type"] == error.value.code
+    assert agent.status.status_code.name == "ERROR"

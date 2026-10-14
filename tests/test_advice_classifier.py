@@ -160,3 +160,53 @@ def test_failure_policy_data_is_bounded_and_fail_closed() -> None:
         "product_scope": "unknown",
         "confidence": "low",
     }
+
+
+@pytest.mark.anyio
+async def test_given_classification_when_completed_then_records_inference_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+
+    from ai_governance_harness.chat import genai_telemetry
+
+    spans = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(spans))
+    monkeypatch.setattr(genai_telemetry, "tracer", provider.get_tracer("classifier-test"))
+    payload = {
+        "classification_status": "classified",
+        "request_intent": "factual_information",
+        "advice_subject": "none",
+        "financial_action": "none",
+        "product_scope": "none",
+        "confidence": "high",
+    }
+    client, completions = _client(json.dumps(payload))
+    completions.completion.usage = SimpleNamespace(
+        prompt_tokens=310,
+        completion_tokens=40,
+        prompt_tokens_details=SimpleNamespace(cached_tokens=128),
+        completion_tokens_details=SimpleNamespace(reasoning_tokens=0),
+    )
+    classifier = FoundryAdviceRequestClassifier(model="test-model", max_output_tokens=400)
+
+    # Act
+    await classifier.classify(
+        client, current_user_text="Show MEM-001", previous_user_text=None
+    )
+
+    # Assert
+    (span,) = spans.get_finished_spans()
+    assert span.name == "chat test-model"
+    assert span.attributes["gen_ai.request.max_tokens"] == 400
+    assert span.attributes["gen_ai.usage.input_tokens"] == 310
+    assert span.attributes["gen_ai.usage.output_tokens"] == 40
+    assert span.attributes["gen_ai.usage.cache_read.input_tokens"] == 128
+    assert span.attributes["gen_ai.usage.reasoning.output_tokens"] == 0
+    provider.shutdown()

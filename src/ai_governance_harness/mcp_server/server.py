@@ -83,6 +83,7 @@ def _call_gateway(tool_name: str, operation: Callable[[], ResultT]) -> ResultT:
     error_category: str | None = None
     with tracer.start_as_current_span(f"mcp.tool.{tool_name}") as span:
         span.set_attribute("mcp.tool.name", tool_name)
+        span.set_attribute("gen_ai.tool.name", tool_name)
         try:
             result = dict(operation())
             result.setdefault(

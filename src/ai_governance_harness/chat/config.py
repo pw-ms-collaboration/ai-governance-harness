@@ -23,6 +23,9 @@ class ChatSettings(BaseModel):
 
     host: str = "127.0.0.1"
     port: int = Field(default=8080, ge=1, le=65535)
+    hosted: bool = False
+    auth_tenant_id: str | None = None
+    auth_audience: str | None = None
     mcp_url: str = "http://127.0.0.1:8001/mcp"
     mcp_snapshot_url: str | None = None
     mcp_snapshot_audience: str | None = None
@@ -102,7 +105,19 @@ class ChatSettings(BaseModel):
 
     @model_validator(mode="after")
     def validate_mock_identity(self) -> Self:
-        """The MVP trusts only an explicitly enabled loopback mock sidecar."""
+        """Separate trusted hosted authentication from the local mock issuer."""
+        if self.hosted:
+            if not all((self.auth_tenant_id, self.auth_audience, self.agent_name)):
+                raise ValueError("Hosted chat requires tenant, audience and Prompt Agent settings.")
+            if any(not value.strip() for value in (self.auth_tenant_id, self.auth_audience)):
+                raise ValueError("Hosted identity settings must not be blank.")
+            if os.getenv("MOCK_IDENTITY_ENABLED", "false").strip().lower() != "false":
+                raise ValueError("Hosted chat must disable mock identity.")
+            if urlparse(self.mcp_url).scheme != "https" or not self.mcp_snapshot_url:
+                raise ValueError("Hosted chat requires HTTPS MCP and authenticated snapshot settings.")
+            if any(urlparse(origin).scheme != "https" for origin in self.allowed_origins):
+                raise ValueError("Hosted chat requires HTTPS browser origins.")
+            return self
         require_loopback_url(self.sidecar_url)
         require_loopback_url(self.mcp_url)
         require_mock_identity_allowed("chat", bind_host=self.host)
@@ -124,16 +139,22 @@ class ChatSettings(BaseModel):
             else cls.model_fields["allowed_origins"].default
         )
         app_id = os.getenv("APPLICATIONINSIGHTS_APP_ID", "").strip()
+        hosted = os.getenv("CHAT_HOSTED", "false").strip().lower()
+        if hosted not in {"true", "false"}:
+            raise ValueError("CHAT_HOSTED must be 'true' or 'false'.")
         return cls(
             host=os.getenv("CHAT_HOST", "127.0.0.1"),
             port=int(os.getenv("CHAT_PORT", "8080")),
+            hosted=hosted == "true",
+            auth_tenant_id=os.getenv("CHAT_AUTH_TENANT_ID"),
+            auth_audience=os.getenv("CHAT_AUTH_AUDIENCE"),
             mcp_url=os.getenv("MCP_SERVER_URL", "http://127.0.0.1:8001/mcp"),
             mcp_snapshot_url=os.getenv("MCP_GOVERNANCE_SNAPSHOT_URL"),
             mcp_snapshot_audience=os.getenv("MCP_GOVERNANCE_SNAPSHOT_AUDIENCE"),
             model_deployment=os.getenv("AZURE_AI_MODEL_DEPLOYMENT_NAME", ""),
             agent_name=agent_name,
             sidecar_url=os.getenv("AGENT_ID_SIDECAR_URL", ""),
-            interactive_agent_id=os.getenv("AGENT_ID_INTERACTIVE_ID", ""),
+            interactive_agent_id=os.getenv("AGENT_ID_INTERACTIVE_ID", INTERACTIVE_ID),
             application_insights_app_id=UUID(app_id) if app_id else None,
             allowed_origins=origins,
             max_messages=int(os.getenv("CHAT_MAX_MESSAGES", "20")),

@@ -430,9 +430,11 @@ class _FakeMcpClient:
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("max_output_tokens", [1_200, 4_000])
+@pytest.mark.parametrize("hosted", [False, True])
 async def test_given_agent_name_when_completing_then_invokes_agent_reference_without_direct_mcp(
     monkeypatch: pytest.MonkeyPatch,
     max_output_tokens: int,
+    hosted: bool,
 ) -> None:
     # Arrange
     model_client = _FakeAgentModelClient()
@@ -449,11 +451,25 @@ async def test_given_agent_name_when_completing_then_invokes_agent_reference_wit
         "ai_governance_harness.chat.service.Client",
         unexpected_mcp_client,
     )
+    settings_overrides = {}
+    if hosted:
+        monkeypatch.setenv("MOCK_IDENTITY_ENABLED", "false")
+        settings_overrides = {
+            "hosted": True,
+            "host": "0.0.0.0",
+            "auth_tenant_id": "test-tenant",
+            "auth_audience": "api://test-chat",
+            "mcp_url": "https://gateway.example/mcp",
+            "mcp_snapshot_url": "https://gateway.example/snapshot",
+            "mcp_snapshot_audience": "api://test-mcp",
+            "allowed_origins": ("https://chat.example",),
+        }
     service = ChatService(
         ChatSettings(
             model_deployment="test-model",
             agent_name="member-wealth-insights-agent",
             max_output_tokens=max_output_tokens,
+            **settings_overrides,
         )
     )
     request = ChatRequest(

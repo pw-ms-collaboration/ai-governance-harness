@@ -709,7 +709,7 @@ class ChatService:
         with genai_telemetry.invoke_agent_span(model=self._settings.model_deployment):
             return await self._complete(request, caller)
 
-    async def _complete(self, request: ChatRequest, caller: CallerIdentity) -> ChatResponse:
+    async def _complete(self, request: ChatRequest, caller: CallerIdentity | None) -> ChatResponse:
         if len(request.messages) > self._settings.max_messages:
             raise ChatServiceError(
                 "The conversation is too long.",

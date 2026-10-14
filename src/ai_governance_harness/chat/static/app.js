@@ -38,6 +38,8 @@ const identityMode = document.querySelector("#identity-mode");
 let history = [];
 let governancePaused = false;
 let accessToken = null;
+let hostedSession = false;
+let hostedMode = false;
 let busy = false;
 let governanceBaselineAt = null;
 let governanceRetainedLimit = 0;
@@ -154,7 +156,7 @@ function addMessage(role, content, policyNotice = null) {
 function setBusy(isBusy) {
   busy = isBusy;
   input.disabled = isBusy;
-  sendButton.disabled = isBusy || !accessToken;
+  sendButton.disabled = isBusy || !(accessToken || hostedSession);
   personaSelector.disabled = isBusy;
   signInButton.disabled = isBusy;
   clearButton.disabled = isBusy;
@@ -531,7 +533,9 @@ function renderGovernance(snapshot) {
   } / ${governanceRetainedLimit}`;
 
   renderServices(snapshot.services);
-  identityMode.textContent = snapshot.identity?.label || "Identity mode unavailable";
+  identityMode.textContent = hostedMode
+    ? "Microsoft Entra EasyAuth"
+    : snapshot.identity?.label || "Identity mode unavailable";
   enforcementMode.textContent = String(snapshot.runtime?.enforcement || "unknown").replaceAll("_", " ");
   sandboxStatus.textContent = [
     snapshot.runtime?.sandbox?.provider || "unknown",
@@ -571,9 +575,9 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault();
   clearError();
   if (busy) return;
-  if (!accessToken) {
-    showError("Choose a mock persona and sign in before sending.");
-    personaSelector.focus();
+  if (!(accessToken || hostedSession)) {
+    showError(hostedMode ? "Sign in through Microsoft Entra again." : "Choose a mock persona and sign in before sending.");
+    if (!hostedMode) personaSelector.focus();
     return;
   }
   const content = input.value.trim();
@@ -593,17 +597,28 @@ form.addEventListener("submit", async (event) => {
   try {
     const response = await fetch("/api/chat", {
       method: "POST",
+      redirect: hostedMode ? "manual" : "follow",
       headers: {
         "Content-Type": "application/json", Accept: "application/json",
-        Authorization: `Bearer ${accessToken}`,
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       },
       body: JSON.stringify({ messages: history }),
     });
+    if (hostedMode && (response.type === "opaqueredirect" || response.status === 401)) {
+      hostedSession = false;
+      accessToken = null;
+      window.location.assign("/.auth/login/aad");
+      throw new Error("Your Microsoft Entra session expired. Sign in again.");
+    }
     const payload = await response.json();
     if (!response.ok) {
       if (response.status === 401) {
         accessToken = null;
-        identityStatus.textContent = "Your mock sign-in expired. Sign in again.";
+        hostedSession = false;
+        identityStatus.textContent = hostedMode
+          ? "Your Microsoft Entra session expired. Sign in again."
+          : "Your mock sign-in expired. Sign in again.";
+        if (hostedMode) window.location.assign("/.auth/login/aad");
       }
       throw new Error(chatErrorMessage(payload));
     }
@@ -616,7 +631,7 @@ form.addEventListener("submit", async (event) => {
       history.pop();
     }
     const lastTurn = history.at(-1);
-    if (accessToken && lastTurn?.role === "assistant" && lastTurn.content.startsWith(APPROVAL_HEADING)) {
+    if ((accessToken || hostedSession) && lastTurn?.role === "assistant" && lastTurn.content.startsWith(APPROVAL_HEADING)) {
       const latestActions = messagesElement.querySelectorAll(".approval-actions");
       latestActions[latestActions.length - 1]
         ?.querySelectorAll("button")
@@ -649,7 +664,7 @@ personaSelector.addEventListener("change", () => {
 });
 
 signInButton.addEventListener("click", async () => {
-  if (busy) return;
+  if (busy || hostedMode) return;
   clearIdentityConversation();
   const persona = personaSelector.value;
   if (!persona) {
@@ -745,5 +760,31 @@ window.setInterval(() => {
   }
 }, 5000);
 
+async function loadIdentityMode() {
+  setBusy(false);
+  try {
+    const response = await fetch("/api/identity", {
+      headers: { Accept: "application/json" },
+      redirect: "error",
+    });
+    if (!response.ok) throw new Error("Sign-in status is unavailable.");
+    const identity = await response.json();
+    if (!["mock", "easy_auth"].includes(identity.mode)) {
+      throw new Error("The identity service returned an invalid mode.");
+    }
+    hostedMode = identity.mode === "easy_auth";
+    hostedSession = hostedMode;
+    if (hostedMode) {
+      personaSelector.closest(".mock-identity").hidden = true;
+      identityMode.textContent = "Microsoft Entra EasyAuth";
+    }
+  } catch (error) {
+    showError(error.message || "Sign-in status is unavailable.");
+  } finally {
+    setBusy(false);
+  }
+}
+
+loadIdentityMode();
 checkHealth();
 refreshGovernance();

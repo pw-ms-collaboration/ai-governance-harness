@@ -6,9 +6,33 @@ import pytest
 from pydantic import ValidationError
 
 from ai_governance_harness.chat.config import ChatSettings
-from ai_governance_harness.identity.constants import INTERACTIVE_ID
 
 pytestmark = pytest.mark.usefixtures("mock_chat_environment")
+
+
+def test_given_hosted_environment_when_loading_then_does_not_require_mock_sidecar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CHAT_HOSTED", "true")
+    monkeypatch.setenv("MOCK_IDENTITY_ENABLED", "false")
+    monkeypatch.setenv("CONTAINER_APP_NAME", "synthetic-chat")
+    monkeypatch.setenv("CHAT_HOST", "0.0.0.0")
+    monkeypatch.setenv("CHAT_AUTH_TENANT_ID", "tenant-test")
+    monkeypatch.setenv("CHAT_AUTH_AUDIENCE", "api://chat-test")
+    monkeypatch.setenv("CHAT_ALLOWED_ORIGINS", "https://chat.example")
+    monkeypatch.setenv("CHAT_USE_PROMPT_AGENT", "true")
+    monkeypatch.setenv("FOUNDRY_AGENT_NAME", "test-agent")
+    monkeypatch.setenv("AZURE_AI_MODEL_DEPLOYMENT_NAME", "test-model")
+    monkeypatch.setenv("MCP_SERVER_URL", "https://gateway.example/mcp")
+    monkeypatch.setenv("MCP_GOVERNANCE_SNAPSHOT_URL", "https://gateway.example/snapshot")
+    monkeypatch.setenv("MCP_GOVERNANCE_SNAPSHOT_AUDIENCE", "api://mcp-test")
+    monkeypatch.delenv("AGENT_ID_SIDECAR_URL", raising=False)
+    monkeypatch.delenv("AGENT_ID_INTERACTIVE_ID", raising=False)
+
+    settings = ChatSettings.from_environment()
+
+    assert settings.hosted is True
+    assert settings.agent_name == "test-agent"
 
 
 def test_given_environment_when_loading_then_parses_service_settings(

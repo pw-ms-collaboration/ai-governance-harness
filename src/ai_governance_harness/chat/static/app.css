@@ -34,6 +34,10 @@ textarea {
   font: inherit;
 }
 
+.mock-identity[hidden] {
+  display: none;
+}
+
 .mock-identity {
   border-bottom: 1px solid var(--border);
   padding-bottom: 1rem;

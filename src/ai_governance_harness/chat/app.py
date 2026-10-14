@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
 from pathlib import Path
 from uuid import uuid4
 
@@ -32,6 +35,51 @@ from ai_governance_harness.mock_identity_guard import require_mock_identity_allo
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
+def _hosted_principal_hash(request: Request, settings: ChatSettings) -> str | None:
+    """Read bounded user claims injected by the required EasyAuth boundary."""
+    encoded = request.headers.getlist("x-ms-client-principal")
+    principal_ids = request.headers.getlist("x-ms-client-principal-id")
+    providers = request.headers.getlist("x-ms-client-principal-idp")
+    if len(encoded) != 1 or len(principal_ids) != 1 or providers != ["aad"]:
+        return None
+    if (
+        len(encoded[0]) > 24_000
+        or not 1 <= len(principal_ids[0]) <= 128
+        or not principal_ids[0].strip()
+    ):
+        return None
+    try:
+        document = json.loads(base64.b64decode(encoded[0], validate=True))
+        if not isinstance(document, dict) or not isinstance(document.get("claims"), list):
+            return None
+        aliases = {
+            "http://schemas.microsoft.com/identity/claims/tenantid": "tid",
+            "http://schemas.microsoft.com/identity/claims/objectidentifier": "oid",
+        }
+        claims: dict[str, str] = {}
+        for item in document["claims"]:
+            if not isinstance(item, dict):
+                return None
+            name, value = item.get("typ"), item.get("val")
+            if not isinstance(name, str) or not isinstance(value, str):
+                return None
+            name = aliases.get(name, name)
+            if name in {"tid", "aud", "oid", "idtyp"}:
+                if name in claims:
+                    return None
+                claims[name] = value
+        if (
+            claims.get("tid") != settings.auth_tenant_id
+            or claims.get("aud") != settings.auth_audience
+            or claims.get("oid") != principal_ids[0]
+            or claims.get("idtyp", "user") != "user"
+        ):
+            return None
+    except (ValueError, UnicodeDecodeError):
+        return None
+    return hashlib.sha256(principal_ids[0].encode("utf-8")).hexdigest()
+
+
 class BrowserSecurityMiddleware(BaseHTTPMiddleware):
     """Apply origin checks and browser security headers."""
 
@@ -49,12 +97,31 @@ class BrowserSecurityMiddleware(BaseHTTPMiddleware):
             return JSONResponse({"error": "Origin is not allowed."}, status_code=403)
 
         correlation_id = request.headers.get("x-correlation-id") or uuid4().hex
+        principal_hash = None
+        if self._settings.hosted:
+            if request.url.path == "/api/mock-identity/signin":
+                return JSONResponse({"error": "Not found."}, status_code=404)
+            if request.url.path not in {"/health/live", "/health/ready"}:
+                principal_hash = _hosted_principal_hash(request, self._settings)
+                if principal_hash is None:
+                    return JSONResponse(
+                        {"error": {
+                            "code": "authentication_required",
+                            "message": "Sign in through Microsoft Entra.",
+                            "correlation_id": correlation_id,
+                        }},
+                        status_code=401,
+                        headers={"WWW-Authenticate": "Bearer", "Cache-Control": "no-store"},
+                    )
         context = GovernanceContext(
             boundary="chat",
             workload_id="ai-governance-harness",
-            environment="local",
+            environment="production" if self._settings.hosted else "local",
             correlation_id=correlation_id,
-            authentication_outcome="local",
+            authentication_outcome="authenticated" if principal_hash else "local",
+            principal_hash=principal_hash,
+            actor="interactive" if principal_hash else None,
+            token_type="user" if principal_hash else None,
         )
         with governance_context(context):
             response = await call_next(request)
@@ -75,7 +142,7 @@ def build_chat_app(
 ) -> Starlette:
     """Build the static UI and chat API application."""
     chat_service = service or ChatService(settings)
-    sidecar = SidecarClient(
+    sidecar = None if settings.hosted else SidecarClient(
         settings.sidecar_url,
         timeout=get_governance_engine().settings.operation_timeout_seconds,
     )
@@ -167,6 +234,9 @@ def build_chat_app(
     async def governance_snapshot(_: Request) -> JSONResponse:
         return JSONResponse(await chat_service.governance_snapshot())
 
+    async def identity_mode(_: Request) -> JSONResponse:
+        return JSONResponse({"mode": "easy_auth" if settings.hosted else "mock"})
+
     def service_error(error: ChatServiceError) -> JSONResponse:
         public_error: dict[str, object] = {
             "code": error.code, "message": str(error),
@@ -180,6 +250,8 @@ def build_chat_app(
         )
 
     async def signin(request: Request) -> JSONResponse:
+        if sidecar is None:
+            return JSONResponse({"error": "Not found."}, status_code=404)
         if request.headers.get("content-type", "").split(";")[0].lower() != "application/json":
             return JSONResponse({"error": "Content type must be application/json."}, status_code=415)
         body = bytearray()
@@ -214,6 +286,11 @@ def build_chat_app(
                 status_code=400,
             )
         try:
+            if settings.hosted:
+                result = await chat_service.complete(payload, None)
+                return JSONResponse(result.model_dump())
+            if sidecar is None:
+                raise RuntimeError("Local identity sidecar is unavailable.")
             caller = await sidecar.validate(request.headers.getlist("authorization"))
             context = get_governance_context().model_copy(update={
                 "boundary": "chat", "actor": "interactive", "token_type": "user",
@@ -234,6 +311,7 @@ def build_chat_app(
             Route("/static/tabs.js", tabs_javascript, methods=["GET"]),
             Route("/static/flow.js", flow_javascript, methods=["GET"]),
             Route("/api/chat", chat, methods=["POST"]),
+            Route("/api/identity", identity_mode, methods=["GET"]),
             Route("/api/mock-identity/signin", signin, methods=["POST"]),
             Route("/api/observability/history", insights_history, methods=["GET"]),
             Route(

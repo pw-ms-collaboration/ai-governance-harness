@@ -26,6 +26,153 @@ pytestmark = pytest.mark.usefixtures("mock_chat_environment")
 
 
 @pytest.fixture
+def hosted_chat_settings(monkeypatch):
+    monkeypatch.setenv("MOCK_IDENTITY_ENABLED", "false")
+    return ChatSettings(
+        hosted=True, host="0.0.0.0", model_deployment="test",
+        agent_name="test-agent", auth_tenant_id="test-tenant",
+        auth_audience="api://test-chat", mcp_url="https://gateway.example/mcp",
+        mcp_snapshot_url="https://gateway.example/snapshot",
+        mcp_snapshot_audience="api://test-mcp",
+        allowed_origins=("https://chat.example",),
+    )
+
+
+def _easy_auth_headers(**overrides):
+    import base64
+
+    claims = {
+        "tid": "test-tenant", "aud": "api://test-chat",
+        "oid": "private-user-id", "idtyp": "user", **overrides,
+    }
+    encoded = base64.b64encode(json.dumps({
+        "claims": [{"typ": name, "val": value} for name, value in claims.items()],
+    }).encode()).decode()
+    return {
+        "X-MS-CLIENT-PRINCIPAL": encoded,
+        "X-MS-CLIENT-PRINCIPAL-ID": "private-user-id",
+        "X-MS-CLIENT-PRINCIPAL-IDP": "aad",
+    }
+
+
+def test_given_hosted_identity_when_chatting_then_no_mock_sidecar_or_token_forwarding(
+    hosted_chat_settings, monkeypatch, caplog,
+):
+    from ai_governance_harness.chat.service import ChatResponse
+
+    def reject_sidecar(*args, **kwargs):
+        pytest.fail("Hosted chat constructed a mock sidecar")
+
+    monkeypatch.setattr(SidecarClient, "__init__", reject_sidecar)
+
+    class Service:
+        async def complete(self, request, caller):
+            context = get_governance_context()
+            assert caller is None
+            assert context.authentication_outcome == "authenticated"
+            assert context.actor == "interactive"
+            assert len(context.principal_hash) == 64
+            assert "private-user-id" not in context.model_dump_json()
+            return ChatResponse(message="ok", tools_used=[])
+
+    with TestClient(build_chat_app(hosted_chat_settings, Service())) as client:
+        response = client.post(
+            "/api/chat", headers=_easy_auth_headers(),
+            json={"messages": [{"role": "user", "content": "hello"}]},
+        )
+        assert client.get("/api/identity", headers=_easy_auth_headers()).json() == {
+            "mode": "easy_auth",
+        }
+        assert client.post("/api/mock-identity/signin", json={}).status_code == 404
+    assert response.status_code == 200
+    assert "private-user-id" not in caplog.text
+    assert get_governance_context().actor is None
+
+
+@pytest.mark.parametrize("overrides", [
+    {"tid": "wrong"}, {"aud": "wrong"}, {"oid": "wrong"}, {"idtyp": "app"},
+])
+def test_given_invalid_hosted_identity_when_chatting_then_rejects_before_service(
+    hosted_chat_settings, overrides,
+):
+    with TestClient(build_chat_app(hosted_chat_settings)) as client:
+        response = client.post("/api/chat", headers=_easy_auth_headers(**overrides), json={})
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize("endpoint", ["/", "/api/chat", "/api/identity", "/api/governance/snapshot"])
+def test_given_anonymous_hosted_request_when_accessing_then_requires_authentication(
+    hosted_chat_settings, endpoint,
+):
+    with TestClient(build_chat_app(hosted_chat_settings)) as client:
+        assert client.get(endpoint).status_code == 401
+        assert client.get("/health/live").status_code == 200
+        assert client.get("/health/ready").status_code == 200
+
+
+@pytest.mark.parametrize("overrides", [
+    {"agent_name": None}, {"auth_tenant_id": None}, {"auth_audience": " "},
+    {"mcp_url": "http://gateway.example/mcp"},
+    {"mcp_snapshot_url": None, "mcp_snapshot_audience": None},
+    {"allowed_origins": ("http://chat.example",)},
+])
+def test_given_unsafe_hosted_settings_when_configuring_then_fails_closed(
+    hosted_chat_settings, overrides,
+):
+    with pytest.raises(ValueError):
+        ChatSettings.model_validate({**hosted_chat_settings.model_dump(), **overrides})
+
+
+def test_given_mock_enabled_when_configuring_hosted_chat_then_refuses(
+    hosted_chat_settings, monkeypatch,
+):
+    monkeypatch.setenv("MOCK_IDENTITY_ENABLED", "true")
+    with pytest.raises(ValueError, match="disable mock identity"):
+        ChatSettings.model_validate(hosted_chat_settings.model_dump())
+
+
+@pytest.mark.parametrize("malformation", [
+    "base64", "json", "oversized", "duplicate_header", "duplicate_claim",
+    "alias_collision", "missing_claim", "provider", "empty_id",
+])
+def test_given_malformed_platform_principal_when_accessing_then_rejects(
+    hosted_chat_settings, malformation,
+):
+    import base64
+
+    headers = _easy_auth_headers()
+    if malformation in {"duplicate_claim", "alias_collision", "missing_claim"}:
+        document = json.loads(base64.b64decode(headers["X-MS-CLIENT-PRINCIPAL"]))
+        if malformation == "missing_claim":
+            document["claims"] = [item for item in document["claims"] if item["typ"] != "aud"]
+        else:
+            document["claims"].append({
+                "typ": "tid" if malformation == "duplicate_claim" else
+                    "http://schemas.microsoft.com/identity/claims/tenantid",
+                "val": "test-tenant",
+            })
+        headers["X-MS-CLIENT-PRINCIPAL"] = base64.b64encode(json.dumps(document).encode()).decode()
+    elif malformation == "base64":
+        headers["X-MS-CLIENT-PRINCIPAL"] = "invalid!"
+    elif malformation == "json":
+        headers["X-MS-CLIENT-PRINCIPAL"] = base64.b64encode(b"[]").decode()
+    elif malformation == "oversized":
+        headers["X-MS-CLIENT-PRINCIPAL"] = "x" * 24_001
+    elif malformation == "provider":
+        headers["X-MS-CLIENT-PRINCIPAL-IDP"] = "untrusted"
+    elif malformation == "empty_id":
+        headers["X-MS-CLIENT-PRINCIPAL-ID"] = " "
+    request_headers = list(headers.items())
+    if malformation == "duplicate_header":
+        request_headers.append(("X-MS-CLIENT-PRINCIPAL", headers["X-MS-CLIENT-PRINCIPAL"]))
+
+    with TestClient(build_chat_app(hosted_chat_settings)) as client:
+        response = client.get("/api/identity", headers=request_headers)
+
+    assert response.status_code == 401
+
+
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 

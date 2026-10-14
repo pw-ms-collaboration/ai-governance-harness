@@ -702,6 +702,10 @@ Preserve these boundaries during provisioning, updates, and rollback:
    the hosted entrypoint.
 * Keep chat protected by Entra EasyAuth. Only `/health/live` and
    `/health/ready` are excluded from authentication in the current demo.
+* Set `CHAT_HOSTED=true`, `MOCK_IDENTITY_ENABLED=false`,
+   `CHAT_AUTH_TENANT_ID` and `CHAT_AUTH_AUDIENCE` for hosted chat. The application
+   trusts only principal headers injected by mandatory platform EasyAuth;
+   never expose a direct application port that bypasses that boundary.
 * Keep direct MCP ingress restricted to the approved APIM egress address.
    Do not open MCP to the internet to work around authentication failures.
 * Preserve `Mcp.Tools.Invoke` for the Foundry agent identity. The chat workload

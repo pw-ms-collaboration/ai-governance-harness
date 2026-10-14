@@ -356,6 +356,10 @@ module chatApp 'br/public:avm/res/app/container-app:0.23.0' = {
         env: [
           { name: 'CHAT_HOST', value: '0.0.0.0' }
           { name: 'CHAT_PORT', value: '8080' }
+          { name: 'CHAT_HOSTED', value: 'true' }
+          { name: 'CHAT_AUTH_TENANT_ID', value: tenantId }
+          { name: 'CHAT_AUTH_AUDIENCE', value: chatAuthAudience }
+          { name: 'MOCK_IDENTITY_ENABLED', value: 'false' }
           { name: 'CHAT_ALLOWED_ORIGINS', value: 'https://${chatAppName}.${managedEnvironment.outputs.defaultDomain}' }
           { name: 'MCP_SERVER_URL', value: apimMcpUrl }
           { name: 'MCP_GOVERNANCE_SNAPSHOT_URL', value: apimSnapshotUrl }

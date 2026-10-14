@@ -83,6 +83,9 @@ Sources: [chat/config.py](../src/ai_governance_harness/chat/config.py) and
 | ------------------------------ | --------------------------- | ------------------------------------------------------------------------------------------ |
 | `CHAT_HOST`                    | `127.0.0.1`                 | Nonempty bind address; keep local services on loopback                                     |
 | `CHAT_PORT`                    | `8080`                      | Integer from 1 to 65,535                                                                   |
+| `CHAT_HOSTED`                  | `false`                     | Explicit `true/false`; hosted mode requires EasyAuth, Prompt Agent mode, HTTPS origins and authenticated MCP snapshots |
+| `CHAT_AUTH_TENANT_ID`           | Required in hosted mode     | Exact tenant claim expected in the platform-injected principal |
+| `CHAT_AUTH_AUDIENCE`            | Required in hosted mode     | Exact chat audience claim expected in the platform-injected principal |
 | `MCP_SERVER_URL`               | `http://127.0.0.1:8001/mcp` | Absolute HTTP(S) URL; no credentials, query, or fragment                                   |
 | `CHAT_ALLOWED_ORIGINS`         | Loopback origins below      | Comma-separated explicit origins; wildcards rejected                                       |
 | `CHAT_MAX_MESSAGES`            | `20`                        | Setting range 1-50, but request-schema hard cap is 20                                      |
@@ -101,10 +104,25 @@ extra fields, and requires the last message to be a user turn. Effective
 message-count and message-length limits are the smaller of the configured
 limit and the schema hard cap. Raising a setting does not enlarge that cap.
 
-Chat applies origin checks and browser security headers, not end-user
-authentication. Requests with no `Origin` header are not authenticated by
-the origin check. There is no implemented chat-to-hosted-MCP credential
-forwarding flow.
+Local chat authenticates through the guarded mock sidecar. Hosted chat requires
+`CHAT_HOSTED=true`, `MOCK_IDENTITY_ENABLED=false`, `CHAT_USE_PROMPT_AGENT=true`
+and `FOUNDRY_AGENT_NAME`. It validates the tenant, audience and user object ID
+in EasyAuth's platform-injected principal. All application routes except
+`/health/live` and `/health/ready` require authentication; mock sign-in returns
+404. The browser uses the EasyAuth session cookie rather than a mock token.
+
+Mandatory Container Apps EasyAuth is the trusted boundary that validates tokens
+and prevents client-supplied identity headers from becoming trusted principals.
+Do not expose the application directly, disable platform authentication or
+exclude application routes. Application header checks are not JWT verification
+and cannot establish platform provenance independently.
+
+Hosted chat records only a hashed caller reference and bounded identity labels.
+It invokes the configured Foundry Prompt Agent through the existing workload
+credential. Browser credentials and staff roles are not forwarded to Foundry or
+MCP. The agent's configured MCP authorization remains separate from browser
+sign-in; this mode does not implement real Entra Agent ID provisioning or
+per-user delegated tool authorization. Local mock OBO behavior is unchanged.
 
 ## MCP Transport and HTTP Settings
 

@@ -161,14 +161,19 @@ def _validate_platform_principal(
     ):
         return None, "invalid_audience"
 
-    if settings.auth_required_role:
+    required_role = (
+        settings.auth_snapshot_role
+        if request.url.path in _LOCAL_OPERATIONAL_PATHS and settings.auth_snapshot_role
+        else settings.auth_required_role
+    )
+    if required_role:
         if not _contains_claim(
             claims,
             (
                 "roles",
                 "http://schemas.microsoft.com/ws/2008/06/identity/claims/role",
             ),
-            settings.auth_required_role,
+            required_role,
         ):
             return None, "missing_role"
     else:

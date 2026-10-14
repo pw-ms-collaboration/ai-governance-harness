@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import httpx
@@ -10,6 +11,7 @@ import pytest
 from openai import BadRequestError
 
 from ai_governance_harness.chat.app import build_chat_app
+from ai_governance_harness.chat import service as service_module
 from ai_governance_harness.chat.config import ChatSettings
 from ai_governance_harness.chat.service import (
     ChatMessage,
@@ -19,6 +21,75 @@ from ai_governance_harness.chat.service import (
 )
 from ai_governance_harness.governance import GovernanceEngine, GovernanceSettings
 from ai_governance_harness.governance.events import governance_events
+
+
+@pytest.mark.parametrize("hosted", [False, True])
+def test_given_snapshot_configuration_when_reading_then_uses_expected_url_and_auth(
+    monkeypatch: pytest.MonkeyPatch, hosted: bool,
+) -> None:
+    snapshot_url = "https://gateway.example/observability/governance/snapshot"
+    settings = ChatSettings(
+        model_deployment="model",
+        mcp_snapshot_url=snapshot_url if hosted else None,
+        mcp_snapshot_audience="api://mcp-server" if hosted else None,
+    )
+    scopes: list[str] = []
+    requests: list[httpx.Request] = []
+
+    @contextmanager
+    def credential():
+        def get_token(scope: str):
+            scopes.append(scope)
+            return SimpleNamespace(token="test-token")
+
+        yield SimpleNamespace(get_token=get_token)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"source": "mcp"})
+
+    @contextmanager
+    def stream(method: str, url: str, **kwargs):
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            with client.stream(method, url, **kwargs) as response:
+                yield response
+
+    monkeypatch.setattr(service_module, "get_azure_credential", credential)
+    monkeypatch.setattr(service_module.httpx, "stream", stream)
+
+    result = ChatService(settings)._read_mcp_snapshot()
+
+    assert result == {"source": "mcp"}
+    assert str(requests[0].url) == (
+        snapshot_url if hosted else "http://127.0.0.1:8001/governance/snapshot"
+    )
+    assert scopes == (["api://mcp-server/.default"] if hosted else [])
+    assert requests[0].headers.get("Authorization") == (
+        "Bearer test-token" if hosted else None
+    )
+
+
+def test_given_redirected_snapshot_when_reading_then_does_not_follow_redirect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(302, headers={"Location": "https://other.example"})
+
+    @contextmanager
+    def stream(method: str, url: str, **kwargs):
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            with client.stream(method, url, **kwargs) as response:
+                yield response
+
+    monkeypatch.setattr(service_module.httpx, "stream", stream)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        ChatService(ChatSettings(model_deployment="model"))._read_mcp_snapshot()
+
+    assert len(requests) == 1
 
 
 class _FakeToolCall:
@@ -190,7 +261,11 @@ async def test_given_agent_name_when_completing_then_invokes_agent_reference_wit
         )
     )
     request = ChatRequest(
-        messages=[ChatMessage(role="user", content="Show MEM-001")]
+        messages=[
+            ChatMessage(role="user", content="Show MEM-001"),
+            ChatMessage(role="assistant", content="The profile is synthetic."),
+            ChatMessage(role="user", content="Summarize MEM-001"),
+        ]
     )
 
     # Act
@@ -203,6 +278,11 @@ async def test_given_agent_name_when_completing_then_invokes_agent_reference_wit
             "type": "agent_reference",
         }
     }
+    agent_input = model_client.responses.calls[0]["input"]
+    assert all(message["type"] == "message" for message in agent_input)
+    assert [message["role"] for message in agent_input] == [
+        "system", "user", "assistant", "user",
+    ]
     assert response.tools_used == ["get_member_profile"]
     assert "GENERAL ADVICE WARNING" in response.message
     assert model_client.closed is True

@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 
+import pytest
 from starlette.testclient import TestClient
 
 from ai_governance_harness.mcp_server import __main__ as entrypoint
@@ -168,6 +169,29 @@ def test_given_hosted_mode_when_getting_governance_then_authentication_is_requir
     assert unauthenticated.status_code == 401
     assert authenticated.status_code == 200
     assert authenticated.json()["schema"] == "ai-governance-observability/v1"
+
+
+@pytest.mark.parametrize(
+    ("role", "endpoint", "expected_status"),
+    [
+        ("Mcp.Governance.Read", "/governance/snapshot", 200),
+        ("Mcp.Governance.Read", "/mcp", 401),
+        ("Mcp.Tools.Invoke", "/governance/snapshot", 401),
+    ],
+)
+def test_given_snapshot_role_when_requesting_then_enforces_read_only_boundary(
+    role: str, endpoint: str, expected_status: int,
+) -> None:
+    settings = _hosted_settings(
+        auth_required_scope=None,
+        auth_required_role="Mcp.Tools.Invoke",
+        auth_snapshot_role="Mcp.Governance.Read",
+    )
+    client = TestClient(build_http_app(settings))
+
+    response = client.get(endpoint, headers=_principal_headers(scope=None, role=role))
+
+    assert response.status_code == expected_status
 
 
 def test_given_wrong_tenant_or_audience_when_posting_then_returns_401() -> None:

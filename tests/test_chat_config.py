@@ -68,3 +68,23 @@ def test_given_unsafe_mcp_url_when_constructing_then_rejects_url(url: str) -> No
     # Act & Assert
     with pytest.raises(ValidationError, match="MCP_SERVER_URL"):
         ChatSettings(model_deployment="model", mcp_url=url)
+
+
+@pytest.mark.parametrize(
+    ("url", "audience"),
+    [
+        ("https://gateway.example/snapshot", None),
+        (None, "api://mcp-server"),
+        ("http://gateway.example/snapshot", "api://mcp-server"),
+        ("https://gateway.example/snapshot?token=secret", "api://mcp-server"),
+    ],
+)
+def test_given_unsafe_snapshot_settings_when_constructing_then_rejects_config(
+    url: str | None, audience: str | None,
+) -> None:
+    with pytest.raises(ValidationError):
+        ChatSettings(
+            model_deployment="model",
+            mcp_snapshot_url=url,
+            mcp_snapshot_audience=audience,
+        )

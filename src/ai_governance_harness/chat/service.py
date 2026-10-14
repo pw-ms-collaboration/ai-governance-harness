@@ -6,17 +6,16 @@ import json
 import logging
 import re
 from urllib.parse import urlsplit, urlunsplit
-from urllib.request import Request as UrlRequest
-from urllib.request import urlopen
 from typing import Any, Literal, Protocol
 
 import anyio
+import httpx
 from mcp import Client
 from openai import APIStatusError
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ai_governance_harness.chat.config import ChatSettings
-from ai_governance_harness.foundry_client import get_foundry_client
+from ai_governance_harness.foundry_client import get_azure_credential, get_foundry_client
 from ai_governance_harness.governance import (
     GovernanceDeniedError,
     LifecyclePoint,
@@ -261,7 +260,7 @@ class ChatService:
 
     def _read_mcp_snapshot(self) -> dict[str, Any]:
         parsed = urlsplit(self._settings.mcp_url)
-        snapshot_url = urlunsplit(
+        snapshot_url = self._settings.mcp_snapshot_url or urlunsplit(
             (
                 parsed.scheme,
                 parsed.netloc,
@@ -270,18 +269,26 @@ class ChatService:
                 "",
             )
         )
-        request = UrlRequest(
+        headers = {"Accept": "application/json"}
+        if self._settings.mcp_snapshot_audience:
+            with get_azure_credential() as credential:
+                token = credential.get_token(
+                    f"{self._settings.mcp_snapshot_audience.rstrip('/')}/.default"
+                )
+            headers["Authorization"] = f"Bearer {token.token}"
+        payload = bytearray()
+        with httpx.stream(
+            "GET",
             snapshot_url,
-            headers={"Accept": "application/json"},
-            method="GET",
-        )
-        with urlopen(
-            request,
+            headers=headers,
+            follow_redirects=False,
             timeout=self._governance.settings.operation_timeout_seconds,
         ) as response:
-            payload = response.read(262_145)
-        if len(payload) > 262_144:
-            raise ValueError("MCP governance snapshot exceeded the safe limit.")
+            response.raise_for_status()
+            for chunk in response.iter_bytes():
+                payload.extend(chunk)
+                if len(payload) > 262_144:
+                    raise ValueError("MCP governance snapshot exceeded the safe limit.")
         document = json.loads(payload)
         if not isinstance(document, dict):
             raise ValueError("MCP governance snapshot must be an object.")
@@ -535,9 +542,9 @@ class ChatService:
     ) -> ChatResponse:
         """Invoke the configured Foundry Prompt Agent and apply chat guardrails."""
         messages = [
-            {"role": "system", "content": SYSTEM_INSTRUCTIONS},
+            {"type": "message", "role": "system", "content": SYSTEM_INSTRUCTIONS},
             *[
-                {"role": message.role, "content": message.content}
+                {"type": "message", "role": message.role, "content": message.content}
                 for message in request.messages
             ],
         ]

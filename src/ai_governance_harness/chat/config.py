@@ -7,7 +7,7 @@ from typing import Self
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 load_dotenv()
 
@@ -20,6 +20,8 @@ class ChatSettings(BaseModel):
     host: str = "127.0.0.1"
     port: int = Field(default=8080, ge=1, le=65535)
     mcp_url: str = "http://127.0.0.1:8001/mcp"
+    mcp_snapshot_url: str | None = None
+    mcp_snapshot_audience: str | None = None
     model_deployment: str
     agent_name: str | None = None
     allowed_origins: tuple[str, ...] = (
@@ -72,6 +74,19 @@ class ChatSettings(BaseModel):
             raise ValueError("CHAT_ALLOWED_ORIGINS must contain explicit origins.")
         return origins
 
+    @model_validator(mode="after")
+    def validate_snapshot_access(self) -> Self:
+        """Require a fixed HTTPS endpoint for authenticated snapshots."""
+        if bool(self.mcp_snapshot_url) != bool(self.mcp_snapshot_audience):
+            raise ValueError("MCP snapshot URL and audience must be configured together.")
+        if self.mcp_snapshot_url:
+            self.validate_mcp_url(self.mcp_snapshot_url)
+            if urlparse(self.mcp_snapshot_url).scheme != "https":
+                raise ValueError("Authenticated MCP snapshots require HTTPS.")
+            if not self.mcp_snapshot_audience or not self.mcp_snapshot_audience.strip():
+                raise ValueError("MCP snapshot audience must not be empty.")
+        return self
+
     @classmethod
     def from_environment(cls) -> Self:
         """Load chat settings from environment variables."""
@@ -91,6 +106,8 @@ class ChatSettings(BaseModel):
             host=os.getenv("CHAT_HOST", "127.0.0.1"),
             port=int(os.getenv("CHAT_PORT", "8080")),
             mcp_url=os.getenv("MCP_SERVER_URL", "http://127.0.0.1:8001/mcp"),
+            mcp_snapshot_url=os.getenv("MCP_GOVERNANCE_SNAPSHOT_URL"),
+            mcp_snapshot_audience=os.getenv("MCP_GOVERNANCE_SNAPSHOT_AUDIENCE"),
             model_deployment=os.getenv("AZURE_AI_MODEL_DEPLOYMENT_NAME", ""),
             agent_name=agent_name,
             allowed_origins=origins,

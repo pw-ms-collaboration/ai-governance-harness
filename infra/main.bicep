@@ -58,6 +58,9 @@ param mcpApiAudience string
 @description('Required application role expected by the MCP service.')
 param mcpRequiredRole string
 
+@description('Application role required to read MCP governance snapshots.')
+param mcpSnapshotRole string = 'Mcp.Governance.Read'
+
 @description('Foundry agent identity client ID allowed to call the MCP backend.')
 param foundryAgentIdentityClientId string
 
@@ -77,9 +80,11 @@ var pullIdentityName = '${resourcePrefix}-acr-pull'
 var foundryIdentityName = '${resourcePrefix}-foundry'
 var apimApiName = '${resourcePrefix}-mcp'
 var apimApiPath = '${resourcePrefix}-mcp'
+var apimGovernanceApiName = '${resourcePrefix}-governance'
 var tenantId = tenant().tenantId
 var issuer = '${environment().authentication.loginEndpoint}${tenantId}/v2.0'
 var apimMcpUrl = '${apim.properties.gatewayUrl}/${apimApiPath}/mcp'
+var apimSnapshotUrl = '${apim.properties.gatewayUrl}/${apimGovernanceApiName}/governance/snapshot'
 var image = '${registry.properties.loginServer}/ai-governance-harness:${imageTag}'
 var tags = {
   application: 'ai-governance-harness'
@@ -222,7 +227,7 @@ module mcpApp 'br/public:avm/res/app/container-app:0.23.0' = {
           validation: {
             allowedAudiences: [mcpApiAudience, mcpApiClientId]
             defaultAuthorizationPolicy: {
-              allowedApplications: [foundryAgentIdentityClientId]
+              allowedApplications: [foundryAgentIdentityClientId, foundryWorkloadIdentity.outputs.clientId]
             }
           }
         }
@@ -255,6 +260,7 @@ module mcpApp 'br/public:avm/res/app/container-app:0.23.0' = {
           { name: 'MCP_AUTH_AUDIENCE', value: mcpApiAudience }
           { name: 'MCP_AUTH_AUDIENCES', value: '${mcpApiAudience},${mcpApiClientId}' }
           { name: 'MCP_AUTH_REQUIRED_ROLE', value: mcpRequiredRole }
+          { name: 'MCP_AUTH_SNAPSHOT_ROLE', value: mcpSnapshotRole }
           { name: 'MCP_RESOURCE_URL', value: apimMcpUrl }
           { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', secretRef: 'appinsights-connection' }
         ]
@@ -352,6 +358,8 @@ module chatApp 'br/public:avm/res/app/container-app:0.23.0' = {
           { name: 'CHAT_PORT', value: '8080' }
           { name: 'CHAT_ALLOWED_ORIGINS', value: 'https://${chatAppName}.${managedEnvironment.outputs.defaultDomain}' }
           { name: 'MCP_SERVER_URL', value: apimMcpUrl }
+          { name: 'MCP_GOVERNANCE_SNAPSHOT_URL', value: apimSnapshotUrl }
+          { name: 'MCP_GOVERNANCE_SNAPSHOT_AUDIENCE', value: mcpApiAudience }
           { name: 'CHAT_USE_PROMPT_AGENT', value: 'true' }
           { name: 'FOUNDRY_AGENT_NAME', value: foundryAgentName }
           { name: 'MCP_HOSTED', value: 'true' }
@@ -412,6 +420,9 @@ resource mcpApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2025-09-01-
         <audience>{1}</audience>
         <audience>{2}</audience>
       </audiences>
+      <required-claims>
+        <claim name="roles" match="any"><value>{3}</value></claim>
+      </required-claims>
     </validate-jwt>
     <rate-limit-by-key calls="120" renewal-period="60" counter-key="@(context.Request.IpAddress)" />
   </inbound>
@@ -424,7 +435,20 @@ resource mcpApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2025-09-01-
   <on-error>
     <base />
   </on-error>
-</policies>''', issuer, mcpApiAudience, mcpApiClientId)
+</policies>''', issuer, mcpApiAudience, mcpApiClientId, mcpRequiredRole)
+  }
+}
+
+module governanceApi 'apim-governance-api.bicep' = {
+  name: 'governanceSnapshotApi'
+  params: {
+    apimServiceName: apimServiceName
+    apimApiName: apimGovernanceApiName
+    mcpAppFqdn: mcpApp.outputs.fqdn
+    tenantId: tenantId
+    mcpApiAudience: mcpApiAudience
+    mcpApiClientId: mcpApiClientId
+    snapshotRole: mcpSnapshotRole
   }
 }
 

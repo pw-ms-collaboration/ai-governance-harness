@@ -24,6 +24,9 @@ param mcpApiAudience string
 @description('MCP API application client ID, also accepted as an Entra token audience.')
 param mcpApiClientId string
 
+@description('Application role required to invoke MCP tools.')
+param mcpRequiredRole string = 'Mcp.Tools.Invoke'
+
 resource apim 'Microsoft.ApiManagement/service@2024-05-01' existing = {
   name: apimServiceName
 }
@@ -67,6 +70,9 @@ resource mcpApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2025-09-01-
         <audience>{1}</audience>
         <audience>{2}</audience>
       </audiences>
+      <required-claims>
+        <claim name="roles" match="any"><value>{3}</value></claim>
+      </required-claims>
     </validate-jwt>
     <rate-limit-by-key calls="120" renewal-period="60" counter-key="@(context.Request.IpAddress)" />
   </inbound>
@@ -79,6 +85,6 @@ resource mcpApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2025-09-01-
   <on-error>
     <base />
   </on-error>
-</policies>''', issuer, mcpApiAudience, mcpApiClientId)
+</policies>''', issuer, mcpApiAudience, mcpApiClientId, mcpRequiredRole)
   }
 }

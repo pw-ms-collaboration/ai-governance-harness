@@ -52,6 +52,7 @@ class ServerSettings(BaseModel):
     auth_audiences: tuple[str, ...] = ()
     auth_required_scope: str | None = None
     auth_required_role: str | None = None
+    auth_snapshot_role: str | None = None
     resource_url: str | None = None
     max_request_body_size: int = Field(default=1_048_576, ge=1, le=4_194_304)
     rate_limit_capacity: int = Field(default=60, ge=1, le=10_000)
@@ -151,6 +152,7 @@ class ServerSettings(BaseModel):
             auth_audiences=audiences,
             auth_required_scope=os.getenv("MCP_AUTH_REQUIRED_SCOPE"),
             auth_required_role=os.getenv("MCP_AUTH_REQUIRED_ROLE"),
+            auth_snapshot_role=os.getenv("MCP_AUTH_SNAPSHOT_ROLE"),
             resource_url=os.getenv("MCP_RESOURCE_URL"),
             max_request_body_size=int(
                 os.getenv("MCP_MAX_REQUEST_BODY_SIZE", "1048576")

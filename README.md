@@ -717,7 +717,7 @@ Failed and denied browser turns remain visible to the user but are removed from
 the active request history, so a rejected intent cannot contaminate the next
 independent question.
 
-### Business-unit policy attribution
+### Policy origin attribution
 
 The synthetic [BU policy source](./src/ai_governance_harness/governance/policies/superannuation-ba-policy-source.yaml)
 documents `BU-SUPER-001`. Enforcement remains in
@@ -728,6 +728,10 @@ The adapter validates these bounded identifiers at startup and attaches them
 only to the matched rule. Descriptions are not parsed for attribution.
 
 The governance panel shows policy origin in recent decisions and active rules.
+The Observability tab's Policy activity table also shows Policy origin
+(layer, ID and version) and Policy source (the reviewed YAML basename).
+The supported layers are `business-unit`, `enterprise`, `identity`, and
+`regulation`. These tags attribute a decision; they do not change enforcement.
 Unmapped rules, default denials, and external provider denials are not attributed
 to a BU policy. Tagged allow rules indicate which boundary passed, not a
 compliance certification. Changing the source document alone cannot change
@@ -735,8 +739,22 @@ enforcement.
 
 The UI labels denials without specific provenance as "System policy", including
 generic scope refusals and default denials. This is a broad presentation label,
-not additional policy-source metadata; specific BU provenance takes precedence.
+not additional policy-source metadata; specific matched-rule provenance takes precedence.
 Untagged allow rules remain "Not attributed".
+
+The [identity policy source](./src/ai_governance_harness/governance/policies/identity-policy-source.yaml)
+documents `IDENTITY-001`. Explicit `pre_tool` identity-deny rules identify missing
+execution identity, incompatible actor/token combinations, disallowed staff
+roles, and analyst/reporting member-tool restrictions. They preserve the existing
+allow/deny matrix. Authentication failures are rejected before AGT and do not
+appear as matched identity-policy decisions. Unknown tool actions still fall
+through to System policy. Where several deny rules match, the displayed origin
+belongs to AGT's selected rule, not a list of every applicable policy.
+
+Regulation tagging is supported, but no current rule is assigned a regulatory
+origin. Add a reviewed source and an approved rule-to-control mapping before
+using that layer. Existing fictional business-unit policies are not APRA CPS
+requirements and retain their business-unit origin.
 
 Governance spans expose `governance.policy.layer`, `governance.policy.id`,
 `governance.policy.version`, and `governance.policy.source`. Decision counters
@@ -746,6 +764,9 @@ time-series churn. Structured decision logs allowlist `policy_layer`,
 loaded policy, never prompts, member records, or caller-supplied policy data.
 Existing Azure Monitor export configuration carries these OTel attributes;
 no Azure credentials are needed for offline validation.
+Azure history projects the four provenance fields into bounded, validated rows.
+Older untagged spans remain unattributed; current YAML is never used to infer
+the origin of a historical decision.
 
 Demo chat errors and refusal notices still show the existing technical reason.
 BU provenance is not added to the chat response. Hiding technical errors for a

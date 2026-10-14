@@ -1,0 +1,40 @@
+# Source documentation and traceability only; not a toolkit execution policy.
+kind: IdentityPolicySource
+policy_id: IDENTITY-001
+version: "1.0"
+title: Agent and staff tool authorization
+status: local-mock-mvp
+policy_layer: identity
+restriction: >
+  Chat orchestration requires the interactive actor. At MCP, interactive actors
+  require user tokens and reporting actors require app tokens. Analysts may use
+  aggregate tools only; retention specialists may also use member tools and
+  prepare outreach subject to eligibility and approval. Other or missing staff
+  roles have no tool access. Reporting actors may use aggregate tools only.
+  Token-less local callers follow the same staff-role matrix.
+runtime_policy: default.yaml
+rule_mappings:
+  - rule: deny-tool-without-known-boundary
+    purpose: Block known tools when the execution boundary is missing or unknown.
+  - rule: deny-chat-tool-without-interactive-actor
+    purpose: Block chat tool orchestration without the interactive actor.
+  - rule: deny-mcp-tool-without-known-actor
+    purpose: Block MCP tools without a recognized actor.
+  - rule: deny-mcp-interactive-tool-without-user-token
+    purpose: Block interactive MCP tools without a user token.
+  - rule: deny-mcp-reporting-tool-without-app-token
+    purpose: Block reporting MCP tools without an app token.
+  - rule: deny-staff-tool-without-permitted-role
+    purpose: Block tools for missing or non-permitted staff roles.
+  - rule: deny-analyst-member-tools
+    purpose: Restrict analysts to aggregate tools.
+  - rule: deny-reporting-member-tools
+    purpose: Restrict reporting agents to aggregate tools.
+limitations:
+  - Identity deny rules make existing restrictions explicit; they do not grant access.
+  - HTTP authentication failures are rejected before AGT and are not matched policy decisions.
+  - Unknown tool actions remain unattributed default denials.
+  - Business eligibility denials can take precedence when multiple deny rules match.
+  - Local mock identities do not prove real Entra authentication or role assignment.
+  - This is an application authorization policy, not a regulatory control mapping.
+  - Editing this source does not change enforcement; runtime rules need explicit updates and tests.

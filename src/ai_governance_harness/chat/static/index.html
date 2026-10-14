@@ -427,7 +427,7 @@
               </div>
               <span id="policy-feed-count" class="genai-privacy">No data</span>
             </div>
-            <p class="genai-intro">Which rule made each recent decision, at which stage, and in which agent run? Rows come from retained traces, so sampling and the 100-span limit mean this is not a complete audit trail. Use Policy hotspots for exact totals.</p>
+            <p class="genai-intro">Which rule and policy origin made each recent decision, at which stage, and in which agent run? Policy source names identify the reviewed source documents. Untagged denials show System policy; older traces cannot be attributed retroactively. Rows come from retained traces, so sampling and the 100-span limit mean this is not a complete audit trail. Use Policy hotspots for exact totals.</p>
             <div class="policy-log-toolbar" role="group" aria-label="Filter policy decisions">
               <label for="policy-feed-filter">Show</label>
               <select id="policy-feed-filter">
@@ -449,6 +449,7 @@
                 <caption>Newest first. Select a run to open it in GenAI agent traces.</caption>
                 <thead><tr>
                   <th scope="col">Time</th><th scope="col">Outcome</th><th scope="col">Rule</th>
+                  <th scope="col">Policy origin</th><th scope="col">Policy source</th>
                   <th scope="col">Stage</th><th scope="col">Service</th><th scope="col">Duration</th>
                   <th scope="col">Agent run</th>
                 </tr></thead>
@@ -573,8 +574,8 @@
       <p>Synthetic demonstration data only. External assets are not tracked or verified.</p>
     </footer>
     <script src="/static/tabs.js?v=2" defer></script>
-    <script src="/static/app.js?v=identity-insights" type="module"></script>
-    <script src="/static/insights.js?v=tokens-1" defer></script>
+    <script src="/static/app.js?v=policy-origin-1" type="module"></script>
+    <script src="/static/insights.js?v=policy-origin-1" type="module"></script>
     <script src="/static/flow.js?v=3" defer></script>
   </body>
 </html>

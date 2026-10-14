@@ -87,6 +87,80 @@ rules:
     stage: pre_input
     condition: "action.type == 'agent.startup'"
     action: allow
+  # Explicit identity denials attribute existing restrictions without widening access.
+  # Keep each OR branch complete: AGT conditions do not support parentheses.
+  - name: deny-tool-without-known-boundary
+    provenance:
+      layer: identity
+      policy_id: IDENTITY-001
+      policy_version: "1.0"
+      source: identity-policy-source.yaml
+    stage: pre_tool
+    condition: "action.type in ['get_member_profile', 'get_member_disengagement_signals', 'get_cohort_churn_analytics', 'get_fum_outflow_summary', 'prepare_member_outreach_case'] and governance.boundary != 'chat' and governance.boundary != 'mcp' and governance.boundary != 'local'"
+    action: deny
+  - name: deny-chat-tool-without-interactive-actor
+    provenance:
+      layer: identity
+      policy_id: IDENTITY-001
+      policy_version: "1.0"
+      source: identity-policy-source.yaml
+    stage: pre_tool
+    condition: "governance.boundary == 'chat' and governance.actor != 'interactive' and action.type in ['get_member_profile', 'get_member_disengagement_signals', 'get_cohort_churn_analytics', 'get_fum_outflow_summary', 'prepare_member_outreach_case']"
+    action: deny
+  - name: deny-mcp-tool-without-known-actor
+    provenance:
+      layer: identity
+      policy_id: IDENTITY-001
+      policy_version: "1.0"
+      source: identity-policy-source.yaml
+    stage: pre_tool
+    condition: "governance.boundary == 'mcp' and governance.actor != 'interactive' and governance.actor != 'reporting' and action.type in ['get_member_profile', 'get_member_disengagement_signals', 'get_cohort_churn_analytics', 'get_fum_outflow_summary', 'prepare_member_outreach_case']"
+    action: deny
+  - name: deny-mcp-interactive-tool-without-user-token
+    provenance:
+      layer: identity
+      policy_id: IDENTITY-001
+      policy_version: "1.0"
+      source: identity-policy-source.yaml
+    stage: pre_tool
+    condition: "governance.boundary == 'mcp' and governance.actor == 'interactive' and governance.token_type != 'user' and action.type in ['get_member_profile', 'get_member_disengagement_signals', 'get_cohort_churn_analytics', 'get_fum_outflow_summary', 'prepare_member_outreach_case']"
+    action: deny
+  - name: deny-mcp-reporting-tool-without-app-token
+    provenance:
+      layer: identity
+      policy_id: IDENTITY-001
+      policy_version: "1.0"
+      source: identity-policy-source.yaml
+    stage: pre_tool
+    condition: "governance.boundary == 'mcp' and governance.actor == 'reporting' and governance.token_type != 'app' and action.type in ['get_member_profile', 'get_member_disengagement_signals', 'get_cohort_churn_analytics', 'get_fum_outflow_summary', 'prepare_member_outreach_case']"
+    action: deny
+  - name: deny-staff-tool-without-permitted-role
+    provenance:
+      layer: identity
+      policy_id: IDENTITY-001
+      policy_version: "1.0"
+      source: identity-policy-source.yaml
+    stage: pre_tool
+    condition: "governance.boundary == 'mcp' and governance.actor == 'interactive' and governance.staff_role != 'analyst' and governance.staff_role != 'retention_specialist' and action.type in ['get_member_profile', 'get_member_disengagement_signals', 'get_cohort_churn_analytics', 'get_fum_outflow_summary', 'prepare_member_outreach_case'] or governance.boundary == 'local' and governance.staff_role != 'analyst' and governance.staff_role != 'retention_specialist' and action.type in ['get_member_profile', 'get_member_disengagement_signals', 'get_cohort_churn_analytics', 'get_fum_outflow_summary', 'prepare_member_outreach_case']"
+    action: deny
+  - name: deny-analyst-member-tools
+    provenance:
+      layer: identity
+      policy_id: IDENTITY-001
+      policy_version: "1.0"
+      source: identity-policy-source.yaml
+    stage: pre_tool
+    condition: "governance.boundary == 'mcp' and governance.actor == 'interactive' and governance.staff_role == 'analyst' and action.type in ['get_member_profile', 'get_member_disengagement_signals', 'prepare_member_outreach_case'] or governance.boundary == 'local' and governance.staff_role == 'analyst' and action.type in ['get_member_profile', 'get_member_disengagement_signals', 'prepare_member_outreach_case']"
+    action: deny
+  - name: deny-reporting-member-tools
+    provenance:
+      layer: identity
+      policy_id: IDENTITY-001
+      policy_version: "1.0"
+      source: identity-policy-source.yaml
+    stage: pre_tool
+    condition: "governance.boundary == 'mcp' and governance.actor == 'reporting' and action.type in ['get_member_profile', 'get_member_disengagement_signals', 'prepare_member_outreach_case']"
+    action: deny
   - name: allow-chat-input
     description: "BU-SUPER-001 v1.0; source: superannuation-ba-policy-source.yaml; requires classified safe intent and sufficient confidence."
     provenance:

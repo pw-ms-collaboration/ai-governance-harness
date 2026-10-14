@@ -34,6 +34,7 @@ from ai_governance_harness.governance.snapshot import (
     build_governance_snapshot,
     merge_governance_snapshots,
 )
+from ai_governance_harness.governance.telemetry import provenance_attributes
 from ai_governance_harness.mcp_server import tools
 from ai_governance_harness.mcp_server.telemetry import PrivacySafeJsonFormatter
 
@@ -120,7 +121,6 @@ def test_given_tagged_rule_when_evaluating_then_attributes_event_and_snapshot(
 @pytest.mark.parametrize(
     ("action", "point", "data"),
     [
-        ("get_member_profile", LifecyclePoint.PRE_TOOL, {}),
         ("chat.input", LifecyclePoint.INPUT, {"request_intent": "unknown"}),
         ("shell.execute", LifecyclePoint.PRE_TOOL, {}),
     ],
@@ -193,8 +193,14 @@ def test_given_invalid_remote_provenance_when_merging_then_drops_event() -> None
     assert "../private.yaml" not in json.dumps(merged)
 
 
-def test_given_bu_source_when_loading_then_all_mappings_match_active_provenance() -> None:
-    source_path = DEFAULT_POLICY_PATH.with_name("superannuation-ba-policy-source.yaml")
+@pytest.mark.parametrize("source_name", [
+    "superannuation-ba-policy-source.yaml",
+    "identity-policy-source.yaml",
+])
+def test_given_policy_source_when_loading_then_all_mappings_match_active_provenance(
+    source_name: str,
+) -> None:
+    source_path = DEFAULT_POLICY_PATH.with_name(source_name)
     source = yaml.safe_load(source_path.read_text(encoding="utf-8"))
     engine = GovernanceEngine(_settings())
     expected = PolicyProvenance(
@@ -202,8 +208,54 @@ def test_given_bu_source_when_loading_then_all_mappings_match_active_provenance(
         policy_version=source["version"], source=source_path.name,
     )
 
-    for name in [item["rule"] for item in source["rule_mappings"]] + source["supporting_rules"]:
+    for name in [item["rule"] for item in source["rule_mappings"]] + source.get("supporting_rules", []):
         assert engine.rule_provenance(name) == expected
+
+
+@pytest.mark.parametrize("layer", ["identity", "regulation", "enterprise", "business-unit"])
+def test_given_supported_origin_when_evaluating_then_preserves_attribution(
+    tmp_path: Path, layer: str,
+) -> None:
+    document = yaml.safe_load(DEFAULT_POLICY_PATH.read_text(encoding="utf-8"))
+    expected = {
+        "layer": layer, "policy_id": "TEST-001", "policy_version": "1.0",
+        "source": "test-policy-source.yaml",
+    }
+    document["rules"][0]["provenance"] = expected
+    policy_path = tmp_path / "tagged.yaml"
+    policy_path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    engine = GovernanceEngine(_settings(policy_path=policy_path))
+
+    decision = engine.evaluate(
+        LifecyclePoint.PRE_TOOL, "prepare_member_outreach_case",
+        context=GovernanceContext(
+            boundary="mcp", actor="interactive", token_type="user",
+            staff_role="retention_specialist",
+        ),
+        policy_data={"retention_handling_status": "specialist_required"},
+    )
+
+    assert decision.allowed is False
+    assert decision.matched_rule == "deny-outreach-requiring-specialist-handling"
+    assert decision.provenance is not None
+    assert decision.provenance.model_dump() == expected
+    assert governance_events.snapshot()["recent_events"][0]["provenance"] == expected
+    assert provenance_attributes(decision.provenance) == {
+        "governance.policy.layer": layer,
+        "governance.policy.id": "TEST-001",
+        "governance.policy.version": "1.0",
+        "governance.policy.source": "test-policy-source.yaml",
+    }
+
+
+def test_given_default_policy_when_inspecting_then_regulatory_mappings_are_not_invented() -> None:
+    engine = GovernanceEngine(_settings())
+    snapshot = build_governance_snapshot(engine, source="chat")
+
+    assert all(
+        rule["provenance"] is None or rule["provenance"]["layer"] != "regulation"
+        for rule in snapshot["policy"]["rules"]
+    )
 
 
 def test_given_denied_policy_when_requiring_allowed_then_exposes_decision() -> None:

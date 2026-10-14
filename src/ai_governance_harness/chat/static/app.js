@@ -1,5 +1,7 @@
 "use strict";
 
+import { provenanceLabel } from "./policy-origin.js";
+
 const form = document.querySelector("#chat-form");
 const input = document.querySelector("#chat-input");
 const sendButton = document.querySelector("#send-button");
@@ -372,15 +374,6 @@ function appendTableCell(row, value, { code = false } = {}) {
     cell.textContent = String(value);
   }
   row.append(cell);
-}
-
-function provenanceLabel(provenance, { includeSource = false, action = null } = {}) {
-  if (!provenance) {
-    return action === "deny" ? "System policy" : "Not attributed";
-  }
-  const layer = provenance.layer === "business-unit" ? "Business unit" : "Enterprise";
-  const label = `${layer}: ${provenance.policy_id} v${provenance.policy_version}`;
-  return includeSource ? `${label} (${provenance.source})` : label;
 }
 
 function renderEvents(events) {

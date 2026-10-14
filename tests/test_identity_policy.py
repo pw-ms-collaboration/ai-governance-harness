@@ -82,6 +82,12 @@ def test_given_all_identity_combinations_when_evaluating_then_exact_matrix() -> 
             policy_data={"retention_handling_status": "routine_permitted"},
         )
         assert result.allowed == expected, (context, tool, result)
+        if not expected:
+            assert result.matched_rule is not None
+            assert result.matched_rule.startswith("deny-"), (context, tool, result)
+            assert result.provenance is not None
+            assert result.provenance.layer == "identity"
+            assert result.provenance.policy_id == "IDENTITY-001"
         if tool == "prepare_member_outreach_case":
             for status in (None, "unknown", "specialist_required", "duplicate_open"):
                 assert not engine.evaluate(

@@ -26,7 +26,7 @@ class PolicyProvenance(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
-    layer: Literal["enterprise", "business-unit"]
+    layer: Literal["enterprise", "business-unit", "identity", "regulation"]
     policy_id: str = Field(
         min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$"
     )

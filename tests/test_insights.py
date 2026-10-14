@@ -382,6 +382,94 @@ def test_given_policy_span_with_rule_when_reading_then_rule_is_preserved(azure_r
     assert (row.rule, row.stage) == ("deny-out-of-scope-request", "output")
 
 
+@pytest.mark.parametrize("layer", ["identity", "regulation", "enterprise", "business-unit"])
+def test_given_tagged_span_when_reading_then_policy_origin_is_preserved(
+    azure_response, layer: str,
+) -> None:
+    azure_response(document([[
+        "span", insights.ROLES[1], "evaluate.governance.policy", "deny",
+        layer, "TEST-001", "1.0", "test-policy-source.yaml",
+    ]], ["kind", "service", "name", "outcome", "policy_layer",
+         "policy_id", "policy_version", "policy_source"]))
+
+    row = insights.read_history(APP_ID, 1)[0]
+
+    assert (row.policy_layer, row.policy_id, row.policy_version, row.policy_source) == (
+        layer, "TEST-001", "1.0", "test-policy-source.yaml",
+    )
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("policy_layer", "unknown"),
+    ("policy_id", "private@example.com"),
+    ("policy_id", "x" * 65),
+    ("policy_version", ""),
+    ("policy_source", "../private.yaml"),
+    ("policy_source", "https://private.example/source.yaml"),
+])
+def test_given_invalid_origin_when_reading_then_rejects_without_leaking(
+    azure_response, field: str, value: str,
+) -> None:
+    row = {
+        "kind": "span", "service": insights.ROLES[1],
+        "name": "evaluate.governance.policy", "outcome": "deny",
+        "policy_layer": "identity", "policy_id": "IDENTITY-001",
+        "policy_version": "1.0", "policy_source": "identity-policy-source.yaml",
+        field: value,
+    }
+    azure_response(document([list(row.values())], list(row)))
+
+    with pytest.raises(insights.InsightsUnavailableError, match="invalid history metadata") as error:
+        insights.read_history(APP_ID, 1)
+
+    assert "private" not in str(error.value)
+
+
+def test_given_partial_origin_when_reading_then_rejects(azure_response) -> None:
+    azure_response(document([[
+        "span", insights.ROLES[1], "evaluate.governance.policy", "identity",
+    ]], ["kind", "service", "name", "policy_layer"]))
+
+    with pytest.raises(insights.InsightsUnavailableError, match="invalid history metadata"):
+        insights.read_history(APP_ID, 1)
+
+
+def test_given_legacy_span_when_reading_then_does_not_infer_origin(azure_response) -> None:
+    azure_response(document([[
+        "span", insights.ROLES[1], "evaluate.governance.policy", "deny", "deny-analyst-member-tools",
+    ]], ["kind", "service", "name", "outcome", "rule"]))
+
+    row = insights.read_history(APP_ID, 1)[0]
+
+    assert (row.policy_layer, row.policy_id, row.policy_version, row.policy_source) == ("", "", "", "")
+
+
+def test_given_history_query_when_projecting_spans_then_includes_policy_origin() -> None:
+    query = insights.history_query(1)
+
+    for suffix in ("layer", "id", "version", "source"):
+        assert f'customDimensions["governance.policy.{suffix}"]' in query
+    assert "policy_layer, policy_id, policy_version, policy_source," in query
+
+
+def test_given_ui_when_loaded_then_policy_origin_helper_is_shared_and_served() -> None:
+    client = TestClient(build_chat_app(_settings()))
+
+    helper = client.get("/static/policy-origin.js")
+    page = client.get("/").text
+    app_script = client.get("/static/app.js").text
+    insights_script = client.get("/static/insights.js").text
+
+    assert helper.status_code == 200
+    assert helper.headers["cache-control"] == "no-store"
+    assert 'identity: "Identity"' in helper.text
+    assert 'regulation: "Regulation"' in helper.text
+    assert '<th scope="col">Policy source</th>' in page
+    assert 'src="/static/insights.js?v=policy-origin-1" type="module"' in page
+    for script in (app_script, insights_script):
+        assert 'import { provenanceLabel } from "./policy-origin.js";' in script
+
+
 def test_given_token_usage_when_querying_then_buckets_by_model_and_reads_span_usage() -> None:
     query = insights.history_query(24)
 

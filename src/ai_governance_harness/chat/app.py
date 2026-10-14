@@ -126,6 +126,9 @@ def build_chat_app(
     async def insights_javascript(_: Request) -> FileResponse:
         return FileResponse(STATIC_DIR / "insights.js", media_type="text/javascript")
 
+    async def policy_origin_javascript(_: Request) -> FileResponse:
+        return FileResponse(STATIC_DIR / "policy-origin.js", media_type="text/javascript")
+
     async def tabs_javascript(_: Request) -> FileResponse:
         return FileResponse(STATIC_DIR / "tabs.js", media_type="text/javascript")
 
@@ -231,6 +234,7 @@ def build_chat_app(
             Route("/static/app.css", stylesheet, methods=["GET"]),
             Route("/static/app.js", javascript, methods=["GET"]),
             Route("/static/insights.js", insights_javascript, methods=["GET"]),
+            Route("/static/policy-origin.js", policy_origin_javascript, methods=["GET"]),
             Route("/static/tabs.js", tabs_javascript, methods=["GET"]),
             Route("/static/flow.js", flow_javascript, methods=["GET"]),
             Route("/api/chat", chat, methods=["POST"]),

@@ -1,5 +1,7 @@
 "use strict";
 
+import { provenanceLabel } from "./policy-origin.js";
+
 (() => {
   const button = document.querySelector("#refresh-insights");
   const range = document.querySelector("#insights-range");
@@ -128,7 +130,7 @@
     if (!rows.length) {
       const row = document.createElement("tr");
       const empty = element("td", policySpans.length ? "No decisions match this filter." : "No retained policy spans in this window.");
-      empty.colSpan = 7;
+      empty.colSpan = 9;
       row.append(empty);
       body.append(row);
       return;
@@ -141,6 +143,12 @@
       outcomeCell.append(badge);
       const ruleCell = document.createElement("td");
       ruleCell.append(span.rule ? element("code", span.rule) : element("span", "Not recorded", "muted"));
+      const provenance = span.policy_layer ? {
+        layer: span.policy_layer,
+        policy_id: span.policy_id,
+        policy_version: span.policy_version,
+        source: span.policy_source,
+      } : null;
       const runCell = document.createElement("td");
       if (span.operation_id && runs.has(span.operation_id)) {
         const link = element("button", `View run ${span.operation_id.slice(0, 8)}`, "policy-run-link");
@@ -153,6 +161,8 @@
       row.append(
         element("td", new Date(span.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })),
         outcomeCell, ruleCell,
+        element("td", provenanceLabel(provenance, { action: span.outcome })),
+        element("td", provenance ? provenance.source : "Not recorded", provenance ? "" : "muted"),
         element("td", span.stage ? stageLabel(span.stage) : "Not recorded", span.stage ? "stage-cell" : "muted"),
         element("td", span.service.replace("ai-governance-harness-", "")),
         element("td", span.duration_ms === null || span.duration_ms === undefined ? "Unknown" : span.duration_ms < 1 ? "< 1 ms" : formatDuration(span.duration_ms), "num"),

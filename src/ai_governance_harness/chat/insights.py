@@ -10,7 +10,7 @@ import re
 import ssl
 import time
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Literal, Self
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from uuid import UUID
@@ -18,7 +18,9 @@ from uuid import UUID
 import anyio
 from azure.core.exceptions import ClientAuthenticationError
 from azure.identity import AzureCliCredential
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+
+from ai_governance_harness.governance.models import PolicyProvenance
 
 logger = logging.getLogger(__name__)
 ROLES = ("ai-governance-harness-chat", "ai-governance-harness-mcp")
@@ -76,11 +78,28 @@ class HistoryRow(BaseModel):
     stage: str = Field(default="", max_length=24, pattern=r"^[a-z_]*$")
     policy: str = Field(default="", max_length=64, pattern=r"^[A-Za-z0-9._-]*$")
     rule: str = Field(default="", max_length=64, pattern=r"^[A-Za-z0-9._-]*$")
+    policy_layer: str = Field(default="", max_length=32)
+    policy_id: str = Field(default="", max_length=64)
+    policy_version: str = Field(default="", max_length=32)
+    policy_source: str = Field(default="", max_length=128)
     model: str = Field(default="", max_length=64, pattern=r"^[A-Za-z0-9._-]*$")
     input_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, ge=0)
     cached_tokens: int | None = Field(default=None, ge=0)
     reasoning_tokens: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_provenance(self) -> Self:
+        """Accept complete bounded attribution or an entirely untagged row."""
+        provenance = {
+            "layer": self.policy_layer,
+            "policy_id": self.policy_id,
+            "policy_version": self.policy_version,
+            "source": self.policy_source,
+        }
+        if any(provenance.values()):
+            PolicyProvenance.model_validate(provenance)
+        return self
 
 
 def history_query(hours: int) -> str:
@@ -130,11 +149,14 @@ let spans = union
 | extend decision=tostring(customDimensions["governance.decision"])
 | extend rule=tostring(customDimensions["governance.rule.name"]), stage=tostring(customDimensions["governance.lifecycle.point"])
 | extend rule=iff(rule matches regex @"{RULE_PATTERN}", rule, ""), stage=iff(stage matches regex @"^[a-z_]{{1,24}}$", stage, "")
+| extend policy_layer=tostring(customDimensions["governance.policy.layer"]), policy_id=tostring(customDimensions["governance.policy.id"])
+| extend policy_version=tostring(customDimensions["governance.policy.version"]), policy_source=tostring(customDimensions["governance.policy.source"])
 | extend model=tostring(customDimensions["gen_ai.response.model"])
 | extend model=iff(model matches regex @"{RULE_PATTERN}", model, "")
 | extend input_tokens=toint(customDimensions["gen_ai.usage.input_tokens"]), output_tokens=toint(customDimensions["gen_ai.usage.output_tokens"])
 | extend cached_tokens=toint(customDimensions["gen_ai.usage.cache_read.input_tokens"]), reasoning_tokens=toint(customDimensions["gen_ai.usage.reasoning.output_tokens"])
 | project ['kind']="span", service=cloud_RoleName, name, timestamp, rule, stage, model,
+policy_layer, policy_id, policy_version, policy_source,
 input_tokens, output_tokens, cached_tokens, reasoning_tokens,
 duration_ms=todouble(duration), outcome=case(name == "evaluate.governance.policy" and decision in ("allow", "deny", "require_approval"), decision, success == true, "success", success == false, "failure", "unknown"),
 operation_id=operation_Id, span_id=id, parent_id=operation_ParentId;

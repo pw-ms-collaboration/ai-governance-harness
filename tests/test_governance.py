@@ -275,6 +275,16 @@ def test_given_external_denial_when_recording_then_enforces_and_counts_it(
             "deny-external-security-recommendation",
         ),
         (
+            {
+                "request_intent": "financial_recommendation",
+                "advice_subject": "general_audience",
+                "financial_action": "allocate",
+                "product_scope": "superannuation_option",
+            },
+            False,
+            "deny-general-financial-recommendation",
+        ),
+        (
             {"classification_status": "unavailable"},
             False,
             "deny-unclassified-chat-input",
@@ -596,3 +606,80 @@ def test_policy_evaluation_p95_is_below_100_ms() -> None:
 
     p95 = statistics.quantiles(durations, n=100)[94]
     assert p95 < 100
+
+
+@pytest.mark.parametrize(
+    ("action", "policy_data", "expected_rule"),
+    [
+        ("shell.execute", {"tool_status": "unregistered"}, "deny-unregistered-tool"),
+        (
+            "prepare_member_outreach_case",
+            {"tool_known": True},
+            "deny-outreach-without-eligibility-facts",
+        ),
+        (
+            "prepare_member_outreach_case",
+            {"retention_handling_status": "not_a_status"},
+            "deny-outreach-without-eligibility-facts",
+        ),
+        (
+            "prepare_member_outreach_case",
+            {"retention_handling_status": "routine_permitted"},
+            "allow-chat-eligible-outreach-case",
+        ),
+    ],
+)
+def test_given_pre_tool_facts_when_evaluating_then_named_rule_matches(
+    action: str,
+    policy_data: dict[str, object],
+    expected_rule: str,
+) -> None:
+    # Arrange
+    engine = GovernanceEngine(_settings())
+    context = GovernanceContext(boundary="chat", actor="interactive")
+
+    # Act
+    decision = engine.evaluate(
+        LifecyclePoint.PRE_TOOL, action, policy_data=policy_data, context=context,
+    )
+
+    # Assert
+    assert decision.matched_rule == expected_rule
+
+
+def test_given_every_classification_when_evaluating_input_then_a_rule_matches() -> None:
+    # Arrange
+    from itertools import product
+
+    from ai_governance_harness.guardrails.advice_classifier import (
+        AdviceSubject,
+        ClassificationConfidence,
+        FinancialAction,
+        ProductScope,
+        RequestIntent,
+    )
+
+    engine = GovernanceEngine(_settings())
+    unmatched = []
+
+    # Act
+    for intent, subject, action, scope, confidence in product(
+        RequestIntent, AdviceSubject, FinancialAction, ProductScope,
+        ClassificationConfidence,
+    ):
+        policy_data = {
+            "classification_status": "classified",
+            "request_intent": intent.value,
+            "advice_subject": subject.value,
+            "financial_action": action.value,
+            "product_scope": scope.value,
+            "confidence": confidence.value,
+        }
+        decision = engine.evaluate(
+            LifecyclePoint.INPUT, "chat.input", policy_data=policy_data,
+        )
+        if decision.matched_rule is None:
+            unmatched.append(policy_data)
+
+    # Assert
+    assert unmatched == []

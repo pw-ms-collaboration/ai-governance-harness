@@ -629,8 +629,8 @@ def test_given_flow_script_when_requested_then_served_without_html_injection() -
     assert response.headers["content-type"].startswith("text/javascript")
     assert "innerHTML" not in response.text
     assert "/api/governance/snapshot" in response.text
-    assert "setOutcomeFilter" in response.text
-    assert "activeOutcome" in response.text
+    assert "function setFilter(" in response.text
+    assert "applyFilterState" in response.text
 
 
 def test_given_observability_tab_when_loaded_then_request_flow_shows_every_outcome() -> None:

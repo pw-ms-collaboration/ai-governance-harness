@@ -47,6 +47,22 @@ rules:
     stage: pre_tool
     condition: "action.type == 'prepare_member_outreach_case' and data.retention_handling_status in ['review_required', 'unknown']"
     action: deny
+  - name: deny-outreach-without-eligibility-facts
+    description: "BU-SUPER-002 v1.0; source: superannuation-outreach-policy-source.yaml; missing or unrecognised eligibility facts."
+    provenance:
+      layer: business-unit
+      policy_id: BU-SUPER-002
+      policy_version: "1.0"
+      source: superannuation-outreach-policy-source.yaml
+    stage: pre_tool
+    # The toolkit evaluates `not in` as false, so each known status is excluded with `!=`.
+    condition: "action.type == 'prepare_member_outreach_case' and data.retention_handling_status != 'routine_permitted' and data.retention_handling_status != 'duplicate_open' and data.retention_handling_status != 'specialist_required' and data.retention_handling_status != 'account_exited' and data.retention_handling_status != 'review_required' and data.retention_handling_status != 'unknown'"
+    action: deny
+  - name: deny-unregistered-tool
+    description: "Model selected a tool that is not registered for browser chat."
+    stage: pre_tool
+    condition: "data.tool_status == 'unregistered'"
+    action: deny
   - name: deny-identified-member-financial-recommendation
     description: "BU-SUPER-001 v1.0; source: superannuation-ba-policy-source.yaml; request advice boundary."
     provenance:
@@ -60,6 +76,11 @@ rules:
   - name: deny-external-security-recommendation
     stage: pre_input
     condition: "action.type == 'chat.input' and data.request_intent == 'financial_recommendation' and data.product_scope == 'external_security'"
+    action: deny
+  - name: deny-general-financial-recommendation
+    description: "Financial recommendations are out of scope even when not tied to an identified member."
+    stage: pre_input
+    condition: "action.type == 'chat.input' and data.request_intent == 'financial_recommendation' and data.advice_subject != 'identified_member' and data.product_scope != 'external_security'"
     action: deny
   - name: deny-unclassified-chat-input
     stage: pre_input

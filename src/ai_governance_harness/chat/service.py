@@ -35,6 +35,7 @@ from ai_governance_harness.governance import (
     get_governance_engine,
 )
 from ai_governance_harness.governance.reliability import ReliabilityGuard
+from ai_governance_harness.governance.telemetry import guardrail_span
 from ai_governance_harness.governance.retention import RetentionReview
 from ai_governance_harness.governance.snapshot import (
     build_governance_snapshot,
@@ -745,43 +746,57 @@ class ChatService:
                 source="chat",
             )
 
-            classification_failure_reason: str | None = None
-            try:
-                async def classify_request() -> AdviceRequestClassification:
-                    return await self._advice_classifier.classify(
-                        model_client,
-                        current_user_text=current_user_text,
-                        previous_user_text=previous_user_text,
-                    )
+            with guardrail_span(
+                "advice_request_classifier", LifecyclePoint.INPUT,
+            ) as classifier_check:
+                classification_failure_reason: str | None = None
+                try:
+                    async def classify_request() -> AdviceRequestClassification:
+                        return await self._advice_classifier.classify(
+                            model_client,
+                            current_user_text=current_user_text,
+                            previous_user_text=previous_user_text,
+                        )
 
-                classification = await self._classifier_reliability.call(
-                    classify_request
+                    classification = await self._classifier_reliability.call(
+                        classify_request
+                    )
+                    classification_data = classification.to_policy_data()
+                except AdviceClassificationFailure as exc:
+                    classification_failure_reason = exc.reason
+                    classification_data = classification_failure_policy_data(
+                        exc.reason
+                    )
+                except Exception as exc:
+                    classification_failure_reason = "unavailable"
+                    classification_data = classification_failure_policy_data(
+                        "unavailable"
+                    )
+                    logger.warning(
+                        "Advice classifier unavailable",
+                        extra={"failure_type": type(exc).__name__},
+                    )
+                classification_stop_reason = (
+                    classification_failure_reason
+                    or _classification_stop_reason(classification_data)
                 )
-                classification_data = classification.to_policy_data()
-            except AdviceClassificationFailure as exc:
-                classification_failure_reason = exc.reason
-                classification_data = classification_failure_policy_data(
-                    exc.reason
-                )
-            except Exception as exc:
-                classification_failure_reason = "unavailable"
-                classification_data = classification_failure_policy_data(
-                    "unavailable"
-                )
-                logger.warning(
-                    "Advice classifier unavailable",
-                    extra={"failure_type": type(exc).__name__},
-                )
+                if classification_failure_reason == "filtered":
+                    classifier_check.triggered("filtered")
+                elif classification_failure_reason is not None:
+                    classifier_check.error(classification_failure_reason)
+                elif classification_stop_reason is not None:
+                    classifier_check.triggered(classification_stop_reason)
+                elif (
+                    classification_data.get("request_intent")
+                    == "financial_recommendation"
+                ):
+                    classifier_check.triggered("financial_recommendation")
 
             self._governance.require_allowed(
                 LifecyclePoint.POST_MODEL,
                 "foundry.advice_classifier",
                 policy_data=classification_data,
                 source="chat",
-            )
-            classification_stop_reason = (
-                classification_failure_reason
-                or _classification_stop_reason(classification_data)
             )
             try:
                 self._governance.require_allowed(
@@ -990,6 +1005,11 @@ class ChatService:
                                     recovery_attempted=empty_response_retried,
                                 )
                                 break
+                    with guardrail_span(
+                        "foundry_content_filter", LifecyclePoint.POST_MODEL,
+                    ) as content_filter_check:
+                        if guardrail_code is not None:
+                            content_filter_check.triggered(guardrail_code)
                     if guardrail_code is not None:
                         decision = self._governance.record_external_denial(
                             LifecyclePoint.POST_MODEL,
@@ -1061,9 +1081,17 @@ class ChatService:
                     )
                     for tool_call in assistant_message.tool_calls:
                         tool_name = tool_call.function.name
+                        with guardrail_span(
+                            "tool_allowlist", LifecyclePoint.PRE_TOOL,
+                        ) as allowlist_check:
+                            if tool_name not in tool_by_name:
+                                allowlist_check.triggered("unregistered_tool")
                         if tool_name not in tool_by_name:
                             self._governance.require_allowed(
-                                LifecyclePoint.PRE_TOOL, tool_name, source="chat",
+                                LifecyclePoint.PRE_TOOL,
+                                tool_name,
+                                policy_data={"tool_status": "unregistered"},
+                                source="chat",
                             )
                             raise ChatServiceError(
                                 "The model selected an unknown tool.",
@@ -1147,6 +1175,11 @@ class ChatService:
                                     "Staff must verify the internal case records.",
                                     code="unsafe_tool_result",
                                 ) from None
+                            with guardrail_span(
+                                "outreach_eligibility", LifecyclePoint.PRE_TOOL,
+                            ) as eligibility_check:
+                                if review.status != "routine_permitted":
+                                    eligibility_check.triggered(review.status)
                             policy_data.update(review.policy_data())
                         try:
                             self._governance.require_allowed(
@@ -1255,8 +1288,18 @@ class ChatService:
         )
 
     def _sanitize_response(self, response: str) -> str:
-        scoped = self._wealth_guardrail.sanitize_scope_claims(response)
-        safe, _ = self._advice_guardrail.enforce_advice_boundaries(scoped)
+        with guardrail_span(
+            "whole_of_wealth_scope", LifecyclePoint.OUTPUT,
+        ) as scope_check:
+            scoped = self._wealth_guardrail.sanitize_scope_claims(response)
+            if scoped != response:
+                scope_check.triggered("scope_claim_rewritten")
+        with guardrail_span(
+            "personal_advice_output_filter", LifecyclePoint.OUTPUT,
+        ) as advice_check:
+            safe, violated = self._advice_guardrail.enforce_advice_boundaries(scoped)
+            if violated:
+                advice_check.triggered("personal_advice_replaced")
         return safe
 
     def _finalize_response(
@@ -1266,8 +1309,12 @@ class ChatService:
     ) -> ChatResponse:
         """Apply output guardrails and record the final governance decision."""
         sanitized = self._sanitize_response(response)
-        if _is_scope_refusal(sanitized):
-            sanitized = SCOPE_REFUSAL_MESSAGE
+        with guardrail_span(
+            "scope_refusal", LifecyclePoint.OUTPUT,
+        ) as refusal_check:
+            if _is_scope_refusal(sanitized):
+                sanitized = SCOPE_REFUSAL_MESSAGE
+                refusal_check.triggered("out_of_scope")
         unique_tools = list(dict.fromkeys(tools_used))
         self._governance.require_allowed(
             LifecyclePoint.OUTPUT,

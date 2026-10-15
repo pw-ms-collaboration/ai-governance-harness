@@ -3,13 +3,13 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Role-governed member and aggregate insights using synthetic data and local mock identity">
+    <meta name="description" content="Role-governed member and aggregate insights using synthetic data and local identity">
     <title>Business Analyst Insights Chat</title>
-    <link rel="stylesheet" href="/static/app.css?v=identity-insights">
+    <link rel="stylesheet" href="/static/app.css?v=eval-progress-1">
   </head>
   <body>
     <a class="skip-link" href="#chat-input">Skip to message input</a>
-    <a class="skip-link skip-governance" href="#governance-title">Skip to governance</a>
+    <a class="skip-link skip-governance" href="#governance-panel">Skip to governance</a>
     <header class="site-header">
       <div>
         <p class="eyebrow">AI governance harness</p>
@@ -30,46 +30,33 @@
         <button type="button" role="tab" id="tab-observability" aria-controls="panel-observability" aria-selected="false" tabindex="-1">
           Observability
         </button>
+        <button type="button" role="tab" id="tab-eval" aria-controls="panel-eval" aria-selected="false" tabindex="-1">
+          Eval
+        </button>
       </div>
     </nav>
 
     <main class="app-shell">
       <div id="panel-chat" class="view-panel" role="tabpanel" aria-labelledby="tab-chat">
-      <section class="intro" aria-labelledby="intro-title">
-        <div class="mock-identity">
-          <label for="mock-persona">Mock identity</label>
-          <select id="mock-persona" aria-describedby="identity-help identity-status">
-            <option value="">Choose a persona</option>
-            <option value="analyst">Analyst</option>
-            <option value="retention_specialist">Retention Specialist</option>
-            <option value="compliance_reviewer">Compliance Reviewer</option>
-            <option value="administrator">Administrator</option>
-          </select>
-          <button id="identity-signin" type="button">Sign in (mock)</button>
-          <p id="identity-help">Local simulation, not Microsoft Entra. Changing persona clears the conversation.</p>
-          <p id="identity-status" role="status" aria-live="polite">Choose a mock identity before sending a message.</p>
-        </div>
-        <h2 id="intro-title">Ask a factual question</h2>
-        <p>
-          Look up a synthetic customer's account profile by member ID, such as
-          <code>MEM-001</code>, <code>MEM-002</code>, or <code>MEM-003</code>.
-          Member profiles, churn signals and aggregate insights require the
-          appropriate role. Responses are factual information, not financial advice.
-        </p>
-        <div class="examples" role="group" aria-label="Example questions">
-          <button type="button" class="example" data-question="Show me the account profile for MEM-001.">
-            Profile MEM-001
-          </button>
-          <button type="button" class="example" data-question="What are the churn signals for MEM-002?">
-            Churn signals
-          </button>
-          <button type="button" class="example" data-question="Summarize the cohort churn risk and FUM at risk.">
-            Cohort summary
-          </button>
-        </div>
-      </section>
-
       <div class="workspace">
+        <section class="identity-panel" aria-label="Identity">
+          <label for="mock-persona">Choose identity</label>
+          <div class="mock-identity">
+            <div class="identity-controls">
+              <select id="mock-persona" aria-describedby="identity-help identity-status">
+                <option value="">Choose a persona</option>
+                <option value="analyst">Analyst</option>
+                <option value="retention_specialist">Retention Specialist</option>
+                <option value="compliance_reviewer">Compliance Reviewer</option>
+                <option value="administrator">Administrator</option>
+              </select>
+              <button id="identity-signin" type="button">Sign in</button>
+            </div>
+          </div>
+          <p id="identity-help" class="visually-hidden">Changing persona clears the conversation.</p>
+          <p id="identity-status" class="identity-status" role="status" aria-live="polite">Not signed in.</p>
+        </section>
+
         <section class="conversation" aria-labelledby="conversation-title">
           <div class="conversation-heading">
             <h2 id="conversation-title">Conversation</h2>
@@ -87,6 +74,27 @@
           <p id="activity-status" class="activity" role="status" aria-live="polite"></p>
 
           <form id="chat-form">
+            <div class="prompt-ideas" aria-labelledby="prompt-ideas-title">
+              <div class="prompt-ideas-heading">
+                <span id="prompt-ideas-title">Try a prompt</span>
+                <span>Factual information only</span>
+              </div>
+              <div class="examples" role="group" aria-label="Prompt ideas">
+                <button type="button" class="example" data-question="Show me the account profile for MEM-001.">
+                  Profile MEM-001
+                </button>
+                <button type="button" class="example" data-question="What are the churn signals for MEM-002?">
+                  Churn signals
+                </button>
+                <button type="button" class="example" data-question="Summarize the cohort churn risk and FUM at risk.">
+                  Cohort summary
+                </button>
+              </div>
+              <p class="question-help">
+                Use a synthetic member ID such as <code>MEM-001</code>, <code>MEM-002</code>,
+                or <code>MEM-003</code>. Responses are factual information, not financial advice.
+              </p>
+            </div>
             <label for="chat-input">Your message</label>
             <textarea
               id="chat-input"
@@ -103,6 +111,61 @@
             <button id="send-button" type="submit" disabled>Send message</button>
           </form>
         </section>
+
+        <aside class="access-panel" aria-labelledby="access-preview-title">
+          <header>
+            <p class="eyebrow">Access boundary</p>
+            <h2 id="access-preview-title">Selected-role access</h2>
+          </header>
+          <div id="role-access-preview" class="role-access-preview">
+            <h3 id="selected-role-name">Choose a persona to preview access</h3>
+            <p id="role-access-summary">Role capabilities will appear here before you sign in.</p>
+            <dl class="capability-list">
+              <div>
+                <dt>Aggregate tools</dt>
+                <dd id="role-aggregate" class="access-status neutral">Not selected</dd>
+              </div>
+              <div>
+                <dt>Member tools</dt>
+                <dd id="role-member" class="access-status neutral">Not selected</dd>
+              </div>
+              <div>
+                <dt>Outreach</dt>
+                <dd id="role-outreach" class="access-status neutral">Not selected</dd>
+              </div>
+            </dl>
+            <p class="preview-note">Preview only. Actual access requires successful sign-in and runtime policy evaluation.</p>
+          </div>
+          <details class="role-comparison">
+            <summary>Compare all role access</summary>
+            <div class="role-cards">
+              <article class="role-card">
+                <h3>Analyst <span>OBO</span></h3>
+                <p><strong>Aggregate:</strong> Allow</p>
+                <p><strong>Member:</strong> Deny</p>
+                <p><strong>Outreach:</strong> Deny</p>
+              </article>
+              <article class="role-card">
+                <h3>Retention Specialist <span>OBO</span></h3>
+                <p><strong>Aggregate:</strong> Allow</p>
+                <p><strong>Member:</strong> Allow</p>
+                <p><strong>Outreach:</strong> Requires eligibility and explicit approval; browser approval supported</p>
+              </article>
+              <article class="role-card">
+                <h3>Compliance Reviewer / Administrator <span>OBO</span></h3>
+                <p><strong>Aggregate:</strong> Deny</p>
+                <p><strong>Member:</strong> Deny</p>
+                <p><strong>Outreach:</strong> Deny</p>
+              </article>
+              <article class="role-card">
+                <h3>Reporting agent <span>App-only</span></h3>
+                <p><strong>Aggregate:</strong> Allow</p>
+                <p><strong>Member:</strong> Deny</p>
+                <p><strong>Outreach:</strong> Deny</p>
+              </article>
+            </div>
+          </details>
+        </aside>
       </div>
       </div>
 
@@ -141,44 +204,44 @@
                 <path id="flow-out-approval" d="M560 170 C 670 170, 670 215, 780 215" />
                 <path id="flow-out-other" d="M560 170 C 670 170, 670 295, 780 295" />
               </g>
-              <g class="flow-node flow-source" aria-hidden="true">
+              <g class="flow-node flow-source" data-filter="source" data-value="chat" aria-hidden="true">
                 <rect x="25" y="42" width="170" height="56" rx="10" />
                 <text x="110" y="67">Chat</text>
                 <text class="flow-node-sub" x="110" y="86">user requests</text>
               </g>
-              <g class="flow-node flow-source" aria-hidden="true">
+              <g class="flow-node flow-source" data-filter="source" data-value="gateway" aria-hidden="true">
                 <rect x="25" y="142" width="170" height="56" rx="10" />
                 <text x="110" y="167">Gateway</text>
                 <text class="flow-node-sub" x="110" y="186">tool gateway</text>
               </g>
-              <g class="flow-node flow-source" aria-hidden="true">
+              <g class="flow-node flow-source" data-filter="source" data-value="mcp" aria-hidden="true">
                 <rect x="25" y="242" width="170" height="56" rx="10" />
                 <text x="110" y="267">MCP</text>
                 <text class="flow-node-sub" x="110" y="286">tool calls</text>
               </g>
-              <g id="flow-gate" class="flow-gate" aria-hidden="true">
+              <g id="flow-gate" class="flow-gate" role="button" tabindex="0" aria-label="Show policy rules triggered at the policy gate" aria-haspopup="dialog" aria-expanded="false" aria-controls="flow-gate-popover">
                 <circle cx="500" cy="170" r="92" fill="url(#flow-gate-glow)" />
                 <path d="M500 112 L552 132 L552 178 C552 206 530 226 500 238 C470 226 448 206 448 178 L448 132 Z" />
                 <text x="500" y="168">Policy</text>
                 <text x="500" y="188">gate</text>
                 <text id="flow-gate-stage" class="flow-gate-stage" x="500" y="268"></text>
               </g>
-              <g id="flow-node-allow" class="flow-node flow-outcome flow-allow" aria-hidden="true">
+              <g id="flow-node-allow" class="flow-node flow-outcome flow-allow" role="button" tabindex="0" aria-label="Filter latest decisions by Policy allowed" aria-pressed="false" data-filter="outcome" data-value="allow">
                 <rect x="780" y="27" width="200" height="56" rx="10" />
                 <text class="flow-outcome-label" x="795" y="51">Policy allowed</text>
                 <text id="flow-count-allow" class="flow-count" x="965" y="64">0</text>
               </g>
-              <g id="flow-node-deny" class="flow-node flow-outcome flow-deny" aria-hidden="true">
+              <g id="flow-node-deny" class="flow-node flow-outcome flow-deny" role="button" tabindex="0" aria-label="Filter latest decisions by Policy denied" aria-pressed="false" data-filter="outcome" data-value="deny">
                 <rect x="780" y="107" width="200" height="56" rx="10" />
                 <text class="flow-outcome-label" x="795" y="131">Policy denied</text>
                 <text id="flow-count-deny" class="flow-count" x="965" y="144">0</text>
               </g>
-              <g id="flow-node-approval" class="flow-node flow-outcome flow-approval" aria-hidden="true">
+              <g id="flow-node-approval" class="flow-node flow-outcome flow-approval" role="button" tabindex="0" aria-label="Filter latest decisions by Approval required" aria-pressed="false" data-filter="outcome" data-value="approval">
                 <rect x="780" y="187" width="200" height="56" rx="10" />
                 <text class="flow-outcome-label" x="795" y="211">Approval required</text>
                 <text id="flow-count-approval" class="flow-count" x="965" y="224">0</text>
               </g>
-              <g id="flow-node-other" class="flow-node flow-outcome flow-other" aria-hidden="true">
+              <g id="flow-node-other" class="flow-node flow-outcome flow-other" role="button" tabindex="0" aria-label="Filter latest decisions by Warn, log or other" aria-pressed="false" data-filter="outcome" data-value="other">
                 <rect x="780" y="267" width="200" height="56" rx="10" />
                 <text class="flow-outcome-label" x="795" y="291">Warn / log / other</text>
                 <text id="flow-count-other" class="flow-count" x="965" y="304">0</text>
@@ -186,29 +249,48 @@
               <g id="flow-particles" aria-hidden="true"></g>
             </svg>
           </div>
-          <ul class="flow-legend" aria-label="Outcome legend">
-            <li><span class="flow-key flow-allow" aria-hidden="true">●</span> Policy allowed (circle)</li>
-            <li><span class="flow-key flow-deny" aria-hidden="true">■</span> Policy denied (square)</li>
-            <li><span class="flow-key flow-approval" aria-hidden="true">◆</span> Approval required (diamond)</li>
-            <li><span class="flow-key flow-other" aria-hidden="true">▲</span> Warn, log, transform or escalate (triangle)</li>
-          </ul>
-          <p id="flow-announcer" class="visually-hidden" role="status" aria-live="polite"></p>
-          <h3 class="flow-ticker-title" id="flow-ticker-title">Latest decisions</h3>
-          <ol id="flow-ticker" class="flow-ticker" aria-labelledby="flow-ticker-title"></ol>
-        </section>
-        <aside class="governance-panel" aria-labelledby="governance-title">
-          <div class="panel-heading">
-            <div>
-              <p class="eyebrow">Live control plane</p>
-              <h2 id="governance-title">Governance observability</h2>
+          <div id="flow-gate-popover" class="flow-gate-popover" role="dialog" aria-labelledby="flow-gate-popover-title" hidden>
+            <div class="flow-gate-popover-head">
+              <h3 id="flow-gate-popover-title">Policy rules triggered</h3>
+              <button type="button" class="flow-gate-popover-close" aria-label="Close policy rules">×</button>
             </div>
+            <p id="flow-gate-popover-meta" class="flow-gate-popover-meta"></p>
+            <ul id="flow-gate-popover-list" class="flow-gate-popover-list"></ul>
+            <p id="flow-gate-popover-foot" class="flow-gate-popover-foot"></p>
+          </div>
+          <div class="flow-filters">
+            <p class="flow-filter-hint">Select an outcome or source, here or in the diagram, to filter the latest decisions.</p>
+            <div class="flow-filter-group" role="group" aria-labelledby="flow-filter-outcome-label">
+              <span id="flow-filter-outcome-label" class="flow-filter-label">Outcome</span>
+              <button type="button" class="flow-chip" data-filter="outcome" data-value="all" aria-pressed="true">All outcomes</button>
+              <button type="button" class="flow-chip" data-filter="outcome" data-value="allow" aria-pressed="false"><span class="flow-key flow-allow" aria-hidden="true">●</span> Policy allowed</button>
+              <button type="button" class="flow-chip" data-filter="outcome" data-value="deny" aria-pressed="false"><span class="flow-key flow-deny" aria-hidden="true">■</span> Policy denied</button>
+              <button type="button" class="flow-chip" data-filter="outcome" data-value="approval" aria-pressed="false"><span class="flow-key flow-approval" aria-hidden="true">◆</span> Approval required</button>
+              <button type="button" class="flow-chip" data-filter="outcome" data-value="other" aria-pressed="false"><span class="flow-key flow-other" aria-hidden="true">▲</span> Warn, log, transform or escalate</button>
+            </div>
+            <div class="flow-filter-group" role="group" aria-labelledby="flow-filter-source-label">
+              <span id="flow-filter-source-label" class="flow-filter-label">Source</span>
+              <button type="button" class="flow-chip" data-filter="source" data-value="all" aria-pressed="true">All sources</button>
+              <button type="button" class="flow-chip" data-filter="source" data-value="chat" aria-pressed="false">Chat</button>
+              <button type="button" class="flow-chip" data-filter="source" data-value="gateway" aria-pressed="false">Gateway</button>
+              <button type="button" class="flow-chip" data-filter="source" data-value="mcp" aria-pressed="false">MCP</button>
+            </div>
+          </div>
+          <p id="flow-announcer" class="visually-hidden" role="status" aria-live="polite"></p>
+          <div class="flow-ticker-heading">
+            <h3 class="flow-ticker-title" id="flow-ticker-title">Latest decisions</h3>
+            <p id="flow-filter-summary" class="flow-filter-summary"></p>
+            <button type="button" id="flow-filter-clear" class="flow-chip" hidden>Clear filters</button>
+          </div>
+          <ol id="flow-ticker" class="flow-ticker" aria-labelledby="flow-ticker-title"></ol>
+          <p id="flow-ticker-empty" class="flow-ticker-empty" hidden></p>
+        </section>
+        <aside id="governance-panel" class="governance-panel" aria-labelledby="governance-title" tabindex="-1">
+          <h2 id="governance-title" class="visually-hidden">Governance observability</h2>
+          <div class="governance-header" hidden>
+          <div class="panel-heading">
             <span id="governance-overall-status" class="status-badge neutral">Loading</span>
           </div>
-          <p class="panel-intro">
-            Privacy-safe decisions from the chat and MCP processes. Raw prompts,
-            member data, arguments, results, and identity claims are never shown.
-          </p>
-          <p id="identity-mode" class="status-badge neutral">Identity mode loading</p>
 
           <div
             class="panel-controls"
@@ -220,7 +302,6 @@
               Pause updates
             </button>
           </div>
-          <p id="governance-update-status" class="activity" role="status" aria-live="polite"></p>
 
           <dl class="metric-grid" aria-label="Governance decision totals">
             <div>
@@ -240,9 +321,11 @@
               <dd id="retained-count">0</dd>
             </div>
           </dl>
+          </div>
+          <p id="governance-update-status" class="activity" role="status" aria-live="polite"></p>
 
-          <section class="runtime-summary" aria-labelledby="runtime-title">
-            <h3 id="runtime-title">System health</h3>
+          <details class="runtime-summary">
+            <summary id="runtime-title">System health</summary>
             <p class="section-intro">Current availability of the services used by governed chat.</p>
             <p id="circuit-health-summary" class="health-summary">Checking service health...</p>
             <ul id="service-statuses" class="status-list"></ul>
@@ -280,9 +363,9 @@
                 </div>
               </dl>
             </details>
-          </section>
+          </details>
 
-          <details open>
+          <details>
             <summary>Recent decisions</summary>
             <div class="table-scroll" role="region" aria-label="Recent governance decisions" tabindex="0">
               <table>
@@ -291,7 +374,7 @@
                   <tr>
                     <th scope="col">Time</th>
                     <th scope="col">Source</th>
-                    <th scope="col">Identity (mock locally)</th>
+                    <th scope="col">Identity</th>
                     <th scope="col">Lifecycle</th>
                     <th scope="col">Action</th>
                     <th scope="col">Decision</th>
@@ -322,10 +405,19 @@
                     <th scope="col">Policy origin</th>
                     <th scope="col">Condition</th>
                   </tr>
+                  <tr class="table-filters">
+                    <td>
+                      <select id="rule-filter-stage" data-policy-filter="0" aria-label="Filter rules by stage">
+                        <option value="">All</option>
+                      </select>
+                    </td>
+                    <td colspan="4"></td>
+                  </tr>
                 </thead>
                 <tbody id="policy-rules"></tbody>
               </table>
             </div>
+            <p id="policy-filter-status" class="table-filter-status" role="status" aria-live="polite"></p>
           </details>
 
           <details>
@@ -567,14 +659,117 @@
         </div>
       </section>
       </div>
+
+      <div id="panel-eval" class="view-panel" role="tabpanel" aria-labelledby="tab-eval" hidden>
+        <section class="governance-panel" aria-labelledby="foundry-evaluation-title">
+          <div class="panel-heading">
+            <h2 id="foundry-evaluation-title">Foundry evaluation results</h2>
+            <div class="foundry-actions">
+              <button id="foundry-run" type="button" disabled>Run Eval</button>
+              <button id="foundry-refresh" type="button" class="secondary">Load Foundry results</button>
+            </div>
+          </div>
+          <p id="foundry-job-status" role="status" aria-live="polite">Checking evaluation job status...</p>
+          <p id="foundry-job-error" class="error" role="alert" hidden></p>
+          <label for="foundry-evaluation-select">Evaluation</label>
+          <select id="foundry-evaluation-select" disabled></select>
+          <button id="foundry-more-evaluations" type="button" class="secondary" hidden>More evaluations</button>
+          <p id="foundry-status" role="status" aria-live="polite">Load Foundry results to browse evaluation runs.</p>
+          <p id="foundry-error" class="error" role="alert" hidden></p>
+          <div class="table-scroll" role="region" aria-label="Foundry evaluation runs" tabindex="0">
+            <table>
+              <caption>Foundry run history</caption>
+              <thead><tr><th scope="col">Run</th><th scope="col">Created</th><th scope="col">Status</th><th scope="col">Pass rate</th><th scope="col">Results</th><th scope="col">Details</th></tr></thead>
+              <tbody id="foundry-pending" hidden>
+                <tr>
+                  <td>Current evaluation</td>
+                  <td>In progress</td>
+                  <td><span id="foundry-pending-state" class="status-badge running">Running</span></td>
+                  <td>Pending</td>
+                  <td>Results will appear when the run finishes.</td>
+                  <td>Come back in a bit.</td>
+                </tr>
+              </tbody>
+              <tbody id="foundry-runs"></tbody>
+            </table>
+          </div>
+          <button id="foundry-more-runs" type="button" class="secondary" hidden>More runs</button>
+          <dialog id="foundry-running-dialog" aria-labelledby="foundry-running-title" aria-describedby="foundry-running-message">
+            <h3 id="foundry-running-title">Evaluation is running</h3>
+            <p id="foundry-running-message">This can take a few minutes. Come back in a bit to check the results. You can keep using the app while it runs.</p>
+            <form method="dialog">
+              <button autofocus>Got it</button>
+            </form>
+          </dialog>
+        </section>
+        <section class="governance-panel evaluation-panel" aria-labelledby="evaluation-title" hidden inert>
+          <div class="panel-heading">
+            <h2 id="evaluation-title">Policy evaluation</h2>
+            <button id="run-evaluation" type="button">Run Eval</button>
+          </div>
+          <p class="panel-intro">
+            Run isolated synthetic allow/deny checks without changing the active
+            policy. Results are saved locally; no Foundry submission is made.
+          </p>
+          <p id="evaluation-status" class="activity" role="status" aria-live="polite">
+            No evaluation loaded.
+          </p>
+          <p id="evaluation-error" class="error" role="alert" hidden></p>
+          <div id="evaluation-results" hidden>
+            <p id="evaluation-summary"></p>
+            <p class="evaluation-artifact">
+              Saved output: <code id="evaluation-artifact"></code>
+            </p>
+            <details open>
+              <summary>Allow/deny baselines</summary>
+              <div class="table-scroll" role="region" aria-label="Evaluation baselines" tabindex="0">
+                <table>
+                  <caption>Both baseline scores must be 1.0</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">Case</th>
+                      <th scope="col">Score</th>
+                      <th scope="col">Outcome</th>
+                      <th scope="col">Detail</th>
+                    </tr>
+                  </thead>
+                  <tbody id="evaluation-baselines"></tbody>
+                </table>
+              </div>
+            </details>
+            <details>
+              <summary>Regression controls</summary>
+              <p class="panel-intro">
+                A control passes when the grader detects its deliberate violation
+                with a 0.0 score or the expected evidence error.
+              </p>
+              <div class="table-scroll" role="region" aria-label="Evaluation regression controls" tabindex="0">
+                <table>
+                  <caption>Deliberately corrupted evidence, checked independently</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">Control</th>
+                      <th scope="col">Score</th>
+                      <th scope="col">Outcome</th>
+                      <th scope="col">Detail</th>
+                    </tr>
+                  </thead>
+                  <tbody id="evaluation-controls"></tbody>
+                </table>
+              </div>
+            </details>
+          </div>
+        </section>
+      </div>
     </main>
 
     <footer>
       <p>Synthetic demonstration data only. External assets are not tracked or verified.</p>
     </footer>
     <script src="/static/tabs.js?v=2" defer></script>
-    <script src="/static/app.js?v=identity-insights" type="module"></script>
-    <script src="/static/insights.js?v=tokens-1" defer></script>
-    <script src="/static/flow.js?v=3" defer></script>
+    <script src="/static/app.js?v=gate-pop-4" type="module"></script>
+    <script src="/static/insights.js?v=gate-pop-4" defer></script>
+    <script src="/static/flow.js?v=gate-pop-4" defer></script>
+    <script src="/static/foundry-evaluations.js?v=5" defer></script>
   </body>
 </html>

@@ -24,6 +24,8 @@ rule_mappings:
     purpose: Block routine preparation after account closure or completed exit.
   - rule: deny-unconfirmed-outreach-eligibility
     purpose: Block preparation when eligibility requires review or is unknown.
+  - rule: deny-outreach-without-eligibility-facts
+    purpose: Block preparation when trusted eligibility facts are missing or unrecognised.
 supporting_rules:
   - allow-eligible-outreach-case
 examples:

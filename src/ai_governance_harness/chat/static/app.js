@@ -26,17 +26,33 @@ const circuitHealthSummary = document.querySelector("#circuit-health-summary");
 const circuitStatuses = document.querySelector("#circuit-statuses");
 const decisionEvents = document.querySelector("#decision-events");
 const policyRules = document.querySelector("#policy-rules");
+const policyFilterControls = [...document.querySelectorAll("[data-policy-filter]")];
+const policyFilterStatus = document.querySelector("#policy-filter-status");
 const policyCaption = document.querySelector("#policy-caption");
 const defaultAction = document.querySelector("#default-action");
 const evidenceControls = document.querySelector("#evidence-controls");
 const privacyControls = document.querySelector("#privacy-controls");
+const runEvaluationButton = document.querySelector("#run-evaluation");
+const evaluationStatus = document.querySelector("#evaluation-status");
+const evaluationError = document.querySelector("#evaluation-error");
+const evaluationResults = document.querySelector("#evaluation-results");
+const evaluationSummary = document.querySelector("#evaluation-summary");
+const evaluationArtifact = document.querySelector("#evaluation-artifact");
+const evaluationBaselines = document.querySelector("#evaluation-baselines");
+const evaluationControls = document.querySelector("#evaluation-controls");
+
 const personaSelector = document.querySelector("#mock-persona");
 const signInButton = document.querySelector("#identity-signin");
 const identityStatus = document.querySelector("#identity-status");
-const identityMode = document.querySelector("#identity-mode");
+const selectedRoleName = document.querySelector("#selected-role-name");
+const roleAccessSummary = document.querySelector("#role-access-summary");
+const roleAggregate = document.querySelector("#role-aggregate");
+const roleMember = document.querySelector("#role-member");
+const roleOutreach = document.querySelector("#role-outreach");
 
 let history = [];
 let governancePaused = false;
+let evaluationTimer = null;
 let accessToken = null;
 let hostedSession = false;
 let hostedMode = false;
@@ -81,8 +97,62 @@ const circuitStatePresentation = {
   },
 };
 
+const roleAccessPresentation = Object.freeze({
+  analyst: {
+    name: "Analyst (OBO)",
+    summary: "Aggregate insights are available. Member-level tools and outreach are blocked.",
+    aggregate: ["Allow", "allowed"],
+    member: ["Deny", "denied"],
+    outreach: ["Deny", "denied"],
+  },
+  retention_specialist: {
+    name: "Retention Specialist (OBO)",
+    summary: "Aggregate and member tools are available. Outreach remains controlled.",
+    aggregate: ["Allow", "allowed"],
+    member: ["Allow", "allowed"],
+    outreach: ["Eligibility + approval", "conditional"],
+  },
+  compliance_reviewer: {
+    name: "Compliance Reviewer (OBO)",
+    summary: "Aggregate, member, and outreach tools are blocked for this role.",
+    aggregate: ["Deny", "denied"],
+    member: ["Deny", "denied"],
+    outreach: ["Deny", "denied"],
+  },
+  administrator: {
+    name: "Administrator (OBO)",
+    summary: "Aggregate, member, and outreach tools are blocked for this role.",
+    aggregate: ["Deny", "denied"],
+    member: ["Deny", "denied"],
+    outreach: ["Deny", "denied"],
+  },
+});
+
 // Must match _OUTREACH_APPROVAL_HEADING in chat/service.py.
 const APPROVAL_HEADING = "Approval required for ";
+
+function setAccessStatus(element, [label, tone]) {
+  element.textContent = label;
+  element.className = `access-status ${tone}`;
+}
+
+function renderRoleAccessPreview(persona) {
+  const presentation = roleAccessPresentation[persona];
+  if (!presentation) {
+    selectedRoleName.textContent = "Choose a persona to preview access";
+    roleAccessSummary.textContent = "Role capabilities will appear here before you sign in.";
+    [roleAggregate, roleMember, roleOutreach].forEach((element) => {
+      setAccessStatus(element, ["Not selected", "neutral"]);
+    });
+    return;
+  }
+
+  selectedRoleName.textContent = presentation.name;
+  roleAccessSummary.textContent = presentation.summary;
+  setAccessStatus(roleAggregate, presentation.aggregate);
+  setAccessStatus(roleMember, presentation.member);
+  setAccessStatus(roleOutreach, presentation.outreach);
+}
 
 function setApprovalActionsEnabled(enabled) {
   messagesElement.querySelectorAll(".approval-actions button").forEach((button) => {
@@ -122,7 +192,6 @@ function approvalActions(content) {
   group.append(hint);
   return group;
 }
-
 function addMessage(role, content, policyNotice = null) {
   // The backend accepts an approval reply only directly after its prompt.
   setApprovalActionsEnabled(false);
@@ -158,7 +227,7 @@ function setBusy(isBusy) {
   input.disabled = isBusy;
   sendButton.disabled = isBusy || !(accessToken || hostedSession);
   personaSelector.disabled = isBusy;
-  signInButton.disabled = isBusy;
+  signInButton.disabled = isBusy || Boolean(accessToken);
   clearButton.disabled = isBusy;
   activityStatus.textContent = isBusy ? "Thinking and checking governance tools" : "";
   activityStatus.classList.toggle("busy", isBusy);
@@ -445,6 +514,59 @@ function renderPolicy(policy) {
     appendTableCell(row, rule.condition || "No condition", { code: true });
     policyRules.append(row);
   }
+  refreshPolicyFilterOptions();
+  applyPolicyFilters();
+}
+
+function policyCellText(row, column) {
+  return row.cells[column]?.textContent.trim() || "";
+}
+
+function refreshPolicyFilterOptions() {
+  const rows = [...policyRules.rows];
+  for (const control of policyFilterControls) {
+    if (control.tagName !== "SELECT") {
+      continue;
+    }
+    const column = Number(control.dataset.policyFilter);
+    const values = [...new Set(rows.map((row) => policyCellText(row, column)))].sort();
+    const selected = values.includes(control.value) ? control.value : "";
+    const options = [new Option("All", "")];
+    for (const value of values) {
+      options.push(new Option(value, value));
+    }
+    control.replaceChildren(...options);
+    control.value = selected;
+  }
+}
+
+function applyPolicyFilters() {
+  const active = policyFilterControls
+    .map((control) => ({
+      column: Number(control.dataset.policyFilter),
+      value: control.value.trim().toLowerCase(),
+      exact: control.tagName === "SELECT",
+    }))
+    .filter((filter) => filter.value);
+  const rows = [...policyRules.rows];
+  let visible = 0;
+  for (const row of rows) {
+    const matches = active.every((filter) => {
+      const text = policyCellText(row, filter.column).toLowerCase();
+      return filter.exact ? text === filter.value : text.includes(filter.value);
+    });
+    row.hidden = !matches;
+    if (matches) {
+      visible += 1;
+    }
+  }
+  policyFilterStatus.textContent = active.length
+    ? `Showing ${visible} of ${rows.length} rules.`
+    : "";
+}
+
+for (const control of policyFilterControls) {
+  control.addEventListener(control.tagName === "SELECT" ? "change" : "input", applyPolicyFilters);
 }
 
 function renderEvidence(evidence) {
@@ -571,6 +693,116 @@ async function refreshGovernance({ announce = false } = {}) {
   }
 }
 
+function renderEvaluationRows(element, rows, { controls = false } = {}) {
+  element.replaceChildren();
+  for (const result of rows) {
+    const row = document.createElement("tr");
+    appendTableCell(row, controls ? result.control_id : result.row_id.replace("baseline-", ""));
+    appendTableCell(row, result.score === null ? "Not scored" : result.score.toFixed(1));
+    const outcome = document.createElement("td");
+    outcome.append(makeStatusBadge(result.accepted ? "passed" : "failed"));
+    row.append(outcome);
+    const error = result.grader_error || result.error;
+    const detail = controls
+      ? error
+        ? `${error}${error === result.expected_error ? " (expected)" : " (unexpected)"}`
+        : `Expected score: 0.0${result.expected_error ? `; expected error: ${result.expected_error}` : ""}`
+      : error || `Collection: ${result.stage}; worker exit: ${result.child_exit_code ?? "unknown"}`;
+    appendTableCell(row, detail);
+    element.append(row);
+  }
+}
+
+function showEvaluationError(message) {
+  evaluationError.textContent = message;
+  evaluationError.hidden = false;
+}
+
+function renderEvaluation(job) {
+  evaluationError.hidden = true;
+  evaluationError.textContent = "";
+  evaluationResults.hidden = true;
+  runEvaluationButton.disabled = job?.status === "running";
+  runEvaluationButton.textContent = job?.status === "running" ? "Running Eval..." : "Run Eval";
+  evaluationStatus.classList.toggle("busy", job?.status === "running");
+  if (!job) {
+    evaluationStatus.textContent = "No saved evaluation yet.";
+    return;
+  }
+  if (job.status === "running") {
+    evaluationStatus.textContent = `Running isolated evaluation: ${job.run_id}`;
+    evaluationTimer = window.setTimeout(() => loadEvaluation(job.run_id), 1000);
+    return;
+  }
+  evaluationStatus.textContent = `Evaluation ${job.status}: ${job.run_id}`;
+  if (job.status === "error") {
+    showEvaluationError(job.error || "Evaluation did not produce a valid result.");
+    return;
+  }
+  const results = job.results;
+  const baselinesPassed = results.baselines.filter((row) => row.accepted).length;
+  const controlsPassed = results.controls.filter((row) => row.accepted).length;
+  const controlsSummary = results.controls.length
+    ? `Regression controls: ${controlsPassed}/${results.controls.length}.`
+    : "Regression controls not run because the baselines did not pass.";
+  evaluationSummary.replaceChildren(
+    makeStatusBadge(job.status),
+    document.createTextNode(
+      ` Baselines: ${baselinesPassed}/${results.baselines.length}. ${controlsSummary}`,
+    ),
+  );
+  evaluationArtifact.textContent = job.artifact;
+  renderEvaluationRows(evaluationBaselines, results.baselines);
+  renderEvaluationRows(evaluationControls, results.controls, { controls: true });
+  evaluationResults.hidden = false;
+}
+
+async function loadEvaluation(runId = null) {
+  window.clearTimeout(evaluationTimer);
+  try {
+    const url = runId
+      ? `/api/governance/evaluations/${encodeURIComponent(runId)}`
+      : "/api/governance/evaluations";
+    const response = await fetch(url, { headers: { Accept: "application/json" } });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || "Evaluation results are unavailable.");
+    }
+    renderEvaluation(payload);
+  } catch (error) {
+    evaluationStatus.textContent = "Evaluation status unavailable. Reload to reconnect to the saved job.";
+    evaluationStatus.classList.remove("busy");
+    runEvaluationButton.disabled = false;
+    runEvaluationButton.textContent = "Run Eval";
+    showEvaluationError(error.message || "Evaluation results could not be loaded.");
+  }
+}
+
+runEvaluationButton.addEventListener("click", async () => {
+  window.clearTimeout(evaluationTimer);
+  runEvaluationButton.disabled = true;
+  runEvaluationButton.textContent = "Starting Eval...";
+  evaluationError.hidden = true;
+  evaluationResults.hidden = true;
+  evaluationStatus.textContent = "Starting a local evaluation job.";
+  try {
+    const response = await fetch("/api/governance/evaluations", {
+      method: "POST",
+      headers: { Accept: "application/json" },
+    });
+    const payload = await response.json();
+    if (!response.ok && response.status !== 409) {
+      throw new Error(payload.error || "Evaluation could not be started.");
+    }
+    renderEvaluation(payload);
+  } catch (error) {
+    runEvaluationButton.disabled = false;
+    runEvaluationButton.textContent = "Run Eval";
+    evaluationStatus.textContent = "Evaluation could not be started.";
+    showEvaluationError(error.message || "Evaluation could not be started.");
+  }
+});
+
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   clearError();
@@ -660,6 +892,7 @@ function clearIdentityConversation() {
 
 personaSelector.addEventListener("change", () => {
   clearIdentityConversation();
+  renderRoleAccessPreview(personaSelector.value);
   identityStatus.textContent = "Persona changed. Sign in to start a new conversation.";
 });
 
@@ -668,12 +901,12 @@ signInButton.addEventListener("click", async () => {
   clearIdentityConversation();
   const persona = personaSelector.value;
   if (!persona) {
-    showError("Choose a mock persona first.");
+    showError("Choose a persona first.");
     personaSelector.focus();
     return;
   }
   setBusy(true);
-  identityStatus.textContent = "Signing in with mock identity...";
+  identityStatus.textContent = "Signing in...";
   try {
     const response = await fetch("/api/mock-identity/signin", {
       method: "POST",
@@ -688,10 +921,10 @@ signInButton.addEventListener("click", async () => {
     }
     accessToken = payload.access_token;
     const label = personaSelector.selectedOptions[0].textContent;
-    identityStatus.textContent = `Signed in as ${label} (mock identity).`;
+    identityStatus.textContent = `Signed in as ${label}.`;
   } catch (error) {
     accessToken = null;
-    identityStatus.textContent = "Mock sign-in failed. Try signing in again.";
+    identityStatus.textContent = "Sign-in failed. Try signing in again.";
     showError(error.message || "The identity service could not be reached.");
   } finally {
     setBusy(false);
@@ -786,5 +1019,8 @@ async function loadIdentityMode() {
 }
 
 loadIdentityMode();
+renderRoleAccessPreview(personaSelector.value);
 checkHealth();
 refreshGovernance();
+runEvaluationButton.disabled = true;
+if (!runEvaluationButton.closest("section").hidden) loadEvaluation();

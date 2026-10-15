@@ -211,6 +211,21 @@ def _validate_platform_principal(
         else:
             return Rejection("invalid_platform_principal")
     if not settings.interactive_agent_id or not settings.reporting_agent_id:
+        if settings.hosted_tool_client_id and request_path == settings.mcp_path:
+            client_ids = {normalized.get("azp"), normalized.get("appid")} - {None}
+            if (
+                client_ids != {settings.hosted_tool_client_id}
+                or normalized.get("idtyp") != "app"
+                or normalized.get("oid") != principal_id
+                or normalized.get("scp")
+            ):
+                return Rejection("invalid_token_shape")
+            return NormalizedIdentity(
+                actor="tool_workload",
+                token_type="app",
+                staff_role="none",
+                principal_hash=hashlib.sha256(principal_id.encode("utf-8")).hexdigest(),
+            )
         role_values = normalized.get("roles", [])
         staff_roles = [role for role in role_values if role in STAFF_ROLES]
         staff_role = STAFF_ROLES[staff_roles[0]] if len(staff_roles) == 1 else "none"

@@ -78,6 +78,8 @@ def test_given_hosted_application_role_when_loading_settings_then_accepts_role(
     monkeypatch.setenv("MCP_AUTH_AUDIENCES", "api://mcp-server,mcp-server-client-id")
     monkeypatch.delenv("MCP_AUTH_REQUIRED_SCOPE", raising=False)
     monkeypatch.setenv("MCP_AUTH_REQUIRED_ROLE", "Mcp.Tools.Invoke")
+    monkeypatch.setenv("MCP_HOSTED_TOOL_CLIENT_ID", "hosted-foundry-agent")
+    monkeypatch.setenv("MCP_AUTH_SNAPSHOT_ROLE", "Mcp.Governance.Read")
     monkeypatch.setenv("MCP_RESOURCE_URL", "https://mcp.example/mcp")
 
     # Act
@@ -86,6 +88,7 @@ def test_given_hosted_application_role_when_loading_settings_then_accepts_role(
     # Assert
     assert settings.auth_required_scope is None
     assert settings.auth_required_role == "Mcp.Tools.Invoke"
+    assert settings.hosted_tool_client_id == "hosted-foundry-agent"
     assert settings.auth_audiences == (
         "api://mcp-server",
         "mcp-server-client-id",

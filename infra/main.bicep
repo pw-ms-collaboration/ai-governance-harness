@@ -260,6 +260,7 @@ module mcpApp 'br/public:avm/res/app/container-app:0.23.0' = {
           { name: 'MCP_AUTH_AUDIENCE', value: mcpApiAudience }
           { name: 'MCP_AUTH_AUDIENCES', value: '${mcpApiAudience},${mcpApiClientId}' }
           { name: 'MCP_AUTH_REQUIRED_ROLE', value: mcpRequiredRole }
+          { name: 'MCP_HOSTED_TOOL_CLIENT_ID', value: foundryAgentIdentityClientId }
           { name: 'MCP_AUTH_SNAPSHOT_ROLE', value: mcpSnapshotRole }
           { name: 'MCP_RESOURCE_URL', value: apimMcpUrl }
           { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', secretRef: 'appinsights-connection' }

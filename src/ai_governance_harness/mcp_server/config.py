@@ -55,6 +55,7 @@ class ServerSettings(BaseModel):
     auth_required_scope: str | None = None
     auth_required_role: str | None = None
     auth_snapshot_role: str | None = None
+    hosted_tool_client_id: str | None = Field(default=None, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9-]+$")
     principal_source: Literal["easy_auth", "jwt"] | None = None
     jwt_issuer: str | None = None
     jwt_jwks_url: str | None = None
@@ -137,6 +138,14 @@ class ServerSettings(BaseModel):
             return self
         source = self.principal_source or ("easy_auth" if self.hosted else "jwt")
         object.__setattr__(self, "principal_source", source)
+        if self.hosted_tool_client_id and (
+            not self.hosted or source != "easy_auth"
+            or self.auth_required_role != "Mcp.Tools.Invoke"
+            or not self.auth_snapshot_role
+            or self.auth_snapshot_role == self.auth_required_role
+            or self.interactive_agent_id or self.reporting_agent_id
+        ):
+            raise ValueError("Hosted tool identity requires EasyAuth, Mcp.Tools.Invoke, a separate snapshot role and no mock agent IDs.")
         audiences = self.auth_audiences or (
             (self.auth_audience,) if self.auth_audience else ()
         )
@@ -198,6 +207,7 @@ class ServerSettings(BaseModel):
             auth_required_scope=os.getenv("MCP_AUTH_REQUIRED_SCOPE"),
             auth_required_role=os.getenv("MCP_AUTH_REQUIRED_ROLE"),
             auth_snapshot_role=os.getenv("MCP_AUTH_SNAPSHOT_ROLE"),
+            hosted_tool_client_id=os.getenv("MCP_HOSTED_TOOL_CLIENT_ID") or None,
             principal_source=os.getenv("MCP_PRINCIPAL_SOURCE") or None,
             jwt_issuer=os.getenv("MCP_JWT_ISSUER") or None,
             jwt_jwks_url=os.getenv("MCP_JWT_JWKS_URL") or None,

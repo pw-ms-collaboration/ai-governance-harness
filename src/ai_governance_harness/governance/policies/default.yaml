@@ -129,6 +129,10 @@ rules:
     stage: pre_tool
     condition: "governance.boundary == 'mcp' and governance.actor == 'reporting' and governance.token_type == 'app' and action.type in ['get_cohort_churn_analytics', 'get_fum_outflow_summary']"
     action: allow
+  - name: allow-hosted-workload-insights
+    stage: pre_tool
+    condition: "governance.boundary == 'mcp' and governance.actor == 'tool_workload' and governance.token_type == 'app' and governance.authentication_outcome == 'authenticated' and action.type in ['get_member_profile', 'get_member_disengagement_signals', 'get_cohort_churn_analytics', 'get_fum_outflow_summary']"
+    action: allow
   - name: allow-local-analyst-aggregates
     stage: pre_tool
     condition: "governance.boundary == 'local' and governance.staff_role == 'analyst' and action.type in ['get_cohort_churn_analytics', 'get_fum_outflow_summary']"

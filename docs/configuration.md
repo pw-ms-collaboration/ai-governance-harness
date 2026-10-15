@@ -177,16 +177,28 @@ See [local mock startup and testing](../README.md#start-mcp-and-the-chat-ui).
 | `MCP_AUTH_TENANT_ID`        | Tenant; falls back to `AZURE_TENANT_ID`            |
 | `MCP_AUTH_AUDIENCE`         | Expected audience claim                            |
 | `MCP_AUTH_REQUIRED_SCOPE`   | Expected delegated scope in `scp`                  |
+| `MCP_AUTH_REQUIRED_ROLE`    | Application-role alternative to the delegated scope |
+| `MCP_AUTH_SNAPSHOT_ROLE`    | Separate application role for governance snapshots |
+| `MCP_HOSTED_TOOL_CLIENT_ID` | Approved Foundry application client ID for hosted read-only tools |
 | `MCP_RESOURCE_URL`          | Resource URL published in OAuth discovery          |
 | `AGENT_ID_INTERACTIVE_ID`   | Allowlisted interactive agent ID |
 | `AGENT_ID_REPORTING_ID`     | Separate allowlisted reporting agent ID |
 
-With `MCP_HOSTED=true`, all six resolved values, an approved region, and
-`MCP_TRANSPORT=streamable-http` are required. Middleware expects trusted
-`x-ms-client-principal*` platform headers identifying Entra ID and verifies
-tenant, audience, and the shared agent claim shape from that principal.
-User tokens require the delegated scope; app-only reporting requires its
-application role. Real hosted Entra Agent ID validation remains deferred.
+With `MCP_HOSTED=true`, tenant, audience, resource URL, exactly one required
+scope or application role, an approved region and Streamable HTTP are required.
+Middleware expects trusted `x-ms-client-principal*` platform headers identifying
+Entra ID. Optional interactive/reporting agent IDs must be supplied together;
+that path retains the agent claim-shape checks used by local mock identities.
+
+The existing application-role Foundry route instead sets
+`MCP_HOSTED_TOOL_CLIENT_ID` and leaves both optional agent IDs unset. Only an
+app-only principal with `Mcp.Tools.Invoke`, the configured `azp` or `appid`, no
+delegated scope, and an object ID matching the platform principal can become
+the bounded `tool_workload` actor. Its policy allows the four read-only insight
+tools, not outreach preparation or arbitrary tools. No staff role is inferred.
+The snapshot reader role remains unable to enter the MCP tool endpoint, and
+the tool role cannot read snapshots. Real Entra Agent ID provisioning and
+per-user delegation remain deferred.
 
 > [!WARNING]
 > Header parsing is not bearer-token signature validation. Your hosting

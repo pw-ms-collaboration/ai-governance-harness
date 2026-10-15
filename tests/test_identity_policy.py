@@ -46,7 +46,7 @@ def test_given_all_identity_combinations_when_evaluating_then_exact_matrix() -> 
     engine = GovernanceEngine(GovernanceSettings(environment="test"))
     for boundary, actor, token_type, role, tool in itertools.product(
         ("chat", "mcp", "local", None),
-        ("interactive", "reporting", None),
+        ("interactive", "reporting", "tool_workload", None),
         ("user", "app", None),
         ROLES,
         TOOLS,
@@ -88,6 +88,22 @@ def test_given_all_identity_combinations_when_evaluating_then_exact_matrix() -> 
                     LifecyclePoint.PRE_TOOL, tool, context=context,
                     policy_data={"retention_handling_status": status},
                 ).allowed
+
+
+@pytest.mark.parametrize("tool", [*TOOLS, "unknown_tool"])
+def test_given_authenticated_hosted_workload_when_evaluating_then_only_read_only_insights(tool):
+    engine = GovernanceEngine(GovernanceSettings(environment="test"))
+    context = GovernanceContext(
+        boundary="mcp", actor="tool_workload", token_type="app",
+        staff_role="none", authentication_outcome="authenticated",
+    )
+
+    result = engine.evaluate(
+        LifecyclePoint.PRE_TOOL, tool, context=context,
+        policy_data={"retention_handling_status": "routine_permitted"},
+    )
+
+    assert result.allowed == (tool in TOOLS[:4])
 
 
 def test_given_bad_policy_snapshots_when_evaluating_each_allow_rule_then_deny() -> None:

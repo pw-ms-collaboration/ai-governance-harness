@@ -87,6 +87,9 @@ def _principal_headers(
     audience: str = "api://mcp-server",
     scope: str | None = "Mcp.Tools.Read",
     role: str | None = None,
+    client_id: str = "interactive-agent",
+    token_type: str = "user",
+    object_id: str = "opaque-principal-id",
 ) -> dict[str, str]:
     claims = [
         {"typ": "tid", "val": tenant},
@@ -95,9 +98,9 @@ def _principal_headers(
     if scope is not None:
         claims.append({"typ": "scp", "val": scope})
     claims.extend([
-        {"typ": "oid", "val": "opaque-principal-id"},
-        {"typ": "azp", "val": "interactive-agent"},
-        {"typ": "idtyp", "val": "user"},
+        {"typ": "oid", "val": object_id},
+        {"typ": "azp", "val": client_id},
+        {"typ": "idtyp", "val": token_type},
         {"typ": "xms_act_fct", "val": "11"},
     ])
     if role is not None:
@@ -110,6 +113,107 @@ def _principal_headers(
         "X-MS-CLIENT-PRINCIPAL": encoded,
         "Content-Type": "application/json",
     }
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected_status"),
+    [
+        ({}, 200),
+        ({"audience": "mcp-server-client-id"}, 200),
+        ({"client_id": "unknown-agent"}, 401),
+        ({"token_type": ""}, 401),
+        ({"token_type": "user"}, 401),
+        ({"object_id": "different-object"}, 401),
+        ({"role": "Mcp.Governance.Read"}, 401),
+        ({"scope": "Mcp.Tools.Read"}, 401),
+        ({"tenant": "wrong-tenant"}, 401),
+    ],
+)
+def test_given_hosted_tool_workload_when_dispatching_then_binds_role_and_caller(
+    overrides, expected_status,
+):
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+
+    from ai_governance_harness.governance import (
+        GovernanceEngine, GovernanceSettings, LifecyclePoint, get_governance_context,
+    )
+    from ai_governance_harness.mcp_server.security import RequestSecurityMiddleware
+
+    settings = _hosted_settings(
+        auth_required_scope=None, auth_required_role="Mcp.Tools.Invoke",
+        auth_snapshot_role="Mcp.Governance.Read",
+        auth_audiences=("api://mcp-server", "mcp-server-client-id"),
+        interactive_agent_id=None, reporting_agent_id=None,
+        hosted_tool_client_id="hosted-foundry-agent",
+    )
+    engine = GovernanceEngine(GovernanceSettings(environment="test"))
+
+    async def endpoint(request):
+        context = get_governance_context()
+        return JSONResponse({
+            "identity": context.identity_attributes(),
+            "profile_allowed": engine.evaluate(
+                LifecyclePoint.PRE_TOOL, "get_member_profile", context=context,
+            ).allowed,
+            "outreach_allowed": engine.evaluate(
+                LifecyclePoint.PRE_TOOL, "prepare_member_outreach_case", context=context,
+                policy_data={"retention_handling_status": "routine_permitted"},
+            ).allowed,
+        })
+
+    app = Starlette(routes=[Route("/mcp", endpoint, methods=["POST"])])
+    app.add_middleware(RequestSecurityMiddleware, settings=settings)
+    claims = {
+        "client_id": "hosted-foundry-agent", "token_type": "app",
+        "scope": None, "role": "Mcp.Tools.Invoke", **overrides,
+    }
+    with TestClient(app) as client:
+        response = client.post("/mcp", headers=_principal_headers(**claims), json={})
+
+    assert response.status_code == expected_status
+    if expected_status == 200:
+        assert response.json() == {
+            "identity": {"boundary": "mcp", "actor": "tool_workload", "token_type": "app", "staff_role": "none"},
+            "profile_allowed": True, "outreach_allowed": False,
+        }
+
+
+@pytest.mark.parametrize("overrides", [
+    {"auth_snapshot_role": None},
+    {"auth_snapshot_role": "Mcp.Tools.Invoke"},
+    {"auth_required_role": "Other.Role"},
+    {"interactive_agent_id": "interactive", "reporting_agent_id": "reporting"},
+])
+def test_given_unsafe_hosted_tool_configuration_when_constructing_then_rejects(overrides):
+    values = {
+        "auth_required_scope": None, "auth_required_role": "Mcp.Tools.Invoke",
+        "auth_snapshot_role": "Mcp.Governance.Read",
+        "interactive_agent_id": None, "reporting_agent_id": None,
+        "hosted_tool_client_id": "hosted-foundry-agent", **overrides,
+    }
+    with pytest.raises(ValueError, match="Hosted tool identity requires"):
+        _hosted_settings(**values)
+
+
+def test_given_bound_tool_workload_when_reading_snapshot_then_reader_role_stays_separate():
+    settings = _hosted_settings(
+        auth_required_scope=None, auth_required_role="Mcp.Tools.Invoke",
+        auth_snapshot_role="Mcp.Governance.Read",
+        interactive_agent_id=None, reporting_agent_id=None,
+        hosted_tool_client_id="hosted-foundry-agent",
+    )
+    with TestClient(build_http_app(settings)) as client:
+        denied = client.get("/governance/snapshot", headers=_principal_headers(
+            scope=None, role="Mcp.Tools.Invoke", client_id="hosted-foundry-agent", token_type="app",
+        ))
+        allowed = client.get("/governance/snapshot", headers=_principal_headers(
+            scope=None, role="Mcp.Governance.Read", client_id="chat-snapshot-reader", token_type="app",
+        ))
+
+    assert denied.status_code == 401
+    assert allowed.status_code == 200
 
 
 def test_given_hosted_mcp_without_principal_when_posting_then_returns_401() -> None:

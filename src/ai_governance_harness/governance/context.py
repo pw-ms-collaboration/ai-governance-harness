@@ -9,7 +9,7 @@ from typing import Iterator, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 Boundary = Literal["chat", "mcp", "local"]
-Actor = Literal["interactive", "reporting"]
+Actor = Literal["interactive", "reporting", "tool_workload"]
 TokenType = Literal["user", "app"]
 StaffRole = Literal[
     "analyst", "retention_specialist", "compliance_reviewer", "administrator", "none"

@@ -46,12 +46,12 @@ resource mcpApi 'Microsoft.ApiManagement/service/apis@2025-09-01-preview' = {
     subscriptionRequired: false
     mcpProperties: {
       transportType: 'streamable'
-      endpoints: any({
-        message: {
+      endpoints: [
+        {
           name: 'message'
           uriTemplate: '/mcp'
         }
-      })
+      ]
     }
   }
 }

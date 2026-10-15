@@ -18,12 +18,14 @@ from pydantic import Field
 from ai_governance_harness.chat.evaluations import RUN_ID
 from ai_governance_harness.evaluation.agent_contracts import AgentEvaluationError
 from ai_governance_harness.evaluation.agent_managed_contracts import (
+    ensure_pin,
     load_cases,
     load_pin,
     read_managed_results,
     read_private_json,
 )
 from ai_governance_harness.evaluation.artifacts import write_json
+from ai_governance_harness.evaluation.behavior_evaluator import DEFAULT_REGISTRY
 from ai_governance_harness.evaluation.evaluator import StrictModel
 from ai_governance_harness.evaluation.register_agent_evaluators import (
     _validate_endpoint,
@@ -65,11 +67,18 @@ class ManagedEvaluationJobs:
         endpoint = _validate_endpoint(os.getenv("AZURE_AI_PROJECT_ENDPOINT"))
         registry = os.getenv("AZURE_AI_EVALUATOR_REGISTRY", "").strip()
         judge = os.getenv("AZURE_AI_EVAL_JUDGE_DEPLOYMENT_NAME", "").strip()
-        if not registry or not judge:
+        if not judge:
             raise AgentEvaluationError("managed_browser_configuration_required")
+        registry_path = Path(registry) if registry else DEFAULT_REGISTRY
         try:
-            load_pin(Path(registry), endpoint)
             cases = load_cases()
+            if any(
+                parent.is_symlink()
+                for parent in (registry_path, *registry_path.parents)
+            ):
+                raise AgentEvaluationError("symlink_managed_artifact")
+            if registry_path.exists():
+                load_pin(registry_path, endpoint)
         except (OSError, ValueError) as error:
             logger.warning(
                 "Managed evaluation preflight failed: %s", type(error).__name__
@@ -86,7 +95,7 @@ class ManagedEvaluationJobs:
         self._save(job)
         self.job = job
         self.tasks.start_soon(
-            self._run, job, Path(registry), judge, endpoint, len(cases) * 60 + 630
+            self._run, job, registry_path, judge, endpoint, len(cases) * 60 + 750
         )
         return job.model_copy()
 
@@ -188,6 +197,16 @@ class ManagedEvaluationJobs:
         final_job = job.model_copy()
         try:
             with anyio.fail_after(timeout):
+                try:
+                    await anyio.to_thread.run_sync(ensure_pin, registry, endpoint)
+                except (OSError, ValueError, AgentEvaluationError) as error:
+                    logger.warning(
+                        "Managed evaluator registry setup failed: %s",
+                        type(error).__name__,
+                    )
+                    final_job.status = "error"
+                    final_job.error = "Evaluator registry could not be created or verified. Check Azure credentials, evaluator registration permissions, the configured registry path, and retained registration artifacts before retrying."
+                    return
                 process = await anyio.open_process(
                     self._command(job.run_id, registry, judge, endpoint),
                     stdout=subprocess.DEVNULL,

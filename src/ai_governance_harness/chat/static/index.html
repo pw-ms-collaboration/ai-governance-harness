@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Role-governed member and aggregate insights using synthetic data and local identity">
     <title>Business Analyst Insights Chat</title>
-    <link rel="stylesheet" href="/static/app.css?v=gate-pop-4">
+    <link rel="stylesheet" href="/static/app.css?v=eval-progress-1">
   </head>
   <body>
     <a class="skip-link" href="#chat-input">Skip to message input</a>
@@ -680,10 +680,27 @@
             <table>
               <caption>Foundry run history</caption>
               <thead><tr><th scope="col">Run</th><th scope="col">Created</th><th scope="col">Status</th><th scope="col">Pass rate</th><th scope="col">Results</th><th scope="col">Details</th></tr></thead>
+              <tbody id="foundry-pending" hidden>
+                <tr>
+                  <td>Current evaluation</td>
+                  <td>In progress</td>
+                  <td><span id="foundry-pending-state" class="status-badge running">Running</span></td>
+                  <td>Pending</td>
+                  <td>Results will appear when the run finishes.</td>
+                  <td>Come back in a bit.</td>
+                </tr>
+              </tbody>
               <tbody id="foundry-runs"></tbody>
             </table>
           </div>
           <button id="foundry-more-runs" type="button" class="secondary" hidden>More runs</button>
+          <dialog id="foundry-running-dialog" aria-labelledby="foundry-running-title" aria-describedby="foundry-running-message">
+            <h3 id="foundry-running-title">Evaluation is running</h3>
+            <p id="foundry-running-message">This can take a few minutes. Come back in a bit to check the results. You can keep using the app while it runs.</p>
+            <form method="dialog">
+              <button autofocus>Got it</button>
+            </form>
+          </dialog>
         </section>
         <section class="governance-panel evaluation-panel" aria-labelledby="evaluation-title" hidden inert>
           <div class="panel-heading">
@@ -753,6 +770,6 @@
     <script src="/static/app.js?v=gate-pop-4" type="module"></script>
     <script src="/static/insights.js?v=gate-pop-4" defer></script>
     <script src="/static/flow.js?v=gate-pop-4" defer></script>
-    <script src="/static/foundry-evaluations.js?v=4" defer></script>
+    <script src="/static/foundry-evaluations.js?v=5" defer></script>
   </body>
 </html>

@@ -248,7 +248,7 @@ def build_chat_app(
             return JSONResponse({"error": "Managed evaluation job not found."}, status_code=404)
         except AgentEvaluationError as error:
             logger.warning("Managed evaluation configuration failed: %s", type(error).__name__)
-            return JSONResponse({"error": "Check AZURE_AI_EVALUATOR_REGISTRY, AZURE_AI_EVAL_JUDGE_DEPLOYMENT_NAME, and AZURE_AI_PROJECT_ENDPOINT before running an evaluation."}, status_code=503)
+            return JSONResponse({"error": "Check AZURE_AI_EVAL_JUDGE_DEPLOYMENT_NAME, AZURE_AI_PROJECT_ENDPOINT, and the evaluator registry before running an evaluation. AZURE_AI_EVALUATOR_REGISTRY is an optional path override."}, status_code=503)
         except (OSError, ValueError) as error:
             logger.warning("Managed evaluation job access failed: %s", type(error).__name__)
             return JSONResponse({"error": "Managed evaluation job artifacts could not be read or created."}, status_code=500)

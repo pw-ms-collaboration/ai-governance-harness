@@ -34,9 +34,9 @@ from ai_governance_harness.evaluation.agent_managed_contracts import (
     ManagedRecord,
     ManagedResponse,
     content_digest,
+    ensure_pin,
     independent_manifest,
     load_cases,
-    load_pin,
     private_content,
     read_private_json,
 )
@@ -596,7 +596,7 @@ def run_agent_managed(
     ) or not 0 < managed_timeout_seconds < float("inf"):
         raise AgentEvaluationError("invalid_managed_timeout")
     cases = load_cases(dataset)
-    pin = load_pin(registry, config.endpoint)
+    pin = ensure_pin(registry, config.endpoint)
     manifest = independent_manifest(cases)
     results = ManagedAgentResults(
         run_id=uuid4().hex,

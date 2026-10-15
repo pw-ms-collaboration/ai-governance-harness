@@ -24,6 +24,7 @@ from ai_governance_harness.evaluation.agent_managed import (
     run_agent_managed,
 )
 from ai_governance_harness.evaluation.collector import run_local
+from ai_governance_harness.evaluation.behavior_evaluator import DEFAULT_REGISTRY
 from ai_governance_harness.evaluation.foundry import run_managed
 from ai_governance_harness.evals.runner import DEFAULT_DATASET
 
@@ -67,8 +68,10 @@ def main() -> int:
     behavior.add_argument(
         "--registry",
         type=Path,
-        required=True,
-        help="Verified behavior evaluator registration directory",
+        default=Path(os.getenv("AZURE_AI_EVALUATOR_REGISTRY", "").strip())
+        if os.getenv("AZURE_AI_EVALUATOR_REGISTRY", "").strip()
+        else DEFAULT_REGISTRY,
+        help="Behavior evaluator registry; defaults to AZURE_AI_EVALUATOR_REGISTRY or .local/evaluations/behavior-evaluator-registration",
     )
     behavior.add_argument("--target-deployment", required=True)
     behavior.add_argument("--judge-deployment", required=True)

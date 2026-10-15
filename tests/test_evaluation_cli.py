@@ -197,3 +197,42 @@ def test_managed_cli_dispatches_separate_execution_and_retrieval(
         assert called[0]["confirm_inference"] is True
         assert called[0]["confirm_submit"] is True
     assert "Managed agent evaluation passed" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("override", [None, "", "   ", "custom/registry"])
+def test_managed_cli_registry_defaults_and_optional_environment_override(
+    tmp_path, monkeypatch, override
+):
+    from types import SimpleNamespace
+    from ai_governance_harness.evaluation import __main__ as cli
+    from ai_governance_harness.evaluation.behavior_evaluator import DEFAULT_REGISTRY
+
+    if override is None:
+        monkeypatch.delenv("AZURE_AI_EVALUATOR_REGISTRY", raising=False)
+    else:
+        monkeypatch.setenv("AZURE_AI_EVALUATOR_REGISTRY", override)
+    called = []
+
+    def runner(directory, **kwargs):
+        called.append(kwargs["registry"])
+        return SimpleNamespace(status="passed")
+
+    monkeypatch.setattr(cli, "run_agent_managed", runner)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "eval",
+            "agent-managed",
+            "--target-deployment",
+            "target",
+            "--judge-deployment",
+            "judge",
+            "--output",
+            str(tmp_path / "agent" / "result"),
+            "--confirm-inference",
+            "--confirm-submit",
+        ],
+    )
+    assert cli.main() == 0
+    assert called == [Path(override) if override and override.strip() else DEFAULT_REGISTRY]

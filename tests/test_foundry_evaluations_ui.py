@@ -229,3 +229,15 @@ def test_ui_shows_run_summary_without_case_detail_controls() -> None:
         assert 'id="foundry-case-filter"' not in html
         assert 'id="foundry-run"' in html
         assert 'aria-labelledby="evaluation-title" hidden inert' in html
+
+
+def test_ui_has_running_placeholder_and_dismissible_progress_dialog() -> None:
+    with TestClient(build_chat_app(settings(), service=object())) as client:
+        html = client.get("/").text
+        assert 'id="foundry-pending" hidden' in html
+        assert 'id="foundry-pending-state" class="status-badge running"' in html
+        assert 'id="foundry-running-dialog" aria-labelledby="foundry-running-title"' in html
+        assert 'aria-describedby="foundry-running-message"' in html
+        assert '<form method="dialog">' in html
+        assert "Evaluation is running" in html
+        assert "Come back in a bit" in html

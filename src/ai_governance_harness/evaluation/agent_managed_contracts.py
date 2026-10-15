@@ -25,6 +25,7 @@ from ai_governance_harness.evaluation.behavior_evaluator import (
     JUDGE_PROMPT,
     NAME,
     evaluator_definition,
+    register_evaluator,
 )
 from ai_governance_harness.evaluation.evaluator import (
     SHA256,
@@ -169,6 +170,14 @@ def load_pin(directory: Path, endpoint: str) -> EvaluatorPin:
     ):
         raise AgentEvaluationError("evaluator_bundle_mismatch")
     return pin
+
+
+def ensure_pin(directory: Path, endpoint: str) -> EvaluatorPin:
+    if any(parent.is_symlink() for parent in (directory, *directory.parents)):
+        raise AgentEvaluationError("symlink_managed_artifact")
+    if not directory.exists():
+        register_evaluator(directory, endpoint)
+    return load_pin(directory, endpoint)
 
 
 class ManagedRecord(BehaviorCase):

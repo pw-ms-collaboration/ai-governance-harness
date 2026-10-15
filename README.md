@@ -344,6 +344,10 @@ quarantine.
 * Access to an Azure AI Foundry project and model deployment.
 * `uv` or standard Python packaging tools.
 
+Agent response evaluations (`agent` and `agent-managed`, including browser
+Run eval) require Linux or macOS for inherited worker sockets. On Windows, run
+them inside WSL or a Linux container.
+
 Confirm the selected interpreter:
 
 ```powershell

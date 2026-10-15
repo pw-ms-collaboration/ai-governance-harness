@@ -313,7 +313,7 @@ def run_agent(
         endpoint=validate_connection(endpoint),
         timeout_seconds=timeout_seconds,
     )
-    if sys.platform != "linux":
+    if sys.platform not in {"linux", "darwin"}:
         raise AgentEvaluationError("unsupported_owned_socket_platform")
     cases, rubric = load_inputs(dataset, rubric_path)
     manifest = independent_agent_manifest(cases, rubric)

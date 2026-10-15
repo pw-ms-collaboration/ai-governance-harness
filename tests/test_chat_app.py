@@ -448,8 +448,43 @@ def test_static_ui_has_required_accessible_structure() -> None:
         tag == "section" and attrs.get("aria-label") == "Identity"
         for tag, attrs in tags
     )
+    identity_ancestors = next(
+        ancestors
+        for tag, attrs, ancestors in ancestor_parser.elements
+        if tag == "section" and attrs.get("aria-label") == "Identity"
+    )
+    assert any(
+        tag == "header" and "site-header" in (attrs.get("class") or "")
+        for tag, attrs in identity_ancestors
+    )
+    assert html.index("<h1>") < html.index('aria-label="Identity"')
+    tablist_ancestors = next(
+        ancestors
+        for tag, attrs, ancestors in ancestor_parser.elements
+        if attrs.get("role") == "tablist"
+        and attrs.get("aria-label") == "Application views"
+    )
+    assert any(
+        tag == "header" and "site-header" in (attrs.get("class") or "")
+        for tag, attrs in tablist_ancestors
+    )
+    assert any(
+        tag == "div" and "header-actions" in (attrs.get("class") or "")
+        for tag, attrs in identity_ancestors
+    )
+    nav_ancestors = next(
+        ancestors
+        for tag, attrs, ancestors in ancestor_parser.elements
+        if tag == "nav" and "view-tabs" in (attrs.get("class") or "")
+    )
+    assert any(
+        tag == "header" and "site-header" in (attrs.get("class") or "")
+        for tag, attrs in nav_ancestors
+    )
     assert any(tag == "details" and attrs.get("class") == "role-comparison" for tag, attrs in tags)
     assert any(tag == "details" and attrs.get("class") == "runtime-summary" for tag, attrs in tags)
+    assert any(attrs.get("class") == "policy-filter-bar" for _, attrs in tags)
+    assert any(attrs.get("id") == "rule-filter-stage" and attrs.get("data-policy-filter") == "0" for _, attrs in tags)
     assert any(
         attrs.get("class") == "governance-header" and "hidden" in attrs for _, attrs in tags
     )
@@ -461,7 +496,7 @@ def test_static_ui_has_required_accessible_structure() -> None:
         for tag, attrs, ancestors in ancestor_parser.elements
         if tag == "button" and attrs.get("class") == "example"
     ]
-    assert len(prompt_buttons) == 3
+    assert len(prompt_buttons) == 4
     assert all(
         any(tag == "form" and attrs.get("id") == "chat-form" for tag, attrs in ancestors)
         for ancestors in prompt_buttons
@@ -477,6 +512,7 @@ def test_static_ui_has_required_accessible_structure() -> None:
         "Selected-role access",
         "Preview only. Actual access requires successful sign-in and runtime policy evaluation.",
         "Try a prompt",
+        "Prepare a retention outreach case for MEM-001.",
         "Analyst <span>OBO</span>",
         "Retention Specialist <span>OBO</span>",
         "Compliance Reviewer / Administrator <span>OBO</span>",

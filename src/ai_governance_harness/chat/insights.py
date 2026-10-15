@@ -22,9 +22,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 logger = logging.getLogger(__name__)
 ROLES = ("ai-governance-harness-chat", "ai-governance-harness-mcp")
-EVENTS = ("mcp.startup", "mcp.readiness", "mcp.tool.call", "governance.policy.decision")
+EVENTS = (
+    "mcp.startup", "mcp.readiness", "mcp.tool.call", "mcp.elicitation",
+    "governance.policy.decision",
+)
 SPAN_NAMES = (
-    "evaluate.governance.policy", "http.server.request",
+    "evaluate.governance.policy", "governance.human_approval", "http.server.request",
     "mcp.tool.get_member_profile", "mcp.tool.get_member_disengagement_signals",
     "mcp.tool.get_cohort_churn_analytics", "mcp.tool.get_fum_outflow_summary",
     "mcp.tool.prepare_member_outreach_case",
@@ -43,9 +46,12 @@ TOKEN_METRIC_NAMES = (
 )
 METRIC_NAMES = (
     "governance.policy.decision.count", "governance.policy.evaluation.duration",
-    "mcp.tool.call.count", "gen_ai.client.inference.usage.input_tokens",
+    "mcp.tool.call.count", "governance.human_approval.count",
+    "gen_ai.client.inference.usage.input_tokens",
     "gen_ai.client.inference.usage.output_tokens",
 )
+
+APPROVAL_OUTCOMES = ("requested", "approved", "declined", "cancelled", "not_approved")
 
 # Hourly 24h windows add up to ~150 decision buckets and ~50 usage buckets.
 MAX_ROWS = 600
@@ -98,13 +104,14 @@ def history_query(hours: int) -> str:
     metric_names = json.dumps(METRIC_NAMES)
     token_names = json.dumps(TOKEN_METRIC_NAMES)
     events = json.dumps(EVENTS)
+    approval_outcomes = json.dumps(APPROVAL_OUTCOMES)
     bucket = {1: "5m", 4: "15m", 24: "1h"}[hours]
     return f"""
 let metrics = customMetrics
 | where timestamp > ago({hours}h) and cloud_RoleName in (dynamic({roles}))
 | where name in (dynamic({metric_names}))
-| extend outcome=tostring(customDimensions["governance.decision"])
-| extend outcome=iff(outcome in ("allow", "deny", "require_approval"), outcome, "")
+| extend outcome=iff(name == "governance.human_approval.count", tostring(customDimensions["governance.approval.outcome"]), tostring(customDimensions["governance.decision"]))
+| extend outcome=iff(outcome in ("allow", "deny", "require_approval") or (name == "governance.human_approval.count" and outcome in (dynamic({approval_outcomes}))), outcome, "")
 | extend bucket=iff(name == "governance.policy.decision.count", bin(timestamp, {bucket}), datetime(null))
 | summarize total=sum(valueSum), samples=sum(valueCount) by service=cloud_RoleName, name, outcome, timestamp=bucket
 | project ['kind']="metric", service, name, outcome, total, samples, timestamp;
@@ -133,7 +140,7 @@ let candidate_spans = union requests, dependencies
 let spans = union
 (candidate_spans | where name != "http.server.request" | top 100 by timestamp desc),
 (candidate_spans | where name == "http.server.request" | top 25 by timestamp desc)
-| extend decision=tostring(customDimensions["governance.decision"]), guardrail_outcome=tostring(customDimensions["governance.guardrail.outcome"])
+| extend decision=tostring(customDimensions["governance.decision"]), guardrail_outcome=tostring(customDimensions["governance.guardrail.outcome"]), approval_outcome=tostring(customDimensions["governance.approval.outcome"])
 | extend rule=coalesce(tostring(customDimensions["governance.rule.name"]), tostring(customDimensions["governance.guardrail.reason"])), stage=tostring(customDimensions["governance.lifecycle.point"])
 | extend rule=iff(rule matches regex @"{RULE_PATTERN}", rule, ""), stage=iff(stage matches regex @"^[a-z_]{{1,24}}$", stage, "")
 | extend model=tostring(customDimensions["gen_ai.response.model"])
@@ -142,7 +149,7 @@ let spans = union
 | extend cached_tokens=toint(customDimensions["gen_ai.usage.cache_read.input_tokens"]), reasoning_tokens=toint(customDimensions["gen_ai.usage.reasoning.output_tokens"])
 | project ['kind']="span", service=cloud_RoleName, name, timestamp, rule, stage, model,
 input_tokens, output_tokens, cached_tokens, reasoning_tokens,
-duration_ms=todouble(duration), outcome=case(name == "evaluate.governance.policy" and decision in ("allow", "deny", "require_approval"), decision, name startswith "apply_guardrail " and guardrail_outcome in ("passed", "triggered", "error"), guardrail_outcome, success == true, "success", success == false, "failure", "unknown"),
+duration_ms=todouble(duration), outcome=case(name == "evaluate.governance.policy" and decision in ("allow", "deny", "require_approval"), decision, name startswith "apply_guardrail " and guardrail_outcome in ("passed", "triggered", "error"), guardrail_outcome, name == "governance.human_approval" and approval_outcome in (dynamic({approval_outcomes})), approval_outcome, success == true, "success", success == false, "failure", "unknown"),
 operation_id=operation_Id, span_id=id, parent_id=operation_ParentId;
 let logs = traces
 | where timestamp > ago({hours}h) and cloud_RoleName in (dynamic({roles}))

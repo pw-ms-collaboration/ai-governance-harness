@@ -5,47 +5,59 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Role-governed member and aggregate insights using synthetic data and local identity">
     <title>Business Analyst Insights Chat</title>
-    <link rel="stylesheet" href="/static/app.css?v=eval-progress-1">
+    <link rel="stylesheet" href="/static/app.css?v=flow-pad-1">
   </head>
   <body>
     <a class="skip-link" href="#chat-input">Skip to message input</a>
     <a class="skip-link skip-governance" href="#governance-panel">Skip to governance</a>
     <header class="site-header">
-      <div>
-        <p class="eyebrow">AI governance harness</p>
-        <h1>Customer insights for business analysts</h1>
-        <p class="subtitle">Foundry-powered member and aggregate insights with governed tool access.</p>
+      <div class="header-brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false"><path d="M12 2.5 4.5 5.4v5.8c0 4.6 3.1 8.7 7.5 10.3 4.4-1.6 7.5-5.7 7.5-10.3V5.4L12 2.5Z"/><path d="m8.6 12 2.4 2.4 4.6-4.8"/></svg>
+        </span>
+        <div class="header-copy">
+          <div class="brand-meta">
+            <p class="eyebrow">AI governance harness</p>
+            <div class="connection" aria-live="polite">
+              <span class="status-dot" aria-hidden="true"></span>
+              <span id="connection-status">Checking services...</span>
+            </div>
+          </div>
+          <h1>Customer insights for business analysts</h1>
+          <p class="subtitle">Foundry-powered member and aggregate insights with governed tool access.</p>
+        </div>
       </div>
-      <div class="connection" aria-live="polite">
-        <span class="status-dot" aria-hidden="true"></span>
-        <span id="connection-status">Checking services...</span>
-      </div>
-    </header>
-
-    <nav class="view-tabs" aria-label="Application views">
-      <div role="tablist" aria-label="Application views">
-        <button type="button" role="tab" id="tab-chat" aria-controls="panel-chat" aria-selected="true">
-          Chat
-        </button>
-        <button type="button" role="tab" id="tab-observability" aria-controls="panel-observability" aria-selected="false" tabindex="-1">
-          Observability
-        </button>
-        <button type="button" role="tab" id="tab-eval" aria-controls="panel-eval" aria-selected="false" tabindex="-1">
-          Eval
-        </button>
-      </div>
-    </nav>
-
-    <main class="app-shell">
-      <div id="panel-chat" class="view-panel" role="tabpanel" aria-labelledby="tab-chat">
-      <div class="workspace">
-        <section class="identity-panel" aria-label="Identity">
-          <label for="mock-persona">Choose identity</label>
+      <nav class="view-tabs" aria-label="Application views">
+        <div role="tablist" aria-label="Application views">
+          <button type="button" role="tab" id="tab-chat" aria-controls="panel-chat" aria-selected="true">
+            Chat
+          </button>
+          <button type="button" role="tab" id="tab-observability" aria-controls="panel-observability" aria-selected="false" tabindex="-1">
+            Observability
+          </button>
+          <button type="button" role="tab" id="tab-eval" aria-controls="panel-eval" aria-selected="false" tabindex="-1">
+            Eval
+          </button>
+        </div>
+      </nav>
+      <div class="header-actions">
+        <section class="identity-panel header-identity-panel" aria-label="Identity">
+          <span class="identity-avatar" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false"><circle cx="12" cy="8.5" r="3.8"/><path d="M4.8 20c1.2-3.6 3.9-5.4 7.2-5.4s6 1.8 7.2 5.4"/></svg>
+          </span>
+          <label id="persona-label" for="mock-persona">Choose identity</label>
           <div class="mock-identity">
             <div class="identity-controls">
-              <select id="mock-persona" aria-describedby="identity-help identity-status">
+              <div class="persona-picker">
+                <button id="persona-trigger" class="persona-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="persona-menu" aria-labelledby="persona-label persona-trigger-text" aria-describedby="identity-help identity-status">
+                  <span id="persona-trigger-text">Choose a persona</span>
+                  <svg class="persona-chevron" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="m5 7.5 5 5 5-5"/></svg>
+                </button>
+                <ul id="persona-menu" class="persona-menu" role="listbox" aria-labelledby="persona-label" tabindex="-1" hidden></ul>
+              </div>
+              <select id="mock-persona" class="persona-native" aria-hidden="true" tabindex="-1">
                 <option value="">Choose a persona</option>
-                <option value="analyst">Analyst</option>
+                <option value="analyst" selected>Analyst</option>
                 <option value="retention_specialist">Retention Specialist</option>
                 <option value="compliance_reviewer">Compliance Reviewer</option>
                 <option value="administrator">Administrator</option>
@@ -56,7 +68,12 @@
           <p id="identity-help" class="visually-hidden">Changing persona clears the conversation.</p>
           <p id="identity-status" class="identity-status" role="status" aria-live="polite">Not signed in.</p>
         </section>
+      </div>
+    </header>
 
+    <main class="app-shell">
+      <div id="panel-chat" class="view-panel" role="tabpanel" aria-labelledby="tab-chat">
+      <div class="workspace">
         <section class="conversation" aria-labelledby="conversation-title">
           <div class="conversation-heading">
             <h2 id="conversation-title">Conversation</h2>
@@ -88,6 +105,9 @@
                 </button>
                 <button type="button" class="example" data-question="Summarize the cohort churn risk and FUM at risk.">
                   Cohort summary
+                </button>
+                <button type="button" class="example" data-question="Prepare a retention outreach case for MEM-001.">
+                  Retention case MEM-001
                 </button>
               </div>
               <p class="question-help">
@@ -191,8 +211,8 @@
               <title id="flow-svg-title">Request flow from chat, gateway and MCP sources through the policy gate to outcomes</title>
               <defs>
                 <radialGradient id="flow-gate-glow">
-                  <stop offset="0%" stop-color="#58a6ff" stop-opacity="0.45" />
-                  <stop offset="100%" stop-color="#58a6ff" stop-opacity="0" />
+                  <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.18" />
+                  <stop offset="100%" stop-color="#3b82f6" stop-opacity="0" />
                 </radialGradient>
               </defs>
               <g class="flow-paths" aria-hidden="true">
@@ -228,23 +248,23 @@
               </g>
               <g id="flow-node-allow" class="flow-node flow-outcome flow-allow" role="button" tabindex="0" aria-label="Filter latest decisions by Policy allowed" aria-pressed="false" data-filter="outcome" data-value="allow">
                 <rect x="780" y="27" width="200" height="56" rx="10" />
-                <text class="flow-outcome-label" x="795" y="51">Policy allowed</text>
-                <text id="flow-count-allow" class="flow-count" x="965" y="64">0</text>
+                <text class="flow-outcome-label" x="800" y="56">Policy allowed</text>
+                <text id="flow-count-allow" class="flow-count" x="962" y="57">0</text>
               </g>
               <g id="flow-node-deny" class="flow-node flow-outcome flow-deny" role="button" tabindex="0" aria-label="Filter latest decisions by Policy denied" aria-pressed="false" data-filter="outcome" data-value="deny">
                 <rect x="780" y="107" width="200" height="56" rx="10" />
-                <text class="flow-outcome-label" x="795" y="131">Policy denied</text>
-                <text id="flow-count-deny" class="flow-count" x="965" y="144">0</text>
+                <text class="flow-outcome-label" x="800" y="136">Policy denied</text>
+                <text id="flow-count-deny" class="flow-count" x="962" y="137">0</text>
               </g>
               <g id="flow-node-approval" class="flow-node flow-outcome flow-approval" role="button" tabindex="0" aria-label="Filter latest decisions by Approval required" aria-pressed="false" data-filter="outcome" data-value="approval">
                 <rect x="780" y="187" width="200" height="56" rx="10" />
-                <text class="flow-outcome-label" x="795" y="211">Approval required</text>
-                <text id="flow-count-approval" class="flow-count" x="965" y="224">0</text>
+                <text class="flow-outcome-label" x="800" y="216">Approval required</text>
+                <text id="flow-count-approval" class="flow-count" x="962" y="217">0</text>
               </g>
               <g id="flow-node-other" class="flow-node flow-outcome flow-other" role="button" tabindex="0" aria-label="Filter latest decisions by Warn, log or other" aria-pressed="false" data-filter="outcome" data-value="other">
                 <rect x="780" y="267" width="200" height="56" rx="10" />
-                <text class="flow-outcome-label" x="795" y="291">Warn / log / other</text>
-                <text id="flow-count-other" class="flow-count" x="965" y="304">0</text>
+                <text class="flow-outcome-label" x="800" y="296">Warn / log / other</text>
+                <text id="flow-count-other" class="flow-count" x="962" y="297">0</text>
               </g>
               <g id="flow-particles" aria-hidden="true"></g>
             </svg>
@@ -394,6 +414,23 @@
               Exact workload policy with <strong id="default-action">unknown</strong>
               as the unmatched-action outcome.
             </p>
+            <div class="policy-filter-bar">
+              <div class="policy-filter-heading">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M4 5h16l-6.2 7.1v5.1l-3.6 1.8v-6.9L4 5Z" />
+                </svg>
+                <div>
+                  <span class="policy-filter-kicker">Refine rules</span>
+                  <label for="rule-filter-stage">Lifecycle stage</label>
+                </div>
+              </div>
+              <div class="policy-filter-select">
+                <select id="rule-filter-stage" data-policy-filter="0">
+                  <option value="">All lifecycle stages</option>
+                </select>
+              </div>
+              <p id="policy-filter-status" class="policy-filter-status" role="status" aria-live="polite"></p>
+            </div>
             <div class="table-scroll" role="region" aria-label="Active governance policy rules" tabindex="0">
               <table>
                 <caption id="policy-caption">Active packaged policy</caption>
@@ -405,19 +442,10 @@
                     <th scope="col">Policy origin</th>
                     <th scope="col">Condition</th>
                   </tr>
-                  <tr class="table-filters">
-                    <td>
-                      <select id="rule-filter-stage" data-policy-filter="0" aria-label="Filter rules by stage">
-                        <option value="">All</option>
-                      </select>
-                    </td>
-                    <td colspan="4"></td>
-                  </tr>
                 </thead>
                 <tbody id="policy-rules"></tbody>
               </table>
             </div>
-            <p id="policy-filter-status" class="table-filter-status" role="status" aria-live="polite"></p>
           </details>
 
           <details>
@@ -570,6 +598,7 @@
                   <div class="genai-legend" aria-hidden="true">
                     <span class="layer-agent">Agent</span><span class="layer-inference">Model inference</span>
                     <span class="layer-tool">Tool</span><span class="layer-mcp">MCP</span>
+                    <span class="layer-approval">Human approval</span>
                     <span class="legend-marker outcome-allow">Policy allowed</span>
                     <span class="legend-marker outcome-deny">Policy denied</span>
                     <span class="legend-marker outcome-require_approval">Approval required</span>
@@ -767,8 +796,8 @@
       <p>Synthetic demonstration data only. External assets are not tracked or verified.</p>
     </footer>
     <script src="/static/tabs.js?v=2" defer></script>
-    <script src="/static/app.js?v=gate-pop-4" type="module"></script>
-    <script src="/static/insights.js?v=gate-pop-4" defer></script>
+    <script src="/static/app.js?v=auto-signin-1" type="module"></script>
+    <script src="/static/insights.js?v=approval-telemetry-1" defer></script>
     <script src="/static/flow.js?v=gate-pop-4" defer></script>
     <script src="/static/foundry-evaluations.js?v=5" defer></script>
   </body>

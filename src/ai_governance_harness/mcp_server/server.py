@@ -20,6 +20,7 @@ from ai_governance_harness.governance import (
     LifecyclePoint,
     get_governance_engine,
 )
+from ai_governance_harness.governance.telemetry import record_human_approval
 from ai_governance_harness.guardrails.advice_filter import tool_response_policy_data
 from ai_governance_harness.mcp_server import tools as gateway_tools
 from ai_governance_harness.mcp_server.tool_contracts import build_tool_metadata
@@ -152,6 +153,9 @@ def _check_outreach_eligibility(member_id: str) -> None:
 
 def _resolve_outreach_approval(member_id: str) -> Elicit[OutreachCaseApproval]:
     _check_outreach_eligibility(member_id)
+    get_governance_engine().record_approval_required(
+        "prepare_member_outreach_case", source="mcp",
+    )
     return Elicit(
         message=(
             f"Approve preparation of a read-only synthetic outreach case for {member_id}. "
@@ -295,12 +299,22 @@ def prepare_member_outreach_case(
             outcome="declined",
             tool_name="prepare_member_outreach_case",
         )
+        record_human_approval(
+            "declined",
+            tool_name="prepare_member_outreach_case",
+            mechanism="mcp_form_elicitation",
+        )
         raise ToolError("Approval was declined. No operation was executed.")
     if approval.action == "cancel":
         emit_audit_event(
             "mcp.elicitation",
             outcome="cancelled",
             tool_name="prepare_member_outreach_case",
+        )
+        record_human_approval(
+            "cancelled",
+            tool_name="prepare_member_outreach_case",
+            mechanism="mcp_form_elicitation",
         )
         raise ToolError("Approval was cancelled. No operation was executed.")
     if not approval.data.approved:
@@ -309,12 +323,22 @@ def prepare_member_outreach_case(
             outcome="not_approved",
             tool_name="prepare_member_outreach_case",
         )
+        record_human_approval(
+            "not_approved",
+            tool_name="prepare_member_outreach_case",
+            mechanism="mcp_form_elicitation",
+        )
         raise ToolError("Explicit approval is required. No operation was executed.")
 
     emit_audit_event(
         "mcp.elicitation",
         outcome="approved",
         tool_name="prepare_member_outreach_case",
+    )
+    record_human_approval(
+        "approved",
+        tool_name="prepare_member_outreach_case",
+        mechanism="mcp_form_elicitation",
     )
 
     def build_case() -> dict[str, Any]:

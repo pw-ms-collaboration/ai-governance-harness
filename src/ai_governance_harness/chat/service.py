@@ -34,7 +34,10 @@ from ai_governance_harness.governance import (
     get_governance_engine,
 )
 from ai_governance_harness.governance.reliability import ReliabilityGuard
-from ai_governance_harness.governance.telemetry import guardrail_span
+from ai_governance_harness.governance.telemetry import (
+    guardrail_span,
+    record_human_approval,
+)
 from ai_governance_harness.governance.retention import RetentionReview
 from ai_governance_harness.governance.snapshot import (
     build_governance_snapshot,
@@ -484,6 +487,15 @@ def _outreach_approval_prompt(member_id: str) -> str:
     )
 
 
+def _record_browser_approval(outcome: Literal["requested", "declined"]) -> None:
+    """Record approval steps that the browser chat resolves without calling MCP."""
+    record_human_approval(
+        outcome,
+        tool_name="prepare_member_outreach_case",
+        mechanism="browser_chat",
+    )
+
+
 def _pending_outreach_approval(
     messages: list[ChatMessage],
 ) -> tuple[str, bool | None] | None:
@@ -915,11 +927,16 @@ class ChatService:
                 if pending_approval is not None:
                     member_id, decision = pending_approval
                     if decision is None:
+                        _record_browser_approval("requested")
+                        self._governance.record_approval_required(
+                            "prepare_member_outreach_case", source="chat",
+                        )
                         return self._finalize_response(
                             _outreach_approval_prompt(member_id),
                             tools_used,
                         )
                     if decision is False:
+                        _record_browser_approval("declined")
                         return self._finalize_response(
                             (
                                 f"Understood. Preparation of the outreach case "
@@ -1228,6 +1245,10 @@ class ChatService:
                             tool_name == "prepare_member_outreach_case"
                             and pending_approval != (member_id, True)
                         ):
+                            _record_browser_approval("requested")
+                            self._governance.record_approval_required(
+                                tool_name, source="chat",
+                            )
                             return self._finalize_response(
                                 _outreach_approval_prompt(member_id),
                                 tools_used,

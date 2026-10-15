@@ -212,7 +212,16 @@
     { key: "mcp", label: "MCP", match: (name) => /^(MCP send |tools\/call |mcp\.tool\.|http\.server\.request$)/.test(name) },
     { key: "policy", label: "Policy", match: (name) => name === "evaluate.governance.policy" },
     { key: "guardrail", label: "Guardrail", match: (name) => name.startsWith("apply_guardrail ") },
+    { key: "approval", label: "Human approval", match: (name) => name === "governance.human_approval" },
   ];
+  const approvalOutcomes = [
+    { key: "requested", label: "Approval requested" },
+    { key: "approved", label: "Approved by human" },
+    { key: "declined", label: "Declined by human" },
+    { key: "cancelled", label: "Approval cancelled" },
+    { key: "not_approved", label: "Not approved" },
+  ];
+  const approvalLabel = (outcome) => approvalOutcomes.find((item) => item.key === outcome)?.label || "Human approval";
   const guardrailOutcomes = [
     { key: "passed", label: "Passed" },
     { key: "triggered", label: "Triggered" },
@@ -270,6 +279,7 @@
       ["Input tokens", tokens("gen_ai.client.inference.usage.input_tokens"), "tokens"],
       ["Output tokens", tokens("gen_ai.client.inference.usage.output_tokens"), "tokens"],
       ["Mean model latency", inference.length ? formatDuration(sumDuration(inference) / inference.length) : "No data", "inference"],
+      ["Human approvals", approvalSummary(metrics), "approval"],
     ]) {
       const card = element("div", "", `kpi-${tone}`);
       card.append(element("dt", label), element("dd", String(value)));
@@ -286,8 +296,9 @@
         .map((row) => row.name.slice("execute_tool ".length)))];
       const policies = policyCounts(related.filter((row) => genaiLayer(row.name).key === "policy"));
       const failed = related.some((row) => row.outcome === "failure");
-      const status = failed ? "error" : policies.deny ? "deny" : policies.require_approval ? "approval" : "ok";
-      const statusLabel = { error: "Error", deny: "Policy denied", approval: "Approval required", ok: "Completed" }[status];
+      const approval = related.filter((row) => genaiLayer(row.name).key === "approval").at(-1);
+      const status = failed ? "error" : policies.deny ? "deny" : policies.require_approval || approval ? "approval" : "ok";
+      const statusLabel = failed ? "Error" : policies.deny ? "Policy denied" : approval ? approvalLabel(approval.outcome) : policies.require_approval ? "Approval required" : "Completed";
       const button = element("button", "", `genai-run status-${status}`);
       button.type = "button";
       button.dataset.operation = run.operation_id;
@@ -310,6 +321,14 @@
       genaiRuns.append(item);
     }
     selectRun(runs.some((run) => run.operation_id === genaiSelected) ? genaiSelected : runs[0]?.operation_id);
+  }
+
+  function approvalSummary(metrics) {
+    const rows = metrics.filter((row) => row.name === "governance.human_approval.count");
+    if (!rows.length) return "No data";
+    const total = (key) => rows.filter((row) => row.outcome === key).reduce((sum, row) => sum + (row.total || 0), 0);
+    const declined = total("declined") + total("cancelled") + total("not_approved");
+    return `${total("approved")} approved · ${declined} declined · ${total("requested")} requested`;
   }
 
   function selectRun(operationId) {
@@ -443,6 +462,7 @@
         const outcome = outcomes.find((item) => item.key === row.outcome);
         if (outcome) meta.append(element("span", outcome.label, `outcome-${outcome.key}`));
       }
+      if (layer.key === "approval") meta.append(element("span", approvalLabel(row.outcome), `approval-${row.outcome}`));
       if (layer.key === "guardrail" && row.outcome !== "passed") {
         const outcome = guardrailOutcomes.find((item) => item.key === row.outcome);
         if (outcome) meta.append(element("span", `${outcome.label}${row.rule && row.rule !== "none" ? `: ${reasonLabel(row.rule)}` : ""}`, row.outcome === "error" ? "outcome-require_approval" : "outcome-deny"));

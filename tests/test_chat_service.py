@@ -782,7 +782,13 @@ async def test_given_eligible_outreach_request_then_asks_for_approval(
         lambda: project_client,
     )
     monkeypatch.setattr("ai_governance_harness.chat.service.Client", OutreachMcpClient)
+    approvals: list[tuple[str, dict[str, str]]] = []
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.record_human_approval",
+        lambda outcome, **attributes: approvals.append((outcome, attributes)),
+    )
     service = ChatService(_settings())
+    governance_events.clear()
     request = ChatRequest(
         messages=[
             ChatMessage(
@@ -799,6 +805,18 @@ async def test_given_eligible_outreach_request_then_asks_for_approval(
     assert response.message.startswith("Approval required for MEM-001")
     assert response.tools_used == []
     assert calls == ["get_member_profile"]
+    approval_events = [
+        event for event in governance_events.snapshot()["recent_events"]
+        if event["decision"] == "require_approval"
+    ]
+    assert len(approval_events) == 1
+    assert approval_events[0]["source"] == "chat"
+    assert approval_events[0]["action"] == "prepare_member_outreach_case"
+    assert approval_events[0]["allowed"] is False
+    assert approvals == [(
+        "requested",
+        {"tool_name": "prepare_member_outreach_case", "mechanism": "browser_chat"},
+    )]
 
 
 @pytest.mark.anyio
@@ -889,10 +907,10 @@ async def test_given_explicit_approval_when_outreach_pending_then_executes(
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(
-    ("answer", "expected"),
+    ("answer", "expected", "expected_approval"),
     [
-        ("Decline", "was declined"),
-        ("Tell me more", "Reply **Approve**"),
+        ("Decline", "was declined", "declined"),
+        ("Tell me more", "Reply **Approve**", "requested"),
     ],
 )
 async def test_given_non_approval_when_outreach_pending_then_does_not_execute(
@@ -900,10 +918,16 @@ async def test_given_non_approval_when_outreach_pending_then_does_not_execute(
     monkeypatch: pytest.MonkeyPatch,
     answer: str,
     expected: str,
+    expected_approval: str,
 ) -> None:
     # Arrange
     model_client = _FakeModelClient()
     project_client = _FakeProjectClient(model_client)
+    approvals: list[str] = []
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.record_human_approval",
+        lambda outcome, **_attributes: approvals.append(outcome),
+    )
     monkeypatch.setattr(
         "ai_governance_harness.chat.service.get_foundry_client",
         lambda: project_client,
@@ -933,6 +957,7 @@ async def test_given_non_approval_when_outreach_pending_then_does_not_execute(
     assert expected in response.message
     assert response.tools_used == []
     assert model_client.chat.completions.calls == []
+    assert approvals == [expected_approval]
 
 
 @pytest.mark.anyio

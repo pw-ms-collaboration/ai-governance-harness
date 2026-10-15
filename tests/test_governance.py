@@ -250,6 +250,29 @@ def test_given_external_denial_when_recording_then_enforces_and_counts_it(
     assert snapshot["recent_events"][0]["provenance"] is None
 
 
+@pytest.mark.usefixtures("chat_caller")
+def test_given_human_approval_gate_when_recording_then_counts_require_approval() -> None:
+    # Arrange
+    engine = GovernanceEngine(_settings(enabled=True))
+
+    # Act
+    decision = engine.record_approval_required(
+        "prepare_member_outreach_case",
+        source="mcp",
+    )
+    snapshot = governance_events.snapshot()
+
+    # Assert
+    assert decision.allowed is False
+    assert decision.action == "require_approval"
+    assert decision.lifecycle_point == LifecyclePoint.PRE_TOOL
+    assert snapshot["counts"]["require_approval"] == 1
+    event = snapshot["recent_events"][0]
+    assert event["source"] == "mcp"
+    assert event["matched_rule"] == "require-human-approval"
+    assert event["policy_name"] == "human-approval-gate"
+
+
 @pytest.mark.parametrize(
     ("overrides", "expected_allowed", "expected_rule"),
     [

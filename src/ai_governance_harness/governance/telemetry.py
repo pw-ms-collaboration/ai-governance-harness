@@ -48,6 +48,38 @@ GuardrailName = Literal[
     "scope_refusal",
 ]
 GuardrailOutcome = Literal["passed", "triggered", "error"]
+
+approval_counter = _meter.create_counter(
+    "governance.human_approval.count",
+    unit="1",
+    description="Count of human-in-the-loop approval steps by tool, mechanism and outcome.",
+)
+HUMAN_APPROVAL_SPAN = "governance.human_approval"
+ApprovalOutcome = Literal["requested", "approved", "declined", "cancelled", "not_approved"]
+ApprovalMechanism = Literal["browser_chat", "mcp_form_elicitation"]
+ApprovalTool = Literal["prepare_member_outreach_case"]
+
+
+def record_human_approval(
+    outcome: ApprovalOutcome,
+    *,
+    tool_name: ApprovalTool,
+    mechanism: ApprovalMechanism,
+) -> None:
+    """Trace and count one human approval step using closed vocabularies only.
+
+    Logs are not exported to Azure Monitor, so approvals are recorded as a span
+    and a metric. Member identifiers and message content are never attached.
+    """
+    attributes = {
+        "governance.approval.outcome": outcome,
+        "governance.approval.tool": tool_name,
+        "governance.approval.mechanism": mechanism,
+    }
+    with tracer.start_as_current_span(HUMAN_APPROVAL_SPAN, attributes=attributes):
+        approval_counter.add(1, attributes)
+
+
 _BOUNDED_CODE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _BOUNDED_ACTION = re.compile(r"^[a-z][a-z0-9_.]{0,63}$")
 

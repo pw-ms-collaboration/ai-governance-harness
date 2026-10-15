@@ -42,6 +42,9 @@ const evaluationBaselines = document.querySelector("#evaluation-baselines");
 const evaluationControls = document.querySelector("#evaluation-controls");
 
 const personaSelector = document.querySelector("#mock-persona");
+const personaTrigger = document.querySelector("#persona-trigger");
+const personaTriggerText = document.querySelector("#persona-trigger-text");
+const personaMenu = document.querySelector("#persona-menu");
 const signInButton = document.querySelector("#identity-signin");
 const identityStatus = document.querySelector("#identity-status");
 const selectedRoleName = document.querySelector("#selected-role-name");
@@ -227,6 +230,8 @@ function setBusy(isBusy) {
   input.disabled = isBusy;
   sendButton.disabled = isBusy || !(accessToken || hostedSession);
   personaSelector.disabled = isBusy;
+  personaTrigger.disabled = isBusy;
+  if (isBusy) closePersonaMenu(false);
   signInButton.disabled = isBusy || Boolean(accessToken);
   clearButton.disabled = isBusy;
   activityStatus.textContent = isBusy ? "Thinking and checking governance tools" : "";
@@ -531,7 +536,7 @@ function refreshPolicyFilterOptions() {
     const column = Number(control.dataset.policyFilter);
     const values = [...new Set(rows.map((row) => policyCellText(row, column)))].sort();
     const selected = values.includes(control.value) ? control.value : "";
-    const options = [new Option("All", "")];
+    const options = [new Option("All lifecycle stages", "")];
     for (const value of values) {
       options.push(new Option(value, value));
     }
@@ -561,8 +566,8 @@ function applyPolicyFilters() {
     }
   }
   policyFilterStatus.textContent = active.length
-    ? `Showing ${visible} of ${rows.length} rules.`
-    : "";
+    ? `Showing ${visible} of ${rows.length} rules`
+    : `Showing all ${rows.length} rules`;
 }
 
 for (const control of policyFilterControls) {
@@ -655,9 +660,6 @@ function renderGovernance(snapshot) {
   } / ${governanceRetainedLimit}`;
 
   renderServices(snapshot.services);
-  identityMode.textContent = hostedMode
-    ? "Microsoft Entra EasyAuth"
-    : snapshot.identity?.label || "Identity mode unavailable";
   enforcementMode.textContent = String(snapshot.runtime?.enforcement || "unknown").replaceAll("_", " ");
   sandboxStatus.textContent = [
     snapshot.runtime?.sandbox?.provider || "unknown",
@@ -809,7 +811,7 @@ form.addEventListener("submit", async (event) => {
   if (busy) return;
   if (!(accessToken || hostedSession)) {
     showError(hostedMode ? "Sign in through Microsoft Entra again." : "Choose a mock persona and sign in before sending.");
-    if (!hostedMode) personaSelector.focus();
+    personaTrigger.focus();
     return;
   }
   const content = input.value.trim();
@@ -891,18 +893,20 @@ function clearIdentityConversation() {
 }
 
 personaSelector.addEventListener("change", () => {
+  syncPersonaPicker();
   clearIdentityConversation();
   renderRoleAccessPreview(personaSelector.value);
   identityStatus.textContent = "Persona changed. Sign in to start a new conversation.";
 });
 
-signInButton.addEventListener("click", async () => {
+async function signIn({ automatic = false } = {}) {
   if (busy || hostedMode) return;
-  clearIdentityConversation();
+  if (!automatic) clearIdentityConversation();
   const persona = personaSelector.value;
   if (!persona) {
+    if (automatic) return;
     showError("Choose a persona first.");
-    personaSelector.focus();
+    personaTrigger.focus();
     return;
   }
   setBusy(true);
@@ -929,7 +933,9 @@ signInButton.addEventListener("click", async () => {
   } finally {
     setBusy(false);
   }
-});
+}
+
+signInButton.addEventListener("click", () => signIn());
 
 input.addEventListener("input", () => {
   characterCount.textContent = `${input.value.length} / 4000`;
@@ -994,7 +1000,6 @@ window.setInterval(() => {
 }, 5000);
 
 async function loadIdentityMode() {
-  setBusy(false);
   try {
     const response = await fetch("/api/identity", {
       headers: { Accept: "application/json" },
@@ -1009,7 +1014,9 @@ async function loadIdentityMode() {
     hostedSession = hostedMode;
     if (hostedMode) {
       personaSelector.closest(".mock-identity").hidden = true;
-      identityMode.textContent = "Microsoft Entra EasyAuth";
+      identityStatus.textContent = "Microsoft Entra sign-in is required.";
+    } else {
+      await signIn({ automatic: true });
     }
   } catch (error) {
     showError(error.message || "Sign-in status is unavailable.");
@@ -1019,6 +1026,123 @@ async function loadIdentityMode() {
 }
 
 loadIdentityMode();
+
+function personaOptions() {
+  return [...personaMenu.querySelectorAll('[role="option"]')];
+}
+
+function buildPersonaMenu() {
+  const items = [...personaSelector.options]
+    .filter((option) => option.value)
+    .map((option) => {
+      const item = document.createElement("li");
+      item.id = `persona-option-${option.value}`;
+      item.setAttribute("role", "option");
+      item.dataset.value = option.value;
+      item.textContent = option.textContent;
+      return item;
+    });
+  personaMenu.replaceChildren(...items);
+  syncPersonaPicker();
+}
+
+function syncPersonaPicker() {
+  const selected = personaSelector.selectedOptions[0];
+  personaTriggerText.textContent = selected ? selected.textContent : "Choose a persona";
+  personaTrigger.classList.toggle("has-value", Boolean(personaSelector.value));
+  personaOptions().forEach((item) => {
+    item.setAttribute("aria-selected", String(item.dataset.value === personaSelector.value));
+  });
+}
+
+function setActivePersonaOption(item) {
+  personaOptions().forEach((option) => option.classList.toggle("active", option === item));
+  if (item) {
+    personaMenu.setAttribute("aria-activedescendant", item.id);
+    item.scrollIntoView({ block: "nearest" });
+  } else {
+    personaMenu.removeAttribute("aria-activedescendant");
+  }
+}
+
+function openPersonaMenu() {
+  if (personaTrigger.disabled) return;
+  personaMenu.hidden = false;
+  personaTrigger.setAttribute("aria-expanded", "true");
+  const options = personaOptions();
+  setActivePersonaOption(options.find((item) => item.dataset.value === personaSelector.value) || options[0]);
+  personaMenu.focus();
+}
+
+function closePersonaMenu(restoreFocus = true) {
+  if (personaMenu.hidden) return;
+  personaMenu.hidden = true;
+  personaTrigger.setAttribute("aria-expanded", "false");
+  setActivePersonaOption(null);
+  if (restoreFocus) personaTrigger.focus();
+}
+
+function choosePersona(item) {
+  if (!item) return;
+  const changed = personaSelector.value !== item.dataset.value;
+  personaSelector.value = item.dataset.value;
+  closePersonaMenu();
+  if (changed) personaSelector.dispatchEvent(new Event("change"));
+}
+
+personaTrigger.addEventListener("click", () => {
+  if (personaMenu.hidden) openPersonaMenu();
+  else closePersonaMenu();
+});
+
+personaTrigger.addEventListener("keydown", (event) => {
+  if (["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key)) {
+    event.preventDefault();
+    openPersonaMenu();
+  }
+});
+
+personaMenu.addEventListener("keydown", (event) => {
+  const options = personaOptions();
+  const active = personaMenu.querySelector(".active");
+  const index = options.indexOf(active);
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    setActivePersonaOption(options[Math.min(index + 1, options.length - 1)]);
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault();
+    setActivePersonaOption(options[Math.max(index - 1, 0)]);
+  } else if (event.key === "Home") {
+    event.preventDefault();
+    setActivePersonaOption(options[0]);
+  } else if (event.key === "End") {
+    event.preventDefault();
+    setActivePersonaOption(options.at(-1));
+  } else if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    choosePersona(active);
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    closePersonaMenu();
+  } else if (event.key === "Tab") {
+    closePersonaMenu(false);
+  }
+});
+
+personaMenu.addEventListener("click", (event) => {
+  choosePersona(event.target.closest('[role="option"]'));
+});
+
+personaMenu.addEventListener("mousemove", (event) => {
+  const item = event.target.closest('[role="option"]');
+  if (item && !item.classList.contains("active")) setActivePersonaOption(item);
+});
+
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".persona-picker")) closePersonaMenu(false);
+});
+
+buildPersonaMenu();
 renderRoleAccessPreview(personaSelector.value);
 checkHealth();
 refreshGovernance();

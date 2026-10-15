@@ -210,7 +210,7 @@ def collect_case(
     private_text(case.prompt)
     private_text(case.expected_behavior)
     endpoint = validate_connection(endpoint)
-    if sys.platform != "linux":
+    if sys.platform not in {"linux", "darwin"}:
         raise AgentEvaluationError("unsupported_owned_socket_platform")
     request_id = uuid4().hex
     deadline = time.monotonic() + timeout_seconds

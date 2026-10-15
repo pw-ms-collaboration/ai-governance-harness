@@ -120,9 +120,11 @@ def test_real_cli_routes_mcp_and_isolated_judge_with_simulated_http(tmp_path):
         assert "recent_contributions" not in path.read_text()
 
 
+@pytest.mark.parametrize("platform", ["linux", "darwin"])
 def test_private_fresh_artifacts_controls_and_no_overwrite(
-    tmp_path, simulated_boundaries
+    tmp_path, simulated_boundaries, monkeypatch, platform
 ):
+    monkeypatch.setattr(sys, "platform", platform)
     directory = tmp_path / "agent" / "private"
     results = run_simulation(directory)
     assert results.status == "passed"

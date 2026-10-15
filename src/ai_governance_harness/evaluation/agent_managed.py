@@ -636,9 +636,15 @@ def run_agent_managed(
                 row.record = ManagedRecord(
                     **row.case.model_dump(), response=evidence.response
                 )
-            except (AgentEvaluationError, ValidationError, OSError):
+            except (AgentEvaluationError, ValidationError, OSError) as error:
                 collection.collection_status = "error"
-                collection.collection_error = "invalid_or_failed_agent_collection"
+                collection.collection_error = (
+                    str(error)
+                    if isinstance(error, AgentEvaluationError)
+                    else "invalid_or_failed_agent_collection"
+                )
+                if collection.evidence and collection.evidence.collection_error:
+                    collection.collection_error = collection.evidence.collection_error
                 collection.policy_status = "error"
                 collection.policy_error = "collection_not_accepted"
                 row.response = ManagedResponse(

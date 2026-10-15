@@ -30,6 +30,9 @@
         <button type="button" role="tab" id="tab-observability" aria-controls="panel-observability" aria-selected="false" tabindex="-1">
           Observability
         </button>
+        <button type="button" role="tab" id="tab-eval" aria-controls="panel-eval" aria-selected="false" tabindex="-1">
+          Eval
+        </button>
       </div>
     </nav>
 
@@ -656,6 +659,91 @@
         </div>
       </section>
       </div>
+
+      <div id="panel-eval" class="view-panel" role="tabpanel" aria-labelledby="tab-eval" hidden>
+        <section class="governance-panel" aria-labelledby="foundry-evaluation-title">
+          <div class="panel-heading">
+            <h2 id="foundry-evaluation-title">Foundry evaluation results</h2>
+            <div class="foundry-actions">
+              <button id="foundry-run" type="button" disabled>Run Eval</button>
+              <button id="foundry-refresh" type="button" class="secondary">Load Foundry results</button>
+            </div>
+          </div>
+          <p id="foundry-job-status" role="status" aria-live="polite">Checking evaluation job status...</p>
+          <p id="foundry-job-error" class="error" role="alert" hidden></p>
+          <label for="foundry-evaluation-select">Evaluation</label>
+          <select id="foundry-evaluation-select" disabled></select>
+          <button id="foundry-more-evaluations" type="button" class="secondary" hidden>More evaluations</button>
+          <p id="foundry-status" role="status" aria-live="polite">Load Foundry results to browse evaluation runs.</p>
+          <p id="foundry-error" class="error" role="alert" hidden></p>
+          <div class="table-scroll" role="region" aria-label="Foundry evaluation runs" tabindex="0">
+            <table>
+              <caption>Foundry run history</caption>
+              <thead><tr><th scope="col">Run</th><th scope="col">Created</th><th scope="col">Status</th><th scope="col">Pass rate</th><th scope="col">Results</th><th scope="col">Details</th></tr></thead>
+              <tbody id="foundry-runs"></tbody>
+            </table>
+          </div>
+          <button id="foundry-more-runs" type="button" class="secondary" hidden>More runs</button>
+        </section>
+        <section class="governance-panel evaluation-panel" aria-labelledby="evaluation-title" hidden inert>
+          <div class="panel-heading">
+            <h2 id="evaluation-title">Policy evaluation</h2>
+            <button id="run-evaluation" type="button">Run Eval</button>
+          </div>
+          <p class="panel-intro">
+            Run isolated synthetic allow/deny checks without changing the active
+            policy. Results are saved locally; no Foundry submission is made.
+          </p>
+          <p id="evaluation-status" class="activity" role="status" aria-live="polite">
+            No evaluation loaded.
+          </p>
+          <p id="evaluation-error" class="error" role="alert" hidden></p>
+          <div id="evaluation-results" hidden>
+            <p id="evaluation-summary"></p>
+            <p class="evaluation-artifact">
+              Saved output: <code id="evaluation-artifact"></code>
+            </p>
+            <details open>
+              <summary>Allow/deny baselines</summary>
+              <div class="table-scroll" role="region" aria-label="Evaluation baselines" tabindex="0">
+                <table>
+                  <caption>Both baseline scores must be 1.0</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">Case</th>
+                      <th scope="col">Score</th>
+                      <th scope="col">Outcome</th>
+                      <th scope="col">Detail</th>
+                    </tr>
+                  </thead>
+                  <tbody id="evaluation-baselines"></tbody>
+                </table>
+              </div>
+            </details>
+            <details>
+              <summary>Regression controls</summary>
+              <p class="panel-intro">
+                A control passes when the grader detects its deliberate violation
+                with a 0.0 score or the expected evidence error.
+              </p>
+              <div class="table-scroll" role="region" aria-label="Evaluation regression controls" tabindex="0">
+                <table>
+                  <caption>Deliberately corrupted evidence, checked independently</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">Control</th>
+                      <th scope="col">Score</th>
+                      <th scope="col">Outcome</th>
+                      <th scope="col">Detail</th>
+                    </tr>
+                  </thead>
+                  <tbody id="evaluation-controls"></tbody>
+                </table>
+              </div>
+            </details>
+          </div>
+        </section>
+      </div>
     </main>
 
     <footer>
@@ -665,5 +753,6 @@
     <script src="/static/app.js?v=gate-pop-4" type="module"></script>
     <script src="/static/insights.js?v=gate-pop-4" defer></script>
     <script src="/static/flow.js?v=gate-pop-4" defer></script>
+    <script src="/static/foundry-evaluations.js?v=4" defer></script>
   </body>
 </html>

@@ -145,11 +145,17 @@ def _governance_error_details(error: GovernanceDeniedError) -> dict[str, str]:
 
 def _governance_service_error(error: GovernanceDeniedError) -> ChatServiceError:
     """Convert a policy denial to the public chat-service error contract."""
+    details = _governance_error_details(error)
+    if (
+        details.get("policy_name") == "azure-ai-foundry"
+        and details.get("matched_rule") == "content_filter"
+    ):
+        return ChatContentFilteredError(details=details)
     return ChatServiceError(
         "Governance policy denied the requested operation.",
         code="governance_denied",
         status_code=403,
-        details=_governance_error_details(error),
+        details=details,
     )
 
 
@@ -251,10 +257,14 @@ def _known_service_error(error: BaseException) -> ChatServiceError | None:
     if mcp_capability_error is not None:
         return mcp_capability_error
     if isinstance(error, BaseExceptionGroup):
+        known_error = None
         for nested_error in error.exceptions:
-            known_error = _known_service_error(nested_error)
-            if known_error is not None:
-                return known_error
+            nested_known_error = _known_service_error(nested_error)
+            if nested_known_error is None:
+                return None
+            if known_error is None:
+                known_error = nested_known_error
+        return known_error
     return None
 
 
@@ -319,13 +329,7 @@ def _model_stop_error(
     details = _empty_model_response_details(completion, choice)
     finish_reason = details.get("finish_reason")
     if finish_reason == "content_filter":
-        return ChatServiceError(
-            "Azure AI Foundry blocked the model response under a configured "
-            "content filter.",
-            code="model_content_filtered",
-            status_code=422,
-            details=details,
-        )
+        return ChatContentFilteredError(details=details)
     if finish_reason == "length" and recovery_attempted:
         return ChatServiceError(
             "The model reached its configured output limit before returning "
@@ -381,6 +385,19 @@ def _classification_stop_reason(policy_data: dict[str, str]) -> str | None:
     if policy_data["confidence"] == "low":
         return "low_confidence"
     return None
+
+
+class ChatContentFilteredError(ChatServiceError):
+    """Raised when Foundry filters a generated response."""
+
+    def __init__(self, *, details: dict[str, str] | None = None) -> None:
+        super().__init__(
+            "Azure AI Foundry blocked the model response under a configured "
+            "content filter.",
+            code="model_content_filtered",
+            status_code=422,
+            details=details,
+        )
 
 
 class ChatMessage(BaseModel):

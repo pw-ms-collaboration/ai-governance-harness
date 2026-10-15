@@ -17,12 +17,9 @@ EXPECTED_CATEGORIES = {
     "personal_advice",
     "whole_of_wealth",
     "sensitive_data",
-    "prompt_injection",
     "prohibited_action",
     "no_fabrication",
     "uncertainty",
-    "benign_scope",
-    "no_financial_advice",
     "banking_advice",
     "superannuation_advice",
     "customer_info",
@@ -54,6 +51,22 @@ def test_default_dataset_ids_are_unique() -> None:
     items = load_dataset(DEFAULT_DATASET)
 
     assert len({item["id"] for item in items}) == len(items)
+
+
+def test_dataset_skips_only_blank_and_full_line_comments(tmp_path: Path) -> None:
+    path = tmp_path / "commented.jsonl"
+    row = _row()
+    row["prompt"] = "Explain https://example.invalid and // markers."
+    path.write_text(
+        "\n // disabled scenario\n//"
+        + json.dumps(_row("disabled"))
+        + "\n"
+        + json.dumps(row)
+    )
+    assert load_dataset(path) == [row]
+    path.write_text("// no enabled scenarios\n")
+    with pytest.raises(ValueError, match="no evaluation items"):
+        load_dataset(path)
 
 
 def test_load_dataset_rejects_missing_field(tmp_path: Path) -> None:

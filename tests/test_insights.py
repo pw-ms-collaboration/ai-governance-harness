@@ -451,3 +451,17 @@ def test_given_ui_when_loaded_then_has_tokenomics_panel() -> None:
     for element_id in ("token-kpis", "token-trend", "token-split", "token-runs", "token-pricing-note"):
         assert f'id="{element_id}"' in page
     assert "renderTokenomics" in script
+
+
+
+def test_given_guardrail_span_when_reading_then_preserves_outcome_and_reason(azure_response) -> None:
+    azure_response(document([
+        ["span", insights.ROLES[0], "apply_guardrail tool_allowlist", "pre_tool", "triggered",
+         "unregistered_tool"],
+    ], ["kind", "service", "name", "stage", "outcome", "rule"]))
+
+    row = insights.read_history(APP_ID, 1)[0]
+
+    assert (row.name, row.outcome, row.rule) == (
+        "apply_guardrail tool_allowlist", "triggered", "unregistered_tool",
+    )

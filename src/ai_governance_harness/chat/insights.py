@@ -33,6 +33,8 @@ SPAN_NAMES = (
 GENAI_SPAN_PATTERN = (
     r"^(?:chat|execute_tool|invoke_agent|tools/call|MCP send tools/call) [A-Za-z0-9._-]{1,64}$"
 )
+# Guardrail spans use the harness namespace because GenAI semconv defines none.
+GUARDRAIL_SPAN_PATTERN = r"^apply_guardrail [a-z][a-z0-9_]{0,63}$"
 # Rule and policy names come from bounded policy configuration.
 RULE_PATTERN = r"^[A-Za-z0-9._-]{1,64}$"
 TOKEN_METRIC_NAMES = (
@@ -51,7 +53,11 @@ MAX_ROWS = 600
 
 def is_known_span(name: str) -> bool:
     """Accept fixed application spans and bounded GenAI semconv span names."""
-    return name in SPAN_NAMES or re.fullmatch(GENAI_SPAN_PATTERN, name) is not None
+    return (
+        name in SPAN_NAMES
+        or re.fullmatch(GENAI_SPAN_PATTERN, name) is not None
+        or re.fullmatch(GUARDRAIL_SPAN_PATTERN, name) is not None
+    )
 
 
 class InsightsUnavailableError(RuntimeError):
@@ -122,13 +128,13 @@ let usage = customMetrics
 | project ['kind']="usage", service, name, model, total, samples, timestamp;
 let candidate_spans = union requests, dependencies
 | where timestamp > ago({hours}h) and cloud_RoleName in (dynamic({roles}))
-| where name in (dynamic({names})) or name matches regex @"{GENAI_SPAN_PATTERN}";
+| where name in (dynamic({names})) or name matches regex @"{GENAI_SPAN_PATTERN}" or name matches regex @"{GUARDRAIL_SPAN_PATTERN}";
 // HTTP probes are frequent, so cap them separately to keep governance and GenAI spans visible.
 let spans = union
 (candidate_spans | where name != "http.server.request" | top 100 by timestamp desc),
 (candidate_spans | where name == "http.server.request" | top 25 by timestamp desc)
-| extend decision=tostring(customDimensions["governance.decision"])
-| extend rule=tostring(customDimensions["governance.rule.name"]), stage=tostring(customDimensions["governance.lifecycle.point"])
+| extend decision=tostring(customDimensions["governance.decision"]), guardrail_outcome=tostring(customDimensions["governance.guardrail.outcome"])
+| extend rule=coalesce(tostring(customDimensions["governance.rule.name"]), tostring(customDimensions["governance.guardrail.reason"])), stage=tostring(customDimensions["governance.lifecycle.point"])
 | extend rule=iff(rule matches regex @"{RULE_PATTERN}", rule, ""), stage=iff(stage matches regex @"^[a-z_]{{1,24}}$", stage, "")
 | extend model=tostring(customDimensions["gen_ai.response.model"])
 | extend model=iff(model matches regex @"{RULE_PATTERN}", model, "")
@@ -136,7 +142,7 @@ let spans = union
 | extend cached_tokens=toint(customDimensions["gen_ai.usage.cache_read.input_tokens"]), reasoning_tokens=toint(customDimensions["gen_ai.usage.reasoning.output_tokens"])
 | project ['kind']="span", service=cloud_RoleName, name, timestamp, rule, stage, model,
 input_tokens, output_tokens, cached_tokens, reasoning_tokens,
-duration_ms=todouble(duration), outcome=case(name == "evaluate.governance.policy" and decision in ("allow", "deny", "require_approval"), decision, success == true, "success", success == false, "failure", "unknown"),
+duration_ms=todouble(duration), outcome=case(name == "evaluate.governance.policy" and decision in ("allow", "deny", "require_approval"), decision, name startswith "apply_guardrail " and guardrail_outcome in ("passed", "triggered", "error"), guardrail_outcome, success == true, "success", success == false, "failure", "unknown"),
 operation_id=operation_Id, span_id=id, parent_id=operation_ParentId;
 let logs = traces
 | where timestamp > ago({hours}h) and cloud_RoleName in (dynamic({roles}))

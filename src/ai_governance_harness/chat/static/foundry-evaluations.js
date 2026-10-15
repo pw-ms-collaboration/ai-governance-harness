@@ -165,7 +165,6 @@
 
   element("run").addEventListener("click", async () => {
     if (jobActive || starting) return;
-    if (!window.confirm("Run the enabled packaged agent scenarios and submit their public responses to Foundry for judging? Commented-out scenarios are skipped. This performs model inference and may incur charges.")) return;
     starting = true;
     element("run").disabled = true;
     element("run").textContent = "Starting Eval...";

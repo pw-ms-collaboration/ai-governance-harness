@@ -34,6 +34,8 @@ from ai_governance_harness.governance import (
     governance_context,
 )
 from ai_governance_harness.governance.sandbox import SandboxGuard
+from ai_governance_harness.identity.sidecar import SidecarClient
+from ai_governance_harness.mock_identity_guard import require_mock_identity_allowed
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 logger = logging.getLogger(__name__)
@@ -57,6 +59,7 @@ class BrowserSecurityMiddleware(BaseHTTPMiddleware):
 
         correlation_id = request.headers.get("x-correlation-id") or uuid4().hex
         context = GovernanceContext(
+            boundary="chat",
             workload_id="ai-governance-harness",
             environment="local",
             correlation_id=correlation_id,
@@ -83,6 +86,10 @@ def build_chat_app(
 ) -> Starlette:
     """Build the static UI and chat API application."""
     chat_service = service or ChatService(settings)
+    sidecar = SidecarClient(
+        settings.sidecar_url,
+        timeout=get_governance_engine().settings.operation_timeout_seconds,
+    )
     insights = InsightsHistory(settings.application_insights_app_id)
     pricing = {
         "currency": settings.token_price_currency,
@@ -246,6 +253,35 @@ def build_chat_app(
             logger.warning("Managed evaluation job access failed: %s", type(error).__name__)
             return JSONResponse({"error": "Managed evaluation job artifacts could not be read or created."}, status_code=500)
 
+    def service_error(error: ChatServiceError) -> JSONResponse:
+        public_error: dict[str, object] = {
+            "code": error.code, "message": str(error),
+            "correlation_id": get_governance_context().correlation_id or "unavailable",
+        }
+        if error.details:
+            public_error["details"] = error.details
+        return JSONResponse(
+            {"error": public_error}, status_code=error.status_code,
+            headers={"WWW-Authenticate": "Bearer"} if error.status_code == 401 else {},
+        )
+
+    async def signin(request: Request) -> JSONResponse:
+        if request.headers.get("content-type", "").split(";")[0].lower() != "application/json":
+            return JSONResponse({"error": "Content type must be application/json."}, status_code=415)
+        body = bytearray()
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body) > 4096:
+                return JSONResponse({"error": "Request is too large."}, status_code=413)
+        try:
+            require_mock_identity_allowed("chat-signin", bind_host=settings.host)
+            status, document = await sidecar.signin(bytes(body))
+        except ValueError:
+            return JSONResponse({"error": "Not found."}, status_code=404)
+        except ChatServiceError as error:
+            return service_error(error)
+        return JSONResponse(document, status_code=status, headers={"Cache-Control": "no-store"})
+
     async def chat(request: Request) -> JSONResponse:
         content_type = request.headers.get("content-type", "").split(";", 1)[0]
         if content_type.lower() != "application/json":
@@ -264,21 +300,15 @@ def build_chat_app(
                 status_code=400,
             )
         try:
-            result = await chat_service.complete(payload)
+            caller = await sidecar.validate(request.headers.getlist("authorization"))
+            context = get_governance_context().model_copy(update={
+                "boundary": "chat", "actor": "interactive", "token_type": "user",
+                "principal_hash": caller.principal_hash, "authentication_outcome": "authenticated",
+            })
+            with governance_context(context):
+                result = await chat_service.complete(payload, caller)
         except ChatServiceError as error:
-            public_error: dict[str, object] = {
-                "code": error.code,
-                "message": str(error),
-                "correlation_id": (
-                    get_governance_context().correlation_id or "unavailable"
-                ),
-            }
-            if error.details:
-                public_error["details"] = error.details
-            return JSONResponse(
-                {"error": public_error},
-                status_code=error.status_code,
-            )
+            return service_error(error)
         return JSONResponse(result.model_dump())
 
     app = Starlette(
@@ -295,6 +325,7 @@ def build_chat_app(
             Route("/static/flow.js", flow_javascript, methods=["GET"]),
             Route("/static/foundry-evaluations.js", foundry_javascript, methods=["GET"]),
             Route("/api/chat", chat, methods=["POST"]),
+            Route("/api/mock-identity/signin", signin, methods=["POST"]),
             Route("/api/observability/history", insights_history, methods=["GET"]),
             Route(
                 "/api/governance/snapshot",

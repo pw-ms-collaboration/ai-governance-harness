@@ -29,8 +29,31 @@ body {
 }
 
 button,
+select,
 textarea {
   font: inherit;
+}
+
+.mock-identity {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
+}
+
+.mock-identity label {
+  display: block;
+  font-weight: 650;
+  margin-bottom: 0.5rem;
+}
+
+.mock-identity select {
+  min-height: 44px;
+  max-width: 100%;
+  padding: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  color: var(--ink);
+  background: var(--surface);
 }
 
 button {

@@ -20,21 +20,30 @@
     "adr-author/SKILL.md#decide",
     "adr-author/SKILL.md#govern"
   ],
-  "inputs": [],
+  "inputs": [
+    {
+      "kind": "research",
+      "path": ".copilot-tracking/research/2026-10-14/entra-agent-id-architecture-research.md",
+      "note": "Decisions D1-D16, evidence C1-C30 and W1-W24"
+    }
+  ],
   "decisionMetadata": {
-    "title": "AI Governance Harness architecture decision set",
-    "suggestedDecision": "",
+    "title": "Agent identity decision set (Entra Agent ID, identity-aware policy, MVP mock)",
+    "suggestedDecision": "ADR 0008-0010 plus ADR 0003 amendment",
     "deciders": [
       "Repository maintainers"
     ],
-    "consulted": [],
-    "informed": [],
+    "consulted": [
+      "AI governance engineering team"
+    ],
+    "informed": [
+      "Security engineering",
+      "Platform architecture"
+    ],
     "tags": [
-      "governance",
+      "identity",
       "security",
-      "reliability",
-      "observability",
-      "supply-chain"
+      "governance"
     ]
   },
   "lineage": {
@@ -44,43 +53,43 @@
       "docs/planning/adrs/0001-contain-agent-governance-toolkit-behind-a-versioned-adapter.md",
       "docs/planning/adrs/0002-enforce-default-deny-at-every-execution-boundary.md",
       "docs/planning/adrs/0003-minimize-identity-and-governance-telemetry.md",
-      "docs/planning/adrs/0004-use-local-first-reliability-and-sandbox-readiness-boundaries.md",
       "docs/planning/adrs/0005-present-governance-through-a-same-origin-observability-panel.md",
-      "docs/planning/adrs/0006-govern-toolkit-dependency-risk-with-an-expiring-vex-exception.md",
-      "docs/planning/adrs/0007-use-feed-neutral-manifests-and-repeatable-team-commands.md"
+      "docs/planning/adrs/0008-use-microsoft-entra-agent-id-for-agent-identity.md",
+      "docs/planning/adrs/0009-enforce-agent-and-staff-identity-through-governance-policy-context.md",
+      "docs/planning/adrs/0010-use-a-local-only-mock-entra-agent-id-issuer-for-the-mvp.md"
     ]
   },
   "asrTriggers": [
     {
       "kind": "security",
-      "evidence": "Default-deny policy enforcement and temporary dependency VEX exception",
-      "note": "Policy failure, bypass, identity leakage, or stale vulnerability exceptions would materially change the system risk posture."
+      "evidence": "Agent identity, OBO token claims, staff app roles, and local mock issuer",
+      "note": "Identity mistakes or a mock running outside local mode would permit unauthorized member data access."
     },
     {
       "kind": "compliance",
-      "evidence": "Repository-owned OWASP Agentic ASI01-ASI10 evidence and governance verification",
-      "note": "Evidence must remain explicit, reproducible, and non-certifying while controls and known gaps evolve."
-    },
-    {
-      "kind": "availability",
-      "evidence": "Foundry and MCP timeout, circuit-breaker, readiness, and fail-closed behavior",
-      "note": "External dependency failure must remain diagnosable without allowing ungoverned execution."
+      "evidence": "Security plan SEC-2026-SUPER-001 identity requirements and OWASP ASI03 evidence",
+      "note": "Identity claims and evidence must stay accurate and must not overstate a mock as Entra integration."
     },
     {
       "kind": "maintainability",
-      "evidence": "Released Toolkit adapter boundary and repository-owned policy contract",
-      "note": "Preview API churn and cross-process enforcement require one stable adapter and clear recovery instructions."
+      "evidence": "AgentMesh PolicyEngine is Public Preview and shared by chat and MCP",
+      "note": "Identity-aware rules must stay inside the adapter boundary and one reviewable policy."
     },
     {
       "kind": "evolvability",
-      "evidence": "Deferred hosted identity, sandbox providers, and future Toolkit upgrade path",
-      "note": "The local-first architecture must allow later hosted and privileged capabilities without weakening current controls."
+      "evidence": "MVP mock must be replaceable by real Entra Agent ID by configuration",
+      "note": "Target contract must stay stable while the MVP and hosted paths diverge."
     }
   ],
   "untrustedSources": [
     {
       "sourceType": "web-fetch",
-      "identifier": "OSV advisory records for the temporary cryptography exception",
+      "identifier": "Microsoft Learn Entra Agent ID and Container Apps pages (W1-W21)",
+      "atPhase": "frame"
+    },
+    {
+      "sourceType": "web-fetch",
+      "identifier": "Agent Governance Toolkit docs: AgentMesh, Tutorial 31, A365 reference architecture (W16-W18)",
       "atPhase": "frame"
     }
   ],
@@ -107,5 +116,34 @@
     }
   ],
   "repoVisibility": "public",
-  "lastUpdatedAt": "2026-10-13T19:08:00Z"
+  "lastUpdatedAt": "2026-10-14T01:58:23Z",
+  "previousSessions": [
+    {
+      "title": "AI Governance Harness architecture decision set",
+      "adrs": "0001-0007",
+      "completedAt": "2026-10-13T19:08:00Z"
+    }
+  ],
+  "frameConfirmedAt": "2026-10-14T01:40:34Z",
+  "decideConfirmedAt": "2026-10-14T01:41:31Z",
+  "governResult": {
+    "written": [
+      "0008",
+      "0009",
+      "0010"
+    ],
+    "amended": [
+      "0003"
+    ],
+    "relatedLinksUpdated": [
+      "0002",
+      "0005"
+    ],
+    "frontmatterValidation": "pass (built-in structural checks; repository schema file absent)",
+    "sensitiveScan": "pass (--public, 0 findings)",
+    "mermaidRender": "pass",
+    "handoffs": "none; user deferred follow-up to /rpi-plan",
+    "effectiveAutonomy": "partial (untrusted web sources present)",
+    "reviewReminder": "Review 0010 when Agent ID Developer access or blueprint ownership is available; review 0008-0009 at first hosted acceptance"
+  }
 }

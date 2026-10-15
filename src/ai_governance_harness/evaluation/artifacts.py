@@ -109,6 +109,8 @@ def independent_manifest() -> CaseManifest:
             allowed=decision == "allow",
             matched_rule=rule,
             enforcement_mode="enforce",
+            boundary="local",
+            staff_role="retention_specialist",
         )
 
     return CaseManifest(
@@ -117,7 +119,7 @@ def independent_manifest() -> CaseManifest:
             "allow": CaseExpectation(
                 policy_digest=hashlib.sha256(policies["allow"]).hexdigest(),
                 events=[
-                    event("pre_tool", "allow", "allow-member-profile"),
+                    event("pre_tool", "allow", "allow-local-retention-tools"),
                     event("post_tool", "allow", "allow-member-profile-result"),
                 ],
                 backend_execution_count=1,

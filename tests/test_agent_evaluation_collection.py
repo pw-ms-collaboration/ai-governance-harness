@@ -100,6 +100,9 @@ class SimulatedProject:
                 assert body["parallel_tool_calls"] is False
                 assert [item["function"]["name"] for item in body["tools"]] == [
                     "get_member_profile",
+                    "get_member_disengagement_signals",
+                    "get_cohort_churn_analytics",
+                    "get_fum_outflow_summary",
                     "prepare_member_outreach_case",
                 ]
                 assert not any(

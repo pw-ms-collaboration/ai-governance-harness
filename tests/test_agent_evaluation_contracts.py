@@ -154,6 +154,10 @@ def simulated_evidence(category: str = "allow", calls: int = 1):
                 decision=decision,
                 allowed=decision == "allow",
                 enforcement_mode="enforce",
+                boundary="chat" if source == "chat" else "mcp",
+                actor="interactive",
+                token_type="user",
+                staff_role=None if source == "chat" else "retention_specialist",
             )
             for index, (point, action, rule, decision) in enumerate(rows, 1)
         ]
@@ -179,7 +183,7 @@ def simulated_evidence(category: str = "allow", calls: int = 1):
                 [
                     ("pre_model", "foundry.chat", "allow-model-call", "allow"),
                     ("post_model", "foundry.chat", "allow-model-result", "allow"),
-                    ("pre_tool", "get_member_profile", "allow-member-profile", "allow"),
+                    ("pre_tool", "get_member_profile", "allow-chat-tools", "allow"),
                     (
                         "post_tool",
                         "get_member_profile",
@@ -238,7 +242,7 @@ def simulated_evidence(category: str = "allow", calls: int = 1):
     )
     gateway_rows = (
         [
-            ("pre_tool", "get_member_profile", "allow-member-profile", "allow"),
+            ("pre_tool", "get_member_profile", "allow-mcp-retention-tools", "allow"),
             ("post_tool", "get_member_profile", "allow-member-profile-result", "allow"),
         ]
         * calls
@@ -290,6 +294,25 @@ def simulated_evidence(category: str = "allow", calls: int = 1):
 def test_policy_oracle_accepts_complete_allow_and_input_deny(category, calls):
     manifest, case, evidence = simulated_evidence(category, calls)
     assert policy_score(manifest, case, evidence, "target") == 1.0
+
+
+@pytest.mark.parametrize("role", ["chat", "mcp"])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("boundary", None),
+        ("actor", None),
+        ("actor", "reporting"),
+        ("token_type", None),
+        ("token_type", "app"),
+        ("staff_role", "analyst"),
+    ],
+)
+def test_policy_oracle_rejects_missing_or_mismatched_identity(role, field, value):
+    manifest, case, evidence = simulated_evidence()
+    capture = evidence.captures[role]
+    capture.events[0] = capture.events[0].model_copy(update={field: value})
+    assert policy_score(manifest, case, evidence, "target") == 0.0
 
 
 @pytest.mark.parametrize("category", ["allow", "deny"])

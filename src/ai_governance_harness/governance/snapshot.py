@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+import os
 
 import yaml
 
@@ -14,6 +15,7 @@ from ai_governance_harness.governance.events import (
     governance_events,
 )
 from ai_governance_harness.governance.sandbox import SandboxGuard
+from ai_governance_harness.mock_identity_guard import MockIdentityGuardError, require_mock_identity_allowed
 
 _EVIDENCE_PATH = Path(__file__).resolve().parent / "evidence" / "owasp-agentic.yaml"
 
@@ -38,7 +40,7 @@ def _policy_summary(engine: GovernanceEngine) -> dict[str, Any]:
                     "name": str(rule.get("name", ""))[:128],
                     "stage": str(rule.get("stage", ""))[:32],
                     "action": str(rule.get("action", ""))[:32],
-                    "condition": str(rule.get("condition", ""))[:256],
+                    "condition": str(rule.get("condition", ""))[:1024],
                     "provenance": (
                         provenance.model_dump()
                         if (provenance := engine.rule_provenance(rule.get("name")))
@@ -100,12 +102,23 @@ def build_governance_snapshot(
 ) -> dict[str, Any]:
     """Return a privacy-safe, bounded process snapshot."""
     sandbox = SandboxGuard(engine.settings)
+    identity = {"mode": "none", "label": "No authenticated identity configured"}
+    if engine.settings.hosted:
+        identity = {"mode": "easy_auth", "label": "Platform Easy Auth (hosted validation deferred)"}
+    elif os.getenv("MOCK_IDENTITY_ENABLED") is not None:
+        try:
+            require_mock_identity_allowed("snapshot")
+        except MockIdentityGuardError:
+            identity = {"mode": "none", "label": "Mock identity disabled or refused by guard"}
+        else:
+            identity = {"mode": "mock", "label": "Local mock identity, not Microsoft Entra"}
     return {
         "schema": "ai-governance-observability/v1",
         "generated_at": datetime.now(UTC).isoformat(),
         "source": source,
         "status": "ready" if engine.ready and sandbox.ready else "not_ready",
         "events": governance_events.snapshot(),
+        "identity": identity,
         "policy": _policy_summary(engine),
         "runtime": {
             "enforcement": (

@@ -10,6 +10,8 @@ from mcp import Client, types
 from ai_governance_harness.mcp_server import tools as gateway_tools
 from ai_governance_harness.mcp_server.server import mcp
 
+pytestmark = pytest.mark.usefixtures("mcp_caller")
+
 
 @pytest.fixture()
 def anyio_backend() -> str:
@@ -53,9 +55,9 @@ async def test_given_server_when_listing_tools_then_exposes_exact_read_only_surf
     tools = {tool.name: tool for tool in result.tools}
     expected_browser_exposure = {
         "get_member_profile": True,
-        "get_member_disengagement_signals": False,
-        "get_cohort_churn_analytics": False,
-        "get_fum_outflow_summary": False,
+        "get_member_disengagement_signals": True,
+        "get_cohort_churn_analytics": True,
+        "get_fum_outflow_summary": True,
         "prepare_member_outreach_case": True,
     }
     for name, enabled in expected_browser_exposure.items():

@@ -11,6 +11,17 @@ from starlette.testclient import TestClient
 from ai_governance_harness.chat import foundry_evaluations as foundry
 from ai_governance_harness.chat.app import build_chat_app
 from ai_governance_harness.chat.config import ChatSettings
+from ai_governance_harness.identity.constants import INTERACTIVE_ID
+
+pytestmark = pytest.mark.usefixtures("mock_chat_environment")
+
+
+def settings():
+    return ChatSettings(
+        model_deployment="test",
+        sidecar_url="http://127.0.0.1:8002",
+        interactive_agent_id=INTERACTIVE_ID,
+    )
 
 
 def test_output_preserves_zero_score_and_distinguishes_errors() -> None:
@@ -165,7 +176,7 @@ def test_browser_routes_only_read_and_do_not_fall_back_to_local(
             }
         ),
     )
-    app = build_chat_app(ChatSettings(model_deployment="test"), service=object())
+    app = build_chat_app(settings(), service=object())
     with TestClient(app) as client:
         response = client.get(path)
         assert response.status_code == 200
@@ -180,16 +191,14 @@ def test_invalid_cursor_and_host_never_call_cloud(monkeypatch) -> None:
     monkeypatch.setattr(
         foundry, "read_foundry", lambda *_: pytest.fail("Must not call cloud")
     )
-    with TestClient(
-        build_chat_app(ChatSettings(model_deployment="test"), service=object())
-    ) as client:
+    with TestClient(build_chat_app(settings(), service=object())) as client:
         assert (
             client.get("/api/foundry/evaluations?after=invalid/token").status_code
             == 400
         )
     with TestClient(
         build_chat_app(
-            ChatSettings(model_deployment="test", host="0.0.0.0"), service=object()
+            settings().model_copy(update={"host": "0.0.0.0"}), service=object()
         )
     ) as client:
         assert client.get("/api/foundry/evaluations").status_code == 403
@@ -203,9 +212,7 @@ def test_cloud_failure_is_explicit_and_sanitized(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(foundry, "read_foundry", broken)
-    with TestClient(
-        build_chat_app(ChatSettings(model_deployment="test"), service=object())
-    ) as client:
+    with TestClient(build_chat_app(settings(), service=object())) as client:
         response = client.get("/api/foundry/evaluations")
         assert response.status_code == 502
         assert "secret-sentinel" not in response.text
@@ -213,9 +220,7 @@ def test_cloud_failure_is_explicit_and_sanitized(monkeypatch) -> None:
 
 
 def test_ui_shows_run_summary_without_case_detail_controls() -> None:
-    with TestClient(
-        build_chat_app(ChatSettings(model_deployment="test"), service=object())
-    ) as client:
+    with TestClient(build_chat_app(settings(), service=object())) as client:
         html = client.get("/").text
         assert 'id="foundry-runs"' in html
         assert '<th scope="col">Pass rate</th>' in html

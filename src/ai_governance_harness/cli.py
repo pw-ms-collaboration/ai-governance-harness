@@ -12,6 +12,10 @@ from typing import Optional
 
 from ai_governance_harness.agent import MemberWealthInsightsAgent
 from ai_governance_harness.mcp_server import MemberNotFoundError
+from ai_governance_harness.governance import GovernanceContext, governance_context
+from ai_governance_harness.mock_identity_guard import (
+    MockIdentityGuardError, resolve_local_persona,
+)
 
 
 def format_header(title: str) -> str:
@@ -21,6 +25,17 @@ def format_header(title: str) -> str:
 
 
 def run_cli(args: Optional[list] = None) -> int:
+    """Run the CLI under an explicit local persona, restoring caller context."""
+    try:
+        role = resolve_local_persona()
+    except MockIdentityGuardError as error:
+        print(f"Invalid local identity configuration: {error}", file=sys.stderr)
+        return 4
+    with governance_context(GovernanceContext(boundary="local", staff_role=role)):
+        return _run_cli(args)
+
+
+def _run_cli(args: Optional[list] = None) -> int:
     """Main CLI entrypoint parser and dispatcher."""
     parser = argparse.ArgumentParser(
         prog="ai-governance-harness",

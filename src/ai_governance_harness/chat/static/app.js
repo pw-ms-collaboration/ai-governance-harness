@@ -39,9 +39,16 @@ const evaluationArtifact = document.querySelector("#evaluation-artifact");
 const evaluationBaselines = document.querySelector("#evaluation-baselines");
 const evaluationControls = document.querySelector("#evaluation-controls");
 
+const personaSelector = document.querySelector("#mock-persona");
+const signInButton = document.querySelector("#identity-signin");
+const identityStatus = document.querySelector("#identity-status");
+const identityMode = document.querySelector("#identity-mode");
+
 let history = [];
 let governancePaused = false;
 let evaluationTimer = null;
+let accessToken = null;
+let busy = false;
 let governanceBaselineAt = null;
 let governanceRetainedLimit = 0;
 
@@ -154,8 +161,12 @@ function addMessage(role, content, policyNotice = null) {
 }
 
 function setBusy(isBusy) {
+  busy = isBusy;
   input.disabled = isBusy;
-  sendButton.disabled = isBusy;
+  sendButton.disabled = isBusy || !accessToken;
+  personaSelector.disabled = isBusy;
+  signInButton.disabled = isBusy;
+  clearButton.disabled = isBusy;
   activityStatus.textContent = isBusy ? "Thinking and checking governance tools" : "";
   activityStatus.classList.toggle("busy", isBusy);
 }
@@ -387,7 +398,7 @@ function renderEvents(events) {
   if (!values.length) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
-    cell.colSpan = 8;
+    cell.colSpan = 9;
     cell.textContent = "No governance decisions have been recorded yet.";
     row.append(cell);
     decisionEvents.append(row);
@@ -403,6 +414,8 @@ function renderEvents(events) {
         : occurredAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
     );
     appendTableCell(row, event.source || "unknown");
+    appendTableCell(row, [event.boundary, event.actor, event.token_type, event.staff_role]
+      .filter(Boolean).join(" / ") || "No identity");
     appendTableCell(row, event.lifecycle_point || "unknown");
     appendTableCell(row, event.action || "unknown", { code: true });
 
@@ -527,6 +540,7 @@ function renderGovernance(snapshot) {
   } / ${governanceRetainedLimit}`;
 
   renderServices(snapshot.services);
+  identityMode.textContent = snapshot.identity?.label || "Identity mode unavailable";
   enforcementMode.textContent = String(snapshot.runtime?.enforcement || "unknown").replaceAll("_", " ");
   sandboxStatus.textContent = [
     snapshot.runtime?.sandbox?.provider || "unknown",
@@ -675,6 +689,12 @@ runEvaluationButton.addEventListener("click", async () => {
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   clearError();
+  if (busy) return;
+  if (!accessToken) {
+    showError("Choose a mock persona and sign in before sending.");
+    personaSelector.focus();
+    return;
+  }
   const content = input.value.trim();
   if (!content) {
     showError("Enter a message before sending.");
@@ -692,11 +712,18 @@ form.addEventListener("submit", async (event) => {
   try {
     const response = await fetch("/api/chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      headers: {
+        "Content-Type": "application/json", Accept: "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
       body: JSON.stringify({ messages: history }),
     });
     const payload = await response.json();
     if (!response.ok) {
+      if (response.status === 401) {
+        accessToken = null;
+        identityStatus.textContent = "Your mock sign-in expired. Sign in again.";
+      }
       throw new Error(chatErrorMessage(payload));
     }
     addMessage("assistant", payload.message, payload.policy_notice);
@@ -708,7 +735,7 @@ form.addEventListener("submit", async (event) => {
       history.pop();
     }
     const lastTurn = history.at(-1);
-    if (lastTurn?.role === "assistant" && lastTurn.content.startsWith(APPROVAL_HEADING)) {
+    if (accessToken && lastTurn?.role === "assistant" && lastTurn.content.startsWith(APPROVAL_HEADING)) {
       const latestActions = messagesElement.querySelectorAll(".approval-actions");
       latestActions[latestActions.length - 1]
         ?.querySelectorAll("button")
@@ -722,6 +749,56 @@ form.addEventListener("submit", async (event) => {
     setBusy(false);
     refreshGovernance();
     input.focus();
+  }
+});
+
+function clearIdentityConversation() {
+  accessToken = null;
+  history = [];
+  messagesElement.replaceChildren();
+  input.value = "";
+  characterCount.textContent = "0 / 4000";
+  clearError();
+  setBusy(false);
+}
+
+personaSelector.addEventListener("change", () => {
+  clearIdentityConversation();
+  identityStatus.textContent = "Persona changed. Sign in to start a new conversation.";
+});
+
+signInButton.addEventListener("click", async () => {
+  if (busy) return;
+  clearIdentityConversation();
+  const persona = personaSelector.value;
+  if (!persona) {
+    showError("Choose a mock persona first.");
+    personaSelector.focus();
+    return;
+  }
+  setBusy(true);
+  identityStatus.textContent = "Signing in with mock identity...";
+  try {
+    const response = await fetch("/api/mock-identity/signin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ persona }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(chatErrorMessage(payload));
+    if (typeof payload.access_token !== "string" || payload.token_type !== "Bearer"
+        || payload.persona !== persona) {
+      throw new Error("The identity service returned an invalid sign-in response.");
+    }
+    accessToken = payload.access_token;
+    const label = personaSelector.selectedOptions[0].textContent;
+    identityStatus.textContent = `Signed in as ${label} (mock identity).`;
+  } catch (error) {
+    accessToken = null;
+    identityStatus.textContent = "Mock sign-in failed. Try signing in again.";
+    showError(error.message || "The identity service could not be reached.");
+  } finally {
+    setBusy(false);
   }
 });
 
@@ -750,7 +827,7 @@ clearButton.addEventListener("click", () => {
   messagesElement.replaceChildren();
   addMessage(
     "assistant",
-    "Conversation cleared. Ask for a synthetic customer's account profile by member ID.",
+    "Conversation cleared. Ask about a synthetic member, churn risk, or FUM outflow permitted by your role.",
   );
   allowedCount.textContent = "0";
   deniedCount.textContent = "0";

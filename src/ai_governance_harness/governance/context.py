@@ -8,6 +8,13 @@ from typing import Iterator, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+Boundary = Literal["chat", "mcp", "local"]
+Actor = Literal["interactive", "reporting"]
+TokenType = Literal["user", "app"]
+StaffRole = Literal[
+    "analyst", "retention_specialist", "compliance_reviewer", "administrator", "none"
+]
+
 
 class GovernanceContext(BaseModel):
     """Bounded context supplied to governance decisions."""
@@ -18,6 +25,10 @@ class GovernanceContext(BaseModel):
     environment: str = Field(default="local", max_length=32)
     correlation_id: str | None = Field(default=None, max_length=128)
     principal_hash: str | None = Field(default=None, min_length=64, max_length=64)
+    boundary: Boundary | None = None
+    actor: Actor | None = None
+    token_type: TokenType | None = None
+    staff_role: StaffRole | None = None
     authentication_outcome: Literal[
         "local", "authenticated", "unauthenticated", "rejected"
     ] = "local"
@@ -33,7 +44,16 @@ class GovernanceContext(BaseModel):
             values["correlation_id"] = self.correlation_id
         if self.principal_hash:
             values["principal_hash"] = self.principal_hash
+        values.update(self.identity_attributes())
         return values
+
+    def identity_attributes(self) -> dict[str, str]:
+        """Return only the four bounded identity enums for telemetry."""
+        return {
+            name: value
+            for name in ("boundary", "actor", "token_type", "staff_role")
+            if (value := getattr(self, name)) is not None
+        }
 
 
 _context: ContextVar[GovernanceContext] = ContextVar(

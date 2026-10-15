@@ -13,6 +13,18 @@ from ai_governance_harness.chat.managed_evaluations import (
     ManagedEvaluationJobs,
 )
 from test_agent_evaluation_managed_contracts import ENDPOINT, registry_bundle
+from ai_governance_harness.identity.constants import INTERACTIVE_ID
+
+pytestmark = pytest.mark.usefixtures("mock_chat_environment")
+
+
+def settings():
+    return ChatSettings(
+        model_deployment="target",
+        sidecar_url="http://127.0.0.1:8002",
+        interactive_agent_id=INTERACTIVE_ID,
+    )
+
 
 API = "/api/foundry/evaluation-jobs"
 CONFIRM = {"confirm_inference": True, "confirm_submit": True}
@@ -25,7 +37,7 @@ def configured(tmp_path, monkeypatch):
     monkeypatch.setenv("AZURE_AI_EVALUATOR_REGISTRY", str(registry))
     monkeypatch.setenv("AZURE_AI_EVAL_JUDGE_DEPLOYMENT_NAME", "judge")
     return build_chat_app(
-        ChatSettings(model_deployment="target"),
+        settings(),
         service=object(),
         evaluation_directory=tmp_path / "evaluations",
     )
@@ -183,7 +195,7 @@ def test_invalid_ids_origin_and_remote_binding_are_rejected(configured):
         )
         assert client.post(API, content="not JSON").status_code == 415
     remote = build_chat_app(
-        ChatSettings(model_deployment="target", host="0.0.0.0"), service=object()
+        settings().model_copy(update={"host": "0.0.0.0"}), service=object()
     )
     with TestClient(remote) as client:
         assert client.post(API, json=CONFIRM).status_code == 403

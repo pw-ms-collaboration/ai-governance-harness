@@ -20,6 +20,8 @@ related:
     relation: influenced-by
   - path: 0002-enforce-default-deny-at-every-execution-boundary.md
     relation: influenced-by
+  - path: 0010-use-a-local-only-mock-entra-agent-id-issuer-for-the-mvp.md
+    relation: influences
 asr_triggers:
   - kind: compliance
     evidence: Panel renders repository-owned policy and OWASP Agentic evidence with limitations.

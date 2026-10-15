@@ -54,6 +54,19 @@ class ExpectedEvent(StrictModel):
     allowed: bool
     matched_rule: str | None = Field(max_length=128)
     enforcement_mode: str = Field(min_length=1, max_length=16)
+    boundary: Literal["chat", "mcp", "local"] | None = None
+    actor: Literal["interactive", "reporting"] | None = None
+    token_type: Literal["user", "app"] | None = None
+    staff_role: (
+        Literal[
+            "analyst",
+            "retention_specialist",
+            "compliance_reviewer",
+            "administrator",
+            "none",
+        ]
+        | None
+    ) = None
 
 
 class ObservedEvent(ExpectedEvent):

@@ -131,6 +131,11 @@ def behavior_policy_score(
                 or event.request_id != evidence.request_id
                 or event.policy_digest != manifest.policy_digest
                 or event.enforcement_mode != "enforce"
+                or event.boundary != role
+                or event.actor != "interactive"
+                or event.token_type != "user"
+                or event.staff_role
+                != (None if role == "chat" else "retention_specialist")
             ):
                 return 0.0
             previous = event.sequence
@@ -209,7 +214,7 @@ def behavior_policy_score(
                     events[index],
                     "pre_tool",
                     "get_member_profile",
-                    "allow-member-profile",
+                    "allow-chat-tools",
                 )
                 and _matches(
                     events[index + 1],
@@ -257,7 +262,7 @@ def behavior_policy_score(
         return 0.0
     for index, event in enumerate(mcp.events):
         point, rule = (
-            ("pre_tool", "allow-member-profile")
+            ("pre_tool", "allow-mcp-retention-tools")
             if index % 2 == 0
             else ("post_tool", "allow-member-profile-result")
         )

@@ -17,7 +17,7 @@ values in the local environment file. Governance settings consume that
 environment; they do not independently load an environment file.
 
 Settings and the policy engine are cached or constructed per process. Restart
-both services after changing configuration or policy. A file edit is not a
+the affected services after changing configuration or policy. A file edit is not a
 policy hot reload. In separately managed processes, give chat and MCP the
 same reviewed workload policy and confirm their policy digests agree.
 
@@ -139,13 +139,20 @@ code, not an environment setting. MCP initialization and session negotiation
 are required before tool calls. An ordinary JSON POST or browser GET to the
 MCP URL is not a substitute for an MCP client.
 
-HTTP rate limiting is process-local and best-effort. Local clients share the
-`local-development` bucket. Hosted authenticated principals get hashed keys;
+HTTP rate limiting is process-local and best-effort. Each authenticated local
+mock or hosted principal gets a separate bucket keyed by its hash;
 buckets are not shared between processes or replicas. Health and discovery
 routes bypass these checks; the local snapshot route also bypasses them in
 nonhosted mode.
 
 ### Hosted MCP Identity Prerequisites
+
+Local HTTP uses the guarded mock JWT source, not anonymous access. The
+[environment template](../.env.example) lists the issuer, JWKS, tenant,
+audience, scope and interactive/reporting agent IDs. The combined launcher
+derives these synthetic settings. Chat requires the loopback sidecar URL and
+interactive agent ID and forwards OBO-shaped tokens on every MCP request.
+See [local mock startup and testing](../README.md#start-mcp-and-the-chat-ui).
 
 | Variable                    | Requirement                                        |
 | --------------------------- | -------------------------------------------------- |
@@ -153,11 +160,15 @@ nonhosted mode.
 | `MCP_AUTH_AUDIENCE`         | Expected audience claim                            |
 | `MCP_AUTH_REQUIRED_SCOPE`   | Expected delegated scope in `scp`                  |
 | `MCP_RESOURCE_URL`          | Resource URL published in OAuth discovery          |
+| `AGENT_ID_INTERACTIVE_ID`   | Allowlisted interactive agent ID |
+| `AGENT_ID_REPORTING_ID`     | Separate allowlisted reporting agent ID |
 
-With `MCP_HOSTED=true`, all four resolved values, an approved region, and
+With `MCP_HOSTED=true`, all six resolved values, an approved region, and
 `MCP_TRANSPORT=streamable-http` are required. Middleware expects trusted
 `x-ms-client-principal*` platform headers identifying Entra ID and verifies
-tenant, audience, and scope claims from that principal.
+tenant, audience, and the shared agent claim shape from that principal.
+User tokens require the delegated scope; app-only reporting requires its
+application role. Real hosted Entra Agent ID validation remains deferred.
 
 > [!WARNING]
 > Header parsing is not bearer-token signature validation. Your hosting

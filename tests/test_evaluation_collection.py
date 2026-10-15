@@ -173,6 +173,7 @@ def test_given_real_sdk_denial_when_probed_then_absence_is_observed(
 
 def test_given_main_and_future_thread_calls_when_observed_then_original_is_counted(
     monkeypatch: pytest.MonkeyPatch,
+    local_persona,
 ) -> None:
     engine = GovernanceEngine(GovernanceSettings())
     monkeypatch.setattr(
@@ -184,7 +185,11 @@ def test_given_main_and_future_thread_calls_when_observed_then_original_is_count
     try:
         gateway.get_member_profile("MEM-001")
         with ThreadPoolExecutor(max_workers=1) as pool:
-            pool.submit(gateway.get_member_profile, "MEM-001").result(timeout=5)
+            from contextvars import copy_context
+
+            pool.submit(
+                copy_context().run, gateway.get_member_profile, "MEM-001"
+            ).result(timeout=5)
         capture = observer.finish(0)
     finally:
         sys.setprofile(None)

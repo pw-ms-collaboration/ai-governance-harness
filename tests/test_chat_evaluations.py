@@ -14,6 +14,9 @@ from starlette.testclient import TestClient
 from ai_governance_harness.chat.app import build_chat_app
 from ai_governance_harness.chat.config import ChatSettings
 from ai_governance_harness.evaluation.artifacts import write_json
+from ai_governance_harness.identity.constants import INTERACTIVE_ID
+
+pytestmark = pytest.mark.usefixtures("mock_chat_environment")
 
 RUN_ID = "20261014T030232Z-b68217988ad8"
 API = "/api/governance/evaluations"
@@ -21,7 +24,11 @@ API = "/api/governance/evaluations"
 
 def _app(directory: Path) -> Starlette:
     return build_chat_app(
-        ChatSettings(model_deployment="test-model"),
+        ChatSettings(
+            model_deployment="test-model",
+            sidecar_url="http://127.0.0.1:8002",
+            interactive_agent_id=INTERACTIVE_ID,
+        ),
         evaluation_directory=directory,
     )
 

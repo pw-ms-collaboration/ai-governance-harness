@@ -42,7 +42,18 @@ its asset name is `governance-behavior-match`.
 Azure CLI credentials are available only to model workers. Their `HOME` remains
 isolated, while `AZURE_CONFIG_DIR` and the original Python user package base are
 selected explicitly so a user-installed CLI can still load and authenticate.
-The MCP data worker receives neither those credentials nor that package base.
+The MCP data worker and mock identity issuer receive neither those credentials
+nor that package base.
+
+Each scenario starts a fresh loopback-only mock identity issuer alongside chat
+and MCP. The runner signs in as the synthetic `retention_specialist` persona;
+chat validates the user token and obtains the MCP OBO token through the production
+sidecar flow. MCP verifies the token, scope and staff role before policy
+enforcement. Tokens and ephemeral signing keys are not retained in evaluation
+artifacts. The independent gate checks the observed chat/MCP identity context
+and exact role-specific policy rules; anonymous or mismatched identity evidence
+cannot pass. This guarded local identity flow does not validate deployed Entra
+resources or production authorization.
 
 The default dataset is unchanged. `--dataset` can select an exact subset, but
 cannot change prompts, requirements, IDs or categories. Member `1001` is not

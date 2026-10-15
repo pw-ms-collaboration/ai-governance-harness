@@ -44,6 +44,7 @@ from ai_governance_harness.governance.events import (
 )
 from ai_governance_harness.mcp_server import __main__ as mcp_main
 from ai_governance_harness.mcp_server.tools import SuperannuationDataGateway
+from ai_governance_harness.identity import __main__ as identity_main
 
 
 def _terminal(frame: FrameType) -> bool:
@@ -255,7 +256,7 @@ class ExecutionObserver:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--role", choices=("chat", "mcp"), required=True)
+    parser.add_argument("--role", choices=("identity", "chat", "mcp"), required=True)
     parser.add_argument("--socket-fd", type=int, required=True)
     parser.add_argument("--capture", type=Path, required=True)
     parser.add_argument("--fixture", type=Path, required=True)
@@ -264,7 +265,11 @@ def main() -> int:
     args = parser.parse_args()
     if args.role == "chat" and not args.confirm_inference:
         raise AgentEvaluationError("inference_confirmation_required")
-    observer = ExecutionObserver(args.request_id, args.role)
+    observer = (
+        ExecutionObserver(args.request_id, args.role)
+        if args.role != "identity"
+        else None
+    )
     exit_code = 1
     with socket.socket(fileno=args.socket_fd) as listener:
         original_run = uvicorn.run
@@ -285,20 +290,29 @@ def main() -> int:
                 server.should_exit = True
 
             threading.Thread(target=stop, daemon=True).start()
-            observer.server_entered = True
+            if observer is not None:
+                observer.server_entered = True
             server.run(sockets=[listener])
-            observer.server_finished = True
+            if observer is not None:
+                observer.server_finished = True
 
         uvicorn.run = serve
         mcp_main.initialize_gateway = partial(original_initialize, args.fixture)
-        observer.install()
+        if observer is not None:
+            observer.install()
         try:
-            exit_code = chat_main.main() if args.role == "chat" else mcp_main.main()
+            entrypoint = {
+                "chat": chat_main.main,
+                "mcp": mcp_main.main,
+                "identity": identity_main.main,
+            }[args.role]
+            exit_code = entrypoint()
             return exit_code
         finally:
             uvicorn.run = original_run
             mcp_main.initialize_gateway = original_initialize
-            write_json(args.capture, observer.finish(exit_code, args.fixture))
+            if observer is not None:
+                write_json(args.capture, observer.finish(exit_code, args.fixture))
 
 
 if __name__ == "__main__":

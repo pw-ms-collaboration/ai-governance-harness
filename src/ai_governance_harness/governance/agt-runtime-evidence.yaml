@@ -15,7 +15,7 @@ deployment:
     target: structured-standard-output
   identity:
     enabled: true
-    kind: exact-workload-policy-binding
+    kind: local-mock-agent-identity-with-exact-workload-policy-binding
     hosted_principal_validation: deferred
   packages:
     - package: agent-governance-toolkit

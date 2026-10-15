@@ -62,6 +62,34 @@ def collected(manifest, case, directory, **kwargs):
     return evidence
 
 
+@pytest.mark.parametrize("role", ["chat", "mcp"])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("boundary", None),
+        ("actor", None),
+        ("actor", "reporting"),
+        ("token_type", None),
+        ("token_type", "app"),
+        ("staff_role", "analyst"),
+    ],
+)
+def test_managed_policy_gate_rejects_missing_or_mismatched_identity(
+    tmp_path, role, field, value
+):
+    case = next(row for row in load_cases() if row.id == "fab-002")
+    manifest = independent_manifest([case])
+    evidence = collected(manifest, case, tmp_path, target_deployment="target")
+    assert (
+        agent_managed.behavior_policy_score(manifest, case, evidence, "target") == 1.0
+    )
+    capture = evidence.captures[role]
+    capture.events[0] = capture.events[0].model_copy(update={field: value})
+    assert (
+        agent_managed.behavior_policy_score(manifest, case, evidence, "target") == 0.0
+    )
+
+
 class Service:
     def __init__(self, failure=None, *, boolean_labels=False):
         self.failure = failure

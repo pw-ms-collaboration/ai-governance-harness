@@ -47,6 +47,10 @@ http_request_duration = meter.create_histogram(
 )
 
 _ALLOWED_EVENT_ATTRIBUTES = {
+    "boundary",
+    "actor",
+    "token_type",
+    "staff_role",
     "authentication_outcome",
     "correlation_id",
     "decision_rule",
@@ -158,6 +162,7 @@ def configure_telemetry(settings: ServerSettings) -> None:
         service_name=SERVICE_NAME,
         environment=settings.environment,
         region=settings.region,
+        manual_only=True,
     )
 
     handler = logging.StreamHandler()

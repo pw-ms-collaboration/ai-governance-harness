@@ -63,6 +63,7 @@ def _decision(action: str = "allow") -> GovernanceDecision:
     )
 
 
+@pytest.mark.usefixtures("mcp_caller")
 def test_policy_allows_known_tool_and_denies_unknown_action() -> None:
     engine = GovernanceEngine(_settings())
 
@@ -73,7 +74,7 @@ def test_policy_allows_known_tool_and_denies_unknown_action() -> None:
     denied = engine.evaluate(LifecyclePoint.PRE_TOOL, "shell.execute")
 
     assert allowed.allowed is True
-    assert allowed.matched_rule == "allow-member-profile"
+    assert allowed.matched_rule == "allow-mcp-retention-tools"
     assert denied.allowed is False
     assert denied.action == "deny"
 
@@ -221,6 +222,7 @@ def test_given_denied_policy_when_requiring_allowed_then_exposes_decision() -> N
 
 
 @pytest.mark.parametrize("enabled", [True, False])
+@pytest.mark.usefixtures("chat_caller")
 def test_given_external_denial_when_recording_then_enforces_and_counts_it(
     enabled: bool,
 ) -> None:
@@ -242,6 +244,8 @@ def test_given_external_denial_when_recording_then_enforces_and_counts_it(
     assert decision.enforcement_mode == "enforce"
     assert snapshot["counts"]["deny"] == 1
     assert snapshot["recent_events"][0]["policy_name"] == "azure-ai-foundry"
+    assert snapshot["recent_events"][0]["boundary"] == "chat"
+    assert snapshot["recent_events"][0]["actor"] == "interactive"
     assert decision.provenance is None
     assert snapshot["recent_events"][0]["provenance"] is None
 
@@ -370,6 +374,7 @@ def test_given_tool_scan_status_when_evaluating_result_then_requires_passed_scan
         assert decision.matched_rule == "deny-personal-advice-tool-response"
 
 
+@pytest.mark.usefixtures("mcp_caller")
 def test_given_direct_gateway_advice_when_returning_result_then_policy_blocks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -546,6 +551,11 @@ def test_snapshot_merge_rejects_malformed_remote_events_and_sensitive_fields() -
         },
     }
 
+    valid_event = remote["events"]["recent_events"][0]
+    remote["events"]["recent_events"].extend([
+        {**valid_event, "oid": "private-object-marker"},
+        {**valid_event, "azp": "private-agent-marker"},
+    ])
     merged = merge_governance_snapshots(local, remote)
 
     assert merged["status"] == "ready"
@@ -553,6 +563,8 @@ def test_snapshot_merge_rejects_malformed_remote_events_and_sensitive_fields() -
     serialized = json.dumps(merged)
     assert "account@example.com" not in serialized
     assert "made_up" not in serialized
+    assert "private-object-marker" not in serialized
+    assert "private-agent-marker" not in serialized
 
 
 def test_snapshot_reports_remote_unavailability_as_partial() -> None:

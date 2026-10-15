@@ -70,6 +70,8 @@ def isolated_environment(directory: Path, policy: Path) -> dict[str, str]:
             "MCP_TRANSPORT": "stdio",
             "MCP_HOSTED": "false",
             "MCP_ENVIRONMENT": "local",
+            "MOCK_IDENTITY_ENABLED": "true",
+            "MOCK_IDENTITY_LOCAL_PERSONA": "retention_specialist",
             "GOVERNANCE_ENVIRONMENT": "local",
             "GOVERNANCE_ENABLED": "true",
             "GOVERNANCE_POLICY_PATH": str(policy),

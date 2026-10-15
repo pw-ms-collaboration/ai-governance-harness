@@ -37,6 +37,13 @@ from ai_governance_harness.evaluation.artifacts import (
     FIXTURE_NAMES,
 )
 from ai_governance_harness.evaluation.collector import isolated_environment
+from ai_governance_harness.identity.config import IdentitySettings
+from ai_governance_harness.identity.constants import (
+    INTERACTIVE_ID,
+    REPORTING_ID,
+    MCP_API_ID,
+    TENANT_ID,
+)
 from ai_governance_harness.guardrails.sovereignty import (
     SovereigntyGuardrail,
     SovereigntyViolationError,
@@ -230,7 +237,7 @@ def collect_case(
         processes: dict[str, subprocess.Popen] = {}
         with ExitStack() as stack:
             sockets = {}
-            for role in ("mcp", "chat"):
+            for role in ("identity", "mcp", "chat"):
                 listener = stack.enter_context(socket.socket())
                 listener.bind(("127.0.0.1", 0))
                 listener.listen(128)
@@ -239,14 +246,30 @@ def collect_case(
                 role: f"http://127.0.0.1:{listener.getsockname()[1]}"
                 for role, listener in sockets.items()
             }
+            identity = IdentitySettings(port=sockets["identity"].getsockname()[1])
             client = stack.enter_context(httpx.Client(trust_env=False))
             try:
-                for role in ("mcp", "chat"):
+                for role in ("identity", "mcp", "chat"):
                     listener = sockets[role]
                     env = (
                         model_environment(work, policy, endpoint)
                         if role == "chat"
                         else isolated_environment(work, policy)
+                    )
+                    env.update(
+                        {
+                            "MOCK_IDENTITY_HOST": identity.host,
+                            "MOCK_IDENTITY_PORT": str(identity.port),
+                            "MCP_PRINCIPAL_SOURCE": "jwt",
+                            "MCP_JWT_ISSUER": identity.issuer,
+                            "MCP_JWT_JWKS_URL": identity.jwks_url,
+                            "MCP_AUTH_AUDIENCE": MCP_API_ID,
+                            "MCP_AUTH_TENANT_ID": TENANT_ID,
+                            "MCP_AUTH_REQUIRED_SCOPE": "Tools.Read",
+                            "AGENT_ID_INTERACTIVE_ID": INTERACTIVE_ID,
+                            "AGENT_ID_REPORTING_ID": REPORTING_ID,
+                            "AGENT_ID_SIDECAR_URL": identity.base_url,
+                        }
                     )
                     env.update(
                         {
@@ -297,7 +320,12 @@ def collect_case(
                             raise AgentEvaluationError("startup_worker_exit")
                         try:
                             ready = client.get(
-                                urls[role] + "/health/ready",
+                                urls[role]
+                                + (
+                                    "/healthz"
+                                    if role == "identity"
+                                    else "/health/ready"
+                                ),
                                 timeout=min(0.25, _remaining(deadline)),
                             )
                         except httpx.HTTPError:
@@ -305,9 +333,12 @@ def collect_case(
                         else:
                             if ready.status_code == 200:
                                 state = ready.json()
-                                if (
-                                    state["status"] != "ready"
-                                    or state["governance"]["enforcement"] != "enabled"
+                                if state["status"] != "ready":
+                                    raise AgentEvaluationError(
+                                        "unexpected_readiness_status"
+                                    )
+                                if role != "identity" and (
+                                    state["governance"]["enforcement"] != "enabled"
                                     or state["governance"]["policy_digest"]
                                     != manifest.policy_digest
                                 ):
@@ -317,11 +348,24 @@ def collect_case(
                                 break
                         time.sleep(min(0.05, _remaining(deadline)))
                 stage = "request"
+                signin = client.post(
+                    urls["chat"] + "/api/mock-identity/signin",
+                    json={"persona": "retention_specialist"},
+                    timeout=_remaining(deadline),
+                )
+                if signin.status_code != 200 or len(signin.content) > 4096:
+                    raise AgentEvaluationError("evaluation_signin_failed")
+                token = signin.json().get("access_token")
+                if not isinstance(token, str) or not token:
+                    raise AgentEvaluationError("evaluation_signin_failed")
                 with client.stream(
                     "POST",
                     urls["chat"] + "/api/chat",
                     json={"messages": [{"role": "user", "content": case.prompt}]},
-                    headers={"x-correlation-id": request_id},
+                    headers={
+                        "x-correlation-id": request_id,
+                        "Authorization": f"Bearer {token}",
+                    },
                     timeout=_remaining(deadline),
                 ) as response:
                     public["http_status"] = response.status_code
@@ -369,10 +413,14 @@ def collect_case(
                 failure = str(error)
             finally:
                 for role in reversed(processes):
-                    exit_codes[role] = _stop(processes[role], deadline)
-                    if exit_codes[role] != 0:
+                    exit_code = _stop(processes[role], deadline)
+                    if role != "identity":
+                        exit_codes[role] = exit_code
+                    if exit_code != 0:
                         failure = failure or "abnormal_worker_exit"
                 for role in processes:
+                    if role == "identity":
+                        continue
                     path = work / f"{role}.json"
                     try:
                         if path.is_symlink() or path.stat().st_size > 1_048_576:

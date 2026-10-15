@@ -231,6 +231,16 @@ def test_ui_shows_run_summary_without_case_detail_controls() -> None:
         assert 'aria-labelledby="evaluation-title" hidden inert' in html
 
 
+def test_foundry_evaluation_script_is_loaded_only_after_local_identity_check() -> None:
+    with TestClient(build_chat_app(settings(), service=object())) as client:
+        html = client.get("/").text
+        javascript = client.get("/static/app.js").text
+
+    assert 'src="/static/foundry-evaluations.js' not in html
+    assert 'if (mode === "mock")' in javascript
+    assert 'import("./foundry-evaluations.js?v=6")' in javascript
+
+
 def test_ui_has_running_placeholder_and_dismissible_progress_dialog() -> None:
     with TestClient(build_chat_app(settings(), service=object())) as client:
         html = client.get("/").text

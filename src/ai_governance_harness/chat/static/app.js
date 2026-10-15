@@ -1018,6 +1018,7 @@ async function loadIdentityMode() {
     } else {
       await signIn({ automatic: true });
     }
+    return identity.mode;
   } catch (error) {
     showError(error.message || "Sign-in status is unavailable.");
   } finally {
@@ -1025,7 +1026,13 @@ async function loadIdentityMode() {
   }
 }
 
-loadIdentityMode();
+loadIdentityMode().then((mode) => {
+  if (mode === "mock") {
+    void import("./foundry-evaluations.js?v=6");
+  } else {
+    document.querySelector("#tab-eval").hidden = true;
+  }
+});
 
 function personaOptions() {
   return [...personaMenu.querySelectorAll('[role="option"]')];

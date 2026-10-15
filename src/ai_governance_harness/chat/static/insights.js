@@ -854,7 +854,7 @@
       data.hidden = false;
       badge.className = "status-badge ready";
       badge.textContent = payload.rows.length ? "History received" : "No data";
-      status.textContent = `Last ${payload.hours} hour(s). Fetched ${displayTime(payload.fetched_at)}. ${payload.cached ? "Cached result (up to 60 seconds)." : "Fresh Azure query."} Telemetry is delayed, not a readiness check.`;
+      status.textContent = `Last ${payload.hours} hour(s). Fetched ${displayTime(payload.fetched_at)}. ${payload.cached ? "Cached result (up to 60 seconds)." : "Fresh Azure query."} `;
     } catch (error) {
       badge.className = "status-badge unavailable";
       badge.textContent = "Unavailable";

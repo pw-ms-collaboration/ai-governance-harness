@@ -1491,6 +1491,10 @@ def genai_exporters(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         genai_telemetry, "tracer", trace_provider.get_tracer("genai-test")
     )
+    monkeypatch.setattr(
+        "ai_governance_harness.governance.telemetry.tracer",
+        trace_provider.get_tracer("guardrail-test"),
+    )
     for attribute, factory, metric in (
         (
             "operation_duration",
@@ -1558,8 +1562,26 @@ async def test_given_tool_turn_when_completing_then_emits_genai_semconv_without_
     serialized = json.dumps(
         [dict(span.attributes) for span in finished.values()], default=str
     )
-    for content in ("MEM-001", "Alex Morgan", "Show", "content"):
+    for content in ("MEM-001", "Alex Morgan", "Show"):
         assert content not in serialized
+    # Guardrail names such as foundry_content_filter legitimately contain "content".
+    genai_serialized = json.dumps(
+        [
+            dict(span.attributes) for name, span in finished.items()
+            if not name.startswith("apply_guardrail ")
+        ],
+        default=str,
+    )
+    assert "content" not in genai_serialized
+    guardrails = {
+        span.attributes["governance.guardrail.name"]: span.attributes
+        for name, span in finished.items() if name.startswith("apply_guardrail ")
+    }
+    assert {"tool_allowlist", "personal_advice_scan", "scope_refusal"} <= set(guardrails)
+    assert all(
+        attributes["governance.guardrail.outcome"] == "passed"
+        for attributes in guardrails.values()
+    )
     metrics = {
         metric.name: metric
         for resource in reader.get_metrics_data().resource_metrics
@@ -1611,3 +1633,13 @@ async def test_given_unknown_tool_when_completing_then_agent_span_records_error_
     )
     assert agent.attributes["error.type"] == error.value.code
     assert agent.status.status_code.name == "ERROR"
+    guardrails = {
+        span.attributes["governance.guardrail.name"]: span
+        for span in spans.get_finished_spans()
+        if span.name.startswith("apply_guardrail ")
+    }
+    allowlist = guardrails["tool_allowlist"]
+    assert allowlist.attributes["governance.guardrail.outcome"] == "triggered"
+    assert allowlist.attributes["governance.guardrail.reason"] == "unregistered_tool"
+    assert allowlist.context.trace_id == agent.context.trace_id
+    assert error.value.details["matched_rule"] == "deny-unregistered-tool"

@@ -30,6 +30,12 @@ from test_agent_evaluation_managed_contracts import ENDPOINT, registry_bundle
 from ai_governance_harness.identity.constants import INTERACTIVE_ID
 
 pytestmark = pytest.mark.usefixtures("mock_chat_environment")
+pytest_plugins = ["test_behavior_evaluator"]
+
+
+@pytest.fixture
+def registered_behavior_service(behavior_registration_service):
+    return behavior_registration_service
 
 
 def settings():
@@ -248,13 +254,100 @@ def test_missing_report_or_runner_error_is_explicit(configured, monkeypatch, exi
 
 
 def test_configuration_failure_never_starts_inference(configured, monkeypatch):
-    monkeypatch.delenv("AZURE_AI_EVALUATOR_REGISTRY")
+    monkeypatch.delenv("AZURE_AI_EVAL_JUDGE_DEPLOYMENT_NAME")
     monkeypatch.setattr(
         ManagedEvaluationJobs, "_command", lambda *_: pytest.fail("Must not start")
     )
     with TestClient(configured) as client:
         assert client.post(API, json=CONFIRM).status_code == 503
         assert client.get(API).json() is None
+
+
+def test_run_eval_initializes_missing_registry(
+    configured, tmp_path, monkeypatch, registered_behavior_service
+):
+    registry = tmp_path / "missing" / "registry"
+    monkeypatch.setenv("AZURE_AI_EVALUATOR_REGISTRY", str(registry))
+
+    def command(_, run_id, selected_registry, judge, endpoint):
+        assert selected_registry == registry
+        assert load_pin(registry, endpoint).verified is True
+        return [sys.executable, "-c", "raise SystemExit(0)"]
+
+    monkeypatch.setattr(ManagedEvaluationJobs, "_command", command)
+    monkeypatch.setattr(
+        ManagedEvaluationJobs,
+        "_result",
+        lambda _, run_id: ManagedEvaluationJob(run_id=run_id, status="passed"),
+    )
+    with TestClient(configured) as client:
+        response = client.post(API, json=CONFIRM)
+        assert response.status_code == 202
+        assert wait(client, response.json()["run_id"])["status"] == "passed"
+        second = client.post(API, json=CONFIRM)
+        assert second.status_code == 202
+        assert wait(client, second.json()["run_id"])["status"] == "passed"
+    assert registered_behavior_service.writes == 1
+    assert registered_behavior_service.reads == 1
+
+
+def test_registry_setup_failure_does_not_start_inference(
+    configured, tmp_path, monkeypatch, registered_behavior_service
+):
+    registered_behavior_service.failure = "create"
+    registry = tmp_path / "missing" / "registry"
+    monkeypatch.setenv("AZURE_AI_EVALUATOR_REGISTRY", str(registry))
+    monkeypatch.setattr(
+        ManagedEvaluationJobs, "_command", lambda *_: pytest.fail("Must not start")
+    )
+    with TestClient(configured) as client:
+        response = client.post(API, json=CONFIRM)
+        assert response.status_code == 202
+        job = wait(client, response.json()["run_id"])
+        assert job["status"] == "error"
+        assert "Evaluator registry could not be created or verified" in job["error"]
+        assert "secret-sentinel" not in job["error"]
+        assert client.post(API, json=CONFIRM).status_code == 503
+    assert registered_behavior_service.writes == 1
+
+
+def test_unconfirmed_run_does_not_initialize_registry(
+    configured, tmp_path, monkeypatch, registered_behavior_service
+):
+    registry = tmp_path / "missing" / "registry"
+    monkeypatch.setenv("AZURE_AI_EVALUATOR_REGISTRY", str(registry))
+    with TestClient(configured) as client:
+        assert client.post(API, json={}).status_code == 400
+    assert not registry.exists()
+    assert registered_behavior_service.writes == 0
+
+
+@pytest.mark.parametrize("override", [None, "", "   "])
+def test_run_eval_uses_default_registry(
+    configured, tmp_path, monkeypatch, registered_behavior_service, override
+):
+    monkeypatch.chdir(tmp_path)
+    if override is None:
+        monkeypatch.delenv("AZURE_AI_EVALUATOR_REGISTRY")
+    else:
+        monkeypatch.setenv("AZURE_AI_EVALUATOR_REGISTRY", override)
+    registry = tmp_path / ".local/evaluations/behavior-evaluator-registration"
+    monkeypatch.setattr(
+        ManagedEvaluationJobs,
+        "_command",
+        lambda *_: [sys.executable, "-c", "raise SystemExit(0)"],
+    )
+    monkeypatch.setattr(
+        ManagedEvaluationJobs,
+        "_result",
+        lambda _, run_id: ManagedEvaluationJob(run_id=run_id, status="passed"),
+    )
+    with TestClient(configured) as client:
+        response = client.post(API, json=CONFIRM)
+        assert response.status_code == 202
+        assert wait(client, response.json()["run_id"])["status"] == "passed"
+    assert load_pin(registry, ENDPOINT).verified is True
+    assert registered_behavior_service.writes == 1
 
 
 def test_invalid_ids_origin_and_remote_binding_are_rejected(configured):

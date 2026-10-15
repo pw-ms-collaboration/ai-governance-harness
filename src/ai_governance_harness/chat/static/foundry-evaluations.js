@@ -141,10 +141,14 @@
       jobActive = job?.status === "running";
       element("run").disabled = jobActive || starting;
       element("run").textContent = jobActive ? "Running Eval..." : "Run Eval";
+      element("pending").hidden = !jobActive;
+      element("pending-state").textContent = "Running";
+      element("job-error").hidden = true;
       element("job-status").hidden = !jobActive;
       element("job-status").textContent = jobActive
-        ? `Running agent scenarios and Foundry evaluation: ${job.run_id}`
+        ? "Evaluation is running. Come back in a bit; results will update here when it finishes."
         : "";
+      if (!jobActive && element("running-dialog").open) element("running-dialog").close();
       if (job && ["error", "cancelled"].includes(job.status)) {
         element("job-error").textContent = job.error || "Evaluation did not complete. Check Foundry before retrying.";
         element("job-error").hidden = false;
@@ -158,6 +162,8 @@
       element("run").disabled = true;
       element("job-status").hidden = false;
       element("job-status").textContent = "Job status unavailable. Reload to reconnect before starting another evaluation.";
+      if (!element("pending").hidden) element("pending-state").textContent = "Status unavailable";
+      if (element("running-dialog").open) element("running-dialog").close();
       element("job-error").textContent = error.message;
       element("job-error").hidden = false;
     }
@@ -171,6 +177,8 @@
     element("job-error").hidden = true;
     element("job-status").hidden = false;
     element("job-status").textContent = "Starting agent evaluation...";
+    element("pending").hidden = false;
+    element("pending-state").textContent = "Starting";
     try {
       const response = await fetch("/api/foundry/evaluation-jobs", {
         method: "POST",
@@ -181,6 +189,10 @@
       if (!response.ok && response.status !== 409) throw new Error(job.error || "Evaluation could not be started.");
       starting = false;
       jobActive = true;
+      if (job.status === "running") {
+        element("pending-state").textContent = "Running";
+        element("running-dialog").showModal();
+      }
       await loadJob(job.run_id);
     } catch (error) {
       starting = false;

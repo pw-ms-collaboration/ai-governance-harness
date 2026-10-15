@@ -1979,6 +1979,39 @@ form > button {
   color: var(--muted);
 }
 
+#foundry-pending {
+  background: var(--assistant);
+}
+
+#foundry-running-dialog {
+  width: min(26rem, calc(100% - 2rem));
+  box-sizing: border-box;
+  padding: 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1rem 3rem rgba(23, 32, 51, 0.2);
+}
+
+#foundry-running-dialog::backdrop {
+  background: rgba(23, 32, 51, 0.35);
+}
+
+#foundry-running-dialog h3 {
+  margin-top: 0;
+}
+
+#foundry-running-dialog p {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+#foundry-running-dialog form {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .status-list,
 .evidence-list,
 .privacy-list {

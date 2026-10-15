@@ -1,20 +1,29 @@
 """One reusable Foundry evaluator for dataset-defined response behaviors."""
 
 from copy import deepcopy
+from pathlib import Path
 
+from azure.ai.projects import AIProjectClient
 from azure.ai.projects.models import (
     EvaluatorMetric,
     EvaluatorVersion,
     PromptBasedEvaluatorDefinition,
 )
+from azure.core.exceptions import AzureError
 
-from ai_governance_harness.evaluation.agent_contracts import digest
+from ai_governance_harness.evaluation.agent_contracts import AgentEvaluationError, digest
+from ai_governance_harness.evaluation.artifacts import write_json
 from ai_governance_harness.evaluation.register_agent_evaluators import (
     DATA_SCHEMA,
+    FOUNDRY_HEADERS,
     INIT_SCHEMA,
+    _definition_payload,
+    _validate_endpoint,
 )
+from ai_governance_harness.foundry_client import get_azure_credential
 
 NAME = "governance-behavior-match"
+DEFAULT_REGISTRY = Path(".local/evaluations/behavior-evaluator-registration")
 INSTRUCTION_VERSION = "1.0.0"
 INPUT_SCHEMA = {
     "type": "object",
@@ -92,3 +101,72 @@ def evaluator_definition() -> EvaluatorVersion:
             },
         ),
     )
+
+
+def register_evaluator(directory: Path, endpoint: str) -> None:
+    """Create a fresh private bundle and retain failed registration evidence."""
+    endpoint = _validate_endpoint(endpoint)
+    if any(parent.is_symlink() for parent in (directory, *directory.parents)):
+        raise AgentEvaluationError("symlink_managed_artifact")
+    definition = evaluator_definition()
+    directory.mkdir(mode=0o700, parents=True, exist_ok=False)
+    write_json(directory / "definition.json", definition.as_dict())
+    report = {
+        "schema_version": "1.0.0",
+        "status": "error",
+        "name": NAME,
+        "version": None,
+        "id": None,
+        "project_endpoint": endpoint,
+        "instruction_version": INSTRUCTION_VERSION,
+        "prompt_digest": digest(JUDGE_PROMPT),
+        "data_mapping": DATA_MAPPING,
+        "verified": False,
+        "error": "registration_incomplete",
+    }
+    try:
+        with get_azure_credential() as credential:
+            with AIProjectClient(
+                endpoint=endpoint,
+                credential=credential,
+                retry_total=0,
+                connection_timeout=30,
+                read_timeout=30,
+            ) as project:
+                registered = project.evaluators.create_version(
+                    name=NAME, evaluator_version=definition, headers=FOUNDRY_HEADERS
+                )
+                report.update(version=registered.version, id=registered.id)
+                if (
+                    registered.name != NAME
+                    or not isinstance(registered.version, str)
+                    or not registered.version.isascii()
+                    or not registered.version.isdigit()
+                    or not 1 <= len(registered.version) <= 20
+                    or registered.version.startswith("0")
+                    or not isinstance(registered.id, str)
+                    or not registered.id.endswith(
+                        f"/evaluators/{NAME}/versions/{registered.version}"
+                    )
+                ):
+                    raise AgentEvaluationError("invalid_evaluator_registration")
+                pinned = project.evaluators.get_version(
+                    name=NAME, version=registered.version, headers=FOUNDRY_HEADERS
+                )
+                if (
+                    pinned.name != NAME
+                    or pinned.version != registered.version
+                    or pinned.id != registered.id
+                    or pinned.definition is None
+                    or _definition_payload(pinned) != _definition_payload(definition)
+                ):
+                    raise AgentEvaluationError("evaluator_definition_mismatch")
+        report.update(status="registered", verified=True, error=None)
+    except AgentEvaluationError as error:
+        report["error"] = str(error)
+        raise
+    except AzureError:
+        report["error"] = "foundry_registration_error"
+        raise AgentEvaluationError("foundry_registration_error") from None
+    finally:
+        write_json(directory / "registration.json", report)

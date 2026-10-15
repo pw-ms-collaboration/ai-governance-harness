@@ -295,7 +295,7 @@ def setup(tmp_path, monkeypatch):
         "\n".join(
             case.model_dump_json()
             for case in load_cases()
-            if case.id in {"adv-002", "unc-001", "cus-001"}
+            if case.id in {"adv-002", "unc-001", "cus-002"}
         )
     )
     monkeypatch.setattr(
@@ -678,13 +678,16 @@ def test_altered_checkpoint_is_rejected_before_credentials(
         )
 
 
+@pytest.mark.parametrize("platform", ["linux", "darwin"])
 def test_real_local_dataset_path_then_managed_sdk_submission(
-    setup, tmp_path, monkeypatch
+    setup, tmp_path, monkeypatch, platform
 ):
     service = Service()
     install_service(monkeypatch, service)
     from ai_governance_harness.evaluation.agent_collector import collect_case
+    import sys
 
+    monkeypatch.setattr(sys, "platform", platform)
     monkeypatch.setattr(agent_managed, "collect_case", collect_case)
     setup.update(
         target_deployment="default-behavior", collection_worker_command=WORKER_COMMAND
@@ -700,3 +703,27 @@ def test_real_local_dataset_path_then_managed_sdk_submission(
     advice = next(row for row in results.rows if row.case.id == "adv-002")
     assert advice.collection.evidence.http_status == 403
     assert advice.collection.evidence.captures["mcp"].backend_executions == 0
+
+
+def test_unsupported_platform_retains_collection_cause_without_submission(
+    setup, tmp_path, monkeypatch
+):
+    import sys
+    from ai_governance_harness.evaluation.agent_collector import collect_case
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(agent_managed, "collect_case", collect_case)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Unsupported platforms must not submit responses to Foundry.")
+
+    monkeypatch.setattr(agent_managed, "get_azure_credential", forbidden)
+    results = agent_managed.run_agent_managed(
+        tmp_path / "agent" / "unsupported", **setup
+    )
+    assert results.error == "no_approved_responses"
+    assert all(
+        row.collection.collection_error == "unsupported_owned_socket_platform"
+        for row in results.rows
+    )
+    assert results.eval_id is None

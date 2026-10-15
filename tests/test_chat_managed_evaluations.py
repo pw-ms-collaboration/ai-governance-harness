@@ -11,7 +11,21 @@ from ai_governance_harness.chat.config import ChatSettings
 from ai_governance_harness.chat.managed_evaluations import (
     ManagedEvaluationJob,
     ManagedEvaluationJobs,
+    RESULT_ERROR,
 )
+from ai_governance_harness.evaluation.agent_managed_contracts import (
+    ManagedAgentResults,
+    ManagedOutcome,
+    ManagedResponse,
+    independent_manifest,
+    load_cases,
+    load_pin,
+)
+from ai_governance_harness.evaluation.agent_runner import (
+    AgentConfiguration,
+    CollectionOutcome,
+)
+from ai_governance_harness.evaluation.artifacts import write_json
 from test_agent_evaluation_managed_contracts import ENDPOINT, registry_bundle
 from ai_governance_harness.identity.constants import INTERACTIVE_ID
 
@@ -154,6 +168,65 @@ def test_completed_job_is_private_and_restored(configured, monkeypatch):
         assert "response" not in path.read_text()
     with TestClient(configured) as client:
         assert client.get(API).json() == completed
+
+
+def test_retained_legacy_report_restores_cloud_ids_without_resubmitting(
+    configured, monkeypatch
+):
+    monkeypatch.setattr(
+        ManagedEvaluationJobs, "start", lambda _: pytest.fail("Must not resubmit")
+    )
+    run_id = "20261014T235232Z-f633759f499b"
+    case = load_cases()[0]
+    with TestClient(configured) as client:
+        jobs = client.app.state.managed_evaluation_jobs
+        jobs.directory.mkdir(parents=True)
+        directory = jobs.directory / run_id
+        directory.mkdir()
+        result = ManagedAgentResults(
+            run_id="retained-run",
+            execution_kind="live",
+            status="error",
+            error="missing_or_duplicate_managed_metric",
+            configuration=AgentConfiguration(
+                target_deployment="target",
+                judge_deployment="judge",
+                endpoint=ENDPOINT,
+                timeout_seconds=60,
+            ),
+            manifest=independent_manifest([case]),
+            evaluator=load_pin(jobs.directory.parent.parent / "registry", ENDPOINT),
+            eval_id="eval-retained",
+            foundry_run_id="run-retained",
+            foundry_status="completed",
+            rows=[
+                ManagedOutcome(
+                    case=case,
+                    collection=CollectionOutcome(case_id=case.id),
+                    response=ManagedResponse(
+                        status="error", error="missing_or_duplicate_managed_metric"
+                    ),
+                )
+            ],
+        )
+        write_json(directory / "managed-agent-results.json", result)
+        jobs._save(ManagedEvaluationJob(run_id=run_id))
+        jobs._save(
+            ManagedEvaluationJob(run_id=run_id, status="error", error=RESULT_ERROR)
+        )
+        original = (jobs.directory / f"{run_id}.browser-result.json").read_bytes()
+        restored = client.get(API).json()
+        assert restored["status"] == "error"
+        assert restored["eval_id"] == "eval-retained"
+        assert restored["foundry_run_id"] == "run-retained"
+        assert "Foundry completed this run" in restored["error"]
+        assert (
+            jobs.directory / f"{run_id}.browser-result.json"
+        ).read_bytes() == original
+        jobs.job = ManagedEvaluationJob(
+            run_id=run_id, status="error", error=RESULT_ERROR
+        )
+        assert client.get(API).json() == restored
 
 
 @pytest.mark.parametrize("exit_code", [0, 2])

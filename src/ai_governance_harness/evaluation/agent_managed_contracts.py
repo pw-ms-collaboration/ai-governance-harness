@@ -31,7 +31,7 @@ from ai_governance_harness.evaluation.evaluator import (
     BuildVersions,
     StrictModel,
 )
-from ai_governance_harness.evals.runner import DEFAULT_DATASET
+from ai_governance_harness.evals.runner import DEFAULT_DATASET, dataset_lines
 
 METRIC = "governance_behavior_match"
 
@@ -94,8 +94,7 @@ def load_cases(path: Path = DEFAULT_DATASET) -> list[BehaviorCase]:
         try:
             return [
                 BehaviorCase.model_validate_json(line)
-                for line in selected.read_text(encoding="utf-8").splitlines()
-                if line.strip()
+                for _, line in dataset_lines(selected)
             ]
         except UnicodeError:
             raise AgentEvaluationError("invalid_dataset_encoding") from None
@@ -280,3 +279,21 @@ class ManagedAgentResults(StrictModel):
         )
         self.status = "passed" if passed else "failed"
         self.error = None if passed else "managed_acceptance_failed"
+
+
+def read_managed_results(path: Path) -> ManagedAgentResults:
+    """Read canonical reports and verify derived verdicts in older reports."""
+    payload = read_private_json(path)
+    derived: list[tuple[int, object]] = []
+    rows = payload.get("rows")
+    if isinstance(rows, list):
+        for index, row in enumerate(rows):
+            if isinstance(row, dict) and "accepted" in row:
+                derived.append((index, row.pop("accepted")))
+    results = ManagedAgentResults.model_validate(payload)
+    if any(
+        type(value) is not bool or value != results.rows[index].accepted
+        for index, value in derived
+    ):
+        raise AgentEvaluationError("inconsistent_saved_managed_acceptance")
+    return results

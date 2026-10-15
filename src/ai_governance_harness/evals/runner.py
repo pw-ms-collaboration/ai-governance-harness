@@ -10,6 +10,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from collections.abc import Iterator
 
 from ai_governance_harness.chat.service import SYSTEM_INSTRUCTIONS
 from ai_governance_harness.foundry_client import get_foundry_client
@@ -40,13 +41,18 @@ TIMEOUT_SECONDS = 900
 TERMINAL_STATUSES = frozenset({"completed", "failed", "canceled"})
 
 
+def dataset_lines(path: Path) -> Iterator[tuple[int, str]]:
+    """Yield active JSONL rows, skipping blank and full-line // comments."""
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if line.strip() and not line.lstrip().startswith("//"):
+            yield number, line
+
+
 def load_dataset(path: Path) -> list[dict[str, str]]:
     """Load and validate JSONL evaluation items."""
     items: list[dict[str, str]] = []
     seen_ids: set[str] = set()
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        if not line.strip():
-            continue
+    for line_number, line in dataset_lines(path):
         row = json.loads(line)
         missing = [field for field in REQUIRED_FIELDS if not str(row.get(field, "")).strip()]
         if missing:

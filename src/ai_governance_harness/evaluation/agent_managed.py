@@ -369,6 +369,42 @@ def _output(
             provider_error_code=_provider_code(output.get("error")),
             output_id=output_id,
         )
+    # Foundry emits a companion result metric when the custom evaluator errors.
+    if (
+        isinstance(metrics, list)
+        and len(metrics) == 2
+        and all(isinstance(metric, dict) for metric in metrics)
+    ):
+        primary = next(
+            (metric for metric in metrics if metric.get("metric") == METRIC), None
+        )
+        companion = next(
+            (metric for metric in metrics if metric.get("metric") == "result"), None
+        )
+        if (
+            primary is not None
+            and companion is not None
+            and all(
+                metric.get("name") == METRIC
+                and metric.get("type") == "azure_ai_evaluator"
+                for metric in metrics
+            )
+            and output.get("status") == "completed"
+            and primary.get("status") == "completed"
+            and primary.get("score") is None
+            and primary.get("label") is None
+            and primary.get("passed") is False
+            and companion.get("status") == "error"
+            and companion.get("score") is None
+            and companion.get("label") is None
+            and companion.get("passed") is None
+        ):
+            return case_id, ManagedResponse(
+                status="error",
+                error="foundry_evaluator_error",
+                provider_error_code=_provider_code(companion.get("error")),
+                output_id=output_id,
+            )
     if (
         not isinstance(metrics, list)
         or len(metrics) != 1
@@ -673,7 +709,10 @@ def run_agent_managed(
         _failure(results, "run_cancelled")
     finally:
         private_content(results.model_dump(mode="json"))
-        write_json(directory / "managed-agent-results.json", results)
+        write_json(
+            directory / "managed-agent-results.json",
+            results.model_dump(mode="json", exclude_computed_fields=True),
+        )
     return results
 
 
@@ -738,5 +777,8 @@ def retrieve_agent_managed(
     finally:
         _checkpoint(directory, results, "retrieved")
         private_content(results.model_dump(mode="json"))
-        write_json(directory / "managed-agent-results.json", results)
+        write_json(
+            directory / "managed-agent-results.json",
+            results.model_dump(mode="json", exclude_computed_fields=True),
+        )
     return results

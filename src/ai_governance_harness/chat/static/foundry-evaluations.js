@@ -9,6 +9,7 @@
   let jobActive = false;
   let starting = false;
   let jobTimer = null;
+  let jobLoaded = false;
 
   function text(tag, value) {
     const node = document.createElement(tag);
@@ -135,6 +136,8 @@
       const job = await response.json();
       if (!response.ok) throw new Error(job.error || "Evaluation job status is unavailable.");
       const wasActive = jobActive;
+      const restoring = !jobLoaded;
+      jobLoaded = true;
       jobActive = job?.status === "running";
       element("run").disabled = jobActive || starting;
       element("run").textContent = jobActive ? "Running Eval..." : "Run Eval";
@@ -146,7 +149,7 @@
         element("job-error").hidden = false;
       }
       if (jobActive) jobTimer = window.setTimeout(() => loadJob(job.run_id), 2000);
-      else if (wasActive && job?.eval_id) {
+      else if ((wasActive || restoring) && job?.eval_id) {
         if (busy) jobTimer = window.setTimeout(() => action(() => evaluations(false, job.eval_id)), 1000);
         else await action(() => evaluations(false, job.eval_id));
       }
@@ -160,7 +163,7 @@
 
   element("run").addEventListener("click", async () => {
     if (jobActive || starting) return;
-    if (!window.confirm("Run all 29 packaged agent scenarios and submit their public responses to Foundry for judging? This performs model inference and may incur charges.")) return;
+    if (!window.confirm("Run the enabled packaged agent scenarios and submit their public responses to Foundry for judging? Commented-out scenarios are skipped. This performs model inference and may incur charges.")) return;
     starting = true;
     element("run").disabled = true;
     element("run").textContent = "Starting Eval...";

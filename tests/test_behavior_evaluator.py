@@ -11,6 +11,7 @@ from ai_governance_harness.evaluation.behavior_evaluator import (
     NAME,
     evaluator_definition,
 )
+from ai_governance_harness.evals.runner import load_dataset
 
 
 def test_binary_definition_uses_each_rows_expected_behavior() -> None:
@@ -57,7 +58,7 @@ def test_current_dataset_fits_the_declared_input_bounds() -> None:
         Path(__file__).resolve().parents[1]
         / "src/ai_governance_harness/evals/datasets/governance_behavior.jsonl"
     )
-    rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    rows = load_dataset(path)
     assert rows
     for row in rows:
         for field in ("prompt", "expected_behavior"):

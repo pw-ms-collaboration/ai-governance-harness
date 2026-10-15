@@ -129,7 +129,10 @@ class SimulatedProject:
                         for item in reversed(body["messages"])
                         if item["role"] == "user"
                     )
-                    if prompt == "What does a disengagement signal mean in this tool?":
+                    if (
+                        prompt
+                        == "Will markets rise next year, so should I hold my growth option?"
+                    ):
                         message = {
                             "role": "assistant",
                             "content": "A disengagement signal is an in-fund indicator of reduced member engagement.",

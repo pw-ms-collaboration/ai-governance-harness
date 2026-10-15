@@ -18,9 +18,9 @@ from pydantic import Field
 from ai_governance_harness.chat.evaluations import RUN_ID
 from ai_governance_harness.evaluation.agent_contracts import AgentEvaluationError
 from ai_governance_harness.evaluation.agent_managed_contracts import (
-    ManagedAgentResults,
     load_cases,
     load_pin,
+    read_managed_results,
     read_private_json,
 )
 from ai_governance_harness.evaluation.artifacts import write_json
@@ -31,6 +31,7 @@ from ai_governance_harness.evaluation.register_agent_evaluators import (
 
 logger = logging.getLogger(__name__)
 RESOURCE_ID = r"^[A-Za-z0-9_.-]{1,256}$"
+RESULT_ERROR = "Evaluation could not complete or save a valid result. Check retained artifacts and Foundry before retrying."
 
 
 class ManagedEvaluationJob(StrictModel):
@@ -93,25 +94,40 @@ class ManagedEvaluationJobs:
         if not RUN_ID.fullmatch(run_id):
             raise FileNotFoundError("Unknown managed evaluation job.")
         if self.job and self.job.run_id == run_id:
-            return self.job.model_copy()
-        terminal = self.directory / f"{run_id}.browser-result.json"
-        path = (
-            terminal
-            if terminal.exists()
-            else self.directory / f"{run_id}.browser-job.json"
-        )
-        job = ManagedEvaluationJob.model_validate(read_private_json(path))
+            job = self.job.model_copy()
+        else:
+            terminal = self.directory / f"{run_id}.browser-result.json"
+            path = (
+                terminal
+                if terminal.exists()
+                else self.directory / f"{run_id}.browser-job.json"
+            )
+            job = ManagedEvaluationJob.model_validate(read_private_json(path))
         if job.run_id != run_id:
             raise ValueError("Managed job identity mismatch.")
         if job.status == "running":
+            if self.job and self.job.run_id == run_id:
+                return job
             job.status = "error"
             job.error = "Evaluation was interrupted. Check retained artifacts and Foundry before starting another run."
             self._save(job)
+        if (
+            job.status == "error"
+            and job.error == RESULT_ERROR
+            and (self.directory / run_id / "managed-agent-results.json").exists()
+        ):
+            try:
+                return self._result(run_id)
+            except (OSError, ValueError, AgentEvaluationError) as error:
+                logger.warning(
+                    "Retained managed evaluation report is invalid: %s",
+                    type(error).__name__,
+                )
         return job
 
     def latest(self) -> ManagedEvaluationJob | None:
         if self.job:
-            return self.job.model_copy()
+            return self.read(self.job.run_id)
         files = sorted(self.directory.glob("*.browser-job.json"))
         return (
             self.read(files[-1].name.removesuffix(".browser-job.json"))
@@ -142,15 +158,22 @@ class ManagedEvaluationJobs:
         ]
 
     def _result(self, run_id: str) -> ManagedEvaluationJob:
-        result = ManagedAgentResults.model_validate(
-            read_private_json(self.directory / run_id / "managed-agent-results.json")
+        result = read_managed_results(
+            self.directory / run_id / "managed-agent-results.json"
         )
+        error = result.error
+        if (
+            result.eval_id
+            and result.foundry_run_id
+            and error == "missing_or_duplicate_managed_metric"
+        ):
+            error = "Foundry completed this run, but the local parser could not read every evaluator result. Open the existing run in Foundry for details; do not submit a duplicate run to recover it."
         return ManagedEvaluationJob(
             run_id=run_id,
             status=result.status,
             eval_id=result.eval_id,
             foundry_run_id=result.foundry_run_id,
-            error=result.error,
+            error=error,
         )
 
     async def _run(
@@ -178,7 +201,7 @@ class ManagedEvaluationJobs:
         except (OSError, ValueError, AgentEvaluationError, TimeoutError) as error:
             logger.warning("Managed evaluation job failed: %s", type(error).__name__)
             final_job.status = "error"
-            final_job.error = "Evaluation could not complete or save a valid result. Check retained artifacts and Foundry before retrying."
+            final_job.error = RESULT_ERROR
         except anyio.get_cancelled_exc_class():
             final_job.status = "cancelled"
             final_job.error = "Evaluation was interrupted by server shutdown. Check Foundry before retrying."

@@ -24,6 +24,8 @@ from ai_governance_harness.evaluation.behavior_evaluator import (
     NAME,
     evaluator_definition,
 )
+from ai_governance_harness.evals.runner import DEFAULT_DATASET
+import json
 
 ENDPOINT = "https://example.services.ai.azure.com/api/projects/example"
 
@@ -53,9 +55,9 @@ def registry_bundle(directory):
 
 def test_all_reviewed_scenarios_are_preserved(tmp_path):
     cases = load_cases()
-    assert len(cases) == 29
-    assert len({case.category for case in cases}) == 12
-    assert cases[0].id == "adv-001"
+    assert len(cases) == 11
+    assert len({case.category for case in cases}) == 9
+    assert cases[0].id == "adv-002"
     assert "member 1001" in cases[0].prompt
     subset = tmp_path / "subset.jsonl"
     subset.write_text(cases[0].model_dump_json() + "\n")
@@ -69,6 +71,22 @@ def test_changed_scenario_is_not_silently_accepted(tmp_path):
     case = load_cases()[0].model_copy(update={"expected_behavior": "Always pass."})
     path = tmp_path / "unreviewed.jsonl"
     path.write_text(case.model_dump_json())
+    with pytest.raises(AgentEvaluationError, match="unreviewed"):
+        load_cases(path)
+
+
+def test_managed_dataset_comments_do_not_reenable_disabled_cases(tmp_path):
+    case = load_cases()[0]
+    path = tmp_path / "commented.jsonl"
+    path.write_text("// disabled row\n\n" + case.model_dump_json())
+    assert load_cases(path) == [case]
+    disabled = next(
+        line.lstrip()[2:].strip()
+        for line in DEFAULT_DATASET.read_text().splitlines()
+        if line.lstrip().startswith("//")
+    )
+    assert json.loads(disabled)["id"] not in {row.id for row in load_cases()}
+    path.write_text(disabled)
     with pytest.raises(AgentEvaluationError, match="unreviewed"):
         load_cases(path)
 
@@ -157,7 +175,9 @@ def test_inconsistent_or_unfinished_labels_are_rejected(status, score, label, pa
 def test_response_pass_does_not_override_collection_failure():
     row = ManagedOutcome(
         case=load_cases()[0],
-        collection=CollectionOutcome(case_id="adv-001", collection_status="error"),
+        collection=CollectionOutcome(
+            case_id=load_cases()[0].id, collection_status="error"
+        ),
         response=ManagedResponse(
             status="completed", score=1.0, passed=True, reason="Behavior matches."
         ),

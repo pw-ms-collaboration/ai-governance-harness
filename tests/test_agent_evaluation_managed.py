@@ -22,6 +22,7 @@ from ai_governance_harness.evaluation.agent_managed_contracts import (
     ManagedAgentResults,
     independent_manifest,
     load_cases,
+    read_managed_results,
 )
 from ai_governance_harness.evaluation.behavior_evaluator import evaluator_definition
 from test_agent_evaluation_collection import WORKER_COMMAND
@@ -41,7 +42,7 @@ def collected(manifest, case, directory, **kwargs):
         capture.request_id = case.id
         for event in capture.events:
             event.request_id = case.id
-    if not denied and case.id == "ben-001":
+    if not denied and case.id == "unc-001":
         chat, mcp = evidence.captures["chat"], evidence.captures["mcp"]
         chat.events = [
             event
@@ -230,6 +231,39 @@ class Service:
                     "results": [result],
                 }
             )
+            if index == 0 and self.failure in {
+                "companion-error",
+                "companion-reversed",
+                "companion-wrong-name",
+                "companion-false-pass",
+            }:
+                result.update(
+                    name=METRIC,
+                    metric=METRIC,
+                    type="azure_ai_evaluator",
+                    status="completed",
+                    score=None,
+                    label=None,
+                    passed=False,
+                )
+                outputs[-1]["status"] = "completed"
+                outputs[-1]["results"].append(
+                    {
+                        "name": METRIC,
+                        "metric": "result",
+                        "type": "azure_ai_evaluator",
+                        "status": "error",
+                        "score": None,
+                        "label": None,
+                        "passed": None,
+                    }
+                )
+                if self.failure == "companion-reversed":
+                    outputs[-1]["results"].reverse()
+                elif self.failure == "companion-wrong-name":
+                    outputs[-1]["results"][-1]["name"] = "unrelated"
+                elif self.failure == "companion-false-pass":
+                    result.update(score=1, label="pass", passed=True)
         if self.failure == "missing-row":
             outputs.pop()
         if self.failure == "duplicate-row":
@@ -261,7 +295,7 @@ def setup(tmp_path, monkeypatch):
         "\n".join(
             case.model_dump_json()
             for case in load_cases()
-            if case.id in {"adv-001", "ben-001", "cus-001"}
+            if case.id in {"adv-002", "unc-001", "cus-001"}
         )
     )
     monkeypatch.setattr(
@@ -285,6 +319,33 @@ def setup(tmp_path, monkeypatch):
     }
 
 
+@pytest.mark.parametrize("failure", ["companion-error", "companion-reversed"])
+def test_foundry_error_companion_is_a_row_error_not_a_run_parser_failure(
+    setup, tmp_path, monkeypatch, failure
+):
+    service = Service(failure)
+    install_service(monkeypatch, service)
+    results = agent_managed.run_agent_managed(tmp_path / "agent" / "companion", **setup)
+    assert results.foundry_status == "completed"
+    assert results.status == "failed"
+    assert results.rows[0].response.status == "error"
+    assert results.rows[0].response.error == "foundry_evaluator_error"
+    assert all(row.response.status == "completed" for row in results.rows[1:])
+
+
+@pytest.mark.parametrize("failure", ["companion-wrong-name", "companion-false-pass"])
+def test_companion_metric_cannot_hide_mismatches_or_promote_a_pass(
+    setup, tmp_path, monkeypatch, failure
+):
+    service = Service(failure)
+    install_service(monkeypatch, service)
+    results = agent_managed.run_agent_managed(
+        tmp_path / "agent" / "invalid-companion", **setup
+    )
+    assert results.status == "error"
+    assert results.error == "missing_or_duplicate_managed_metric"
+
+
 def install_service(monkeypatch, service):
     monkeypatch.setattr(
         agent_managed, "AIProjectClient", lambda **kwargs: nullcontext(service)
@@ -301,6 +362,22 @@ def test_real_sdk_submission_pagination_and_private_artifacts(
     assert results.status == "passed", results.model_dump_json()
     assert len(results.rows) == 3
     assert all(row.accepted and row.response.reason for row in results.rows)
+    assert (
+        ManagedAgentResults.model_validate_json(
+            (directory / "managed-agent-results.json").read_text()
+        )
+        == results
+    )
+    legacy = tmp_path / "legacy-results.json"
+    legacy.write_text(results.model_dump_json())
+    assert read_managed_results(legacy) == results
+    altered = results.model_dump(mode="json")
+    altered["rows"][0]["accepted"] = False
+    legacy.write_text(json.dumps(altered))
+    with pytest.raises(
+        AgentEvaluationError, match="inconsistent_saved_managed_acceptance"
+    ):
+        read_managed_results(legacy)
     assert all(
         set(record) == {"id", "category", "prompt", "expected_behavior", "response"}
         for record in service.records
@@ -617,9 +694,9 @@ def test_real_local_dataset_path_then_managed_sdk_submission(
     )
     assert results.status == "passed", results.model_dump_json()
     assert all(row.collection.enforcement_accepted for row in results.rows)
-    benign = next(row for row in results.rows if row.case.id == "ben-001")
+    benign = next(row for row in results.rows if row.case.id == "unc-001")
     assert benign.collection.evidence.captures["mcp"].backend_executions == 0
     assert benign.collection.evidence.captures["chat"].target_http_attempts == 2
-    advice = next(row for row in results.rows if row.case.id == "adv-001")
+    advice = next(row for row in results.rows if row.case.id == "adv-002")
     assert advice.collection.evidence.http_status == 403
     assert advice.collection.evidence.captures["mcp"].backend_executions == 0

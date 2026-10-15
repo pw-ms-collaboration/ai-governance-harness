@@ -272,17 +272,18 @@
     const inference = spans.filter((row) => row.name.startsWith("chat ") && row.duration_ms !== null);
     const kpis = document.querySelector("#genai-kpis");
     kpis.replaceChildren();
-    for (const [label, value, tone] of [
+    for (const [label, value, note, tone] of [
       ["Agent runs", count("invoke_agent "), "agent"],
       ["Model calls", count("chat "), "inference"],
       ["Tool calls", count("execute_tool "), "tool"],
       ["Input tokens", tokens("gen_ai.client.inference.usage.input_tokens"), "tokens"],
       ["Output tokens", tokens("gen_ai.client.inference.usage.output_tokens"), "tokens"],
       ["Mean model latency", inference.length ? formatDuration(sumDuration(inference) / inference.length) : "No data", "inference"],
-      ["Human approvals", approvalSummary(metrics), "approval"],
-    ]) {
+      ["Human approvals", ...approvalSummary(metrics), "approval"],
+    ].map((entry) => entry.length === 3 ? [entry[0], entry[1], "", entry[2]] : entry)) {
       const card = element("div", "", `kpi-${tone}`);
       card.append(element("dt", label), element("dd", String(value)));
+      if (note) card.append(element("dd", note, "kpi-note"));
       kpis.append(card);
     }
 
@@ -325,10 +326,10 @@
 
   function approvalSummary(metrics) {
     const rows = metrics.filter((row) => row.name === "governance.human_approval.count");
-    if (!rows.length) return "No data";
+    if (!rows.length) return ["No data", ""];
     const total = (key) => rows.filter((row) => row.outcome === key).reduce((sum, row) => sum + (row.total || 0), 0);
     const declined = total("declined") + total("cancelled") + total("not_approved");
-    return `${total("approved")} approved · ${declined} declined · ${total("requested")} requested`;
+    return [`${total("approved")} approved`, `${declined} declined · ${total("requested")} requested`];
   }
 
   function selectRun(operationId) {
@@ -403,7 +404,12 @@
     renderSummary(all, agent?.duration_ms ?? total);
 
     const showPolicy = genaiShowPolicy.checked;
-    const rows = showPolicy ? all : all.filter((row) => genaiLayer(row.name).key !== "policy");
+    // Passed guardrails are summarised in the run facts; keep only fired ones unless checks are expanded.
+    const isRoutineCheck = (row) => {
+      const key = genaiLayer(row.name).key;
+      return key === "policy" || (key === "guardrail" && row.outcome === "passed");
+    };
+    const rows = showPolicy ? all : all.filter((row) => !isRoutineCheck(row));
     const visible = new Set(rows);
     // Hidden policy checks render as markers on their nearest visible ancestor.
     const markers = new Map();

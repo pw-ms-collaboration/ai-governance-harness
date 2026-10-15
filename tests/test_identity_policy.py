@@ -53,7 +53,9 @@ def test_given_all_identity_combinations_when_evaluating_then_exact_matrix() -> 
     ):
         aggregate = tool in TOOLS[:2]
         staff_allowed = role == "retention_specialist" or (
-            role == "analyst" and aggregate
+            role == "analyst" and (
+                aggregate or tool == "get_member_disengagement_signals"
+            )
         )
         expected = (
             (boundary == "chat" and actor == "interactive")
@@ -152,15 +154,31 @@ def test_given_unknown_enum_when_constructing_context_then_reject(field: str) ->
         GovernanceContext(boundary="mcp", actor="reporting", token_type="app"),
     ],
 )
-def test_given_aggregate_only_caller_when_using_gateway_then_no_nested_member_denial(
+def test_given_caller_when_using_gateway_then_enforces_profile_and_signals_permissions(
     context,
 ):
     gateway = SuperannuationDataGateway()
     with governance_context(context):
         assert gateway.get_cohort_churn_analytics()
         assert gateway.get_fum_outflow_summary()
-        with pytest.raises(GovernanceDeniedError):
-            gateway.get_member_disengagement_signals("MEM-001")
+        if context.staff_role == "analyst":
+            signals = gateway.get_member_disengagement_signals("MEM-001")
+            assert signals["member_id"] == "MEM-001"
+            assert "full_name" not in signals
+            assert "account" not in signals
+        else:
+            with pytest.raises(GovernanceDeniedError):
+                gateway.get_member_disengagement_signals("MEM-001")
+        with pytest.raises(GovernanceDeniedError) as error:
+            gateway.get_member_profile("MEM-001")
+        assert error.value.decision is not None
+        expected_rule = (
+            "deny-analyst-member-tools" if context.staff_role == "analyst"
+            else "deny-reporting-member-tools"
+        )
+        assert error.value.decision.matched_rule == expected_rule
+        assert error.value.decision.provenance is not None
+        assert error.value.decision.provenance.layer == "identity"
 
 
 @pytest.fixture

@@ -8,7 +8,8 @@ policy_layer: identity
 restriction: >
   Chat orchestration requires the interactive actor. At MCP, interactive actors
   require user tokens and reporting actors require app tokens. Analysts may use
-  aggregate tools only; retention specialists may also use member tools and
+  aggregate tools and member disengagement signals, but not member profiles or
+  outreach preparation; retention specialists may also use member profiles and
   prepare outreach subject to eligibility and approval. Other or missing staff
   roles have no tool access. Reporting actors may use aggregate tools only.
   Token-less local callers follow the same staff-role matrix.
@@ -27,7 +28,7 @@ rule_mappings:
   - rule: deny-staff-tool-without-permitted-role
     purpose: Block tools for missing or non-permitted staff roles.
   - rule: deny-analyst-member-tools
-    purpose: Restrict analysts to aggregate tools.
+    purpose: Block member profiles and outreach preparation for analysts; allow aggregates and disengagement signals.
   - rule: deny-reporting-member-tools
     purpose: Restrict reporting agents to aggregate tools.
 limitations:

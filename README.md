@@ -609,7 +609,9 @@ The stdio process reserves standard output for MCP protocol messages and sends
 diagnostics to standard error. Connect an MCP client to this command; it is not
 an interactive shell. Without `MOCK_IDENTITY_LOCAL_PERSONA`, data tools deny.
 This local mock persona is token-less and needs no running issuer. `analyst`
-allows only aggregates; `retention_specialist` allows member tools as well.
+allows aggregates and member disengagement signals, but not member profiles or
+outreach preparation; `retention_specialist` allows all these tools subject to
+eligibility and approval.
 The other two personas deny all data tools.
 
 ## Local Endpoints
@@ -745,8 +747,9 @@ Untagged allow rules remain "Not attributed".
 The [identity policy source](./src/ai_governance_harness/governance/policies/identity-policy-source.yaml)
 documents `IDENTITY-001`. Explicit `pre_tool` identity-deny rules identify missing
 execution identity, incompatible actor/token combinations, disallowed staff
-roles, and analyst/reporting member-tool restrictions. They preserve the existing
-allow/deny matrix. Authentication failures are rejected before AGT and do not
+roles, and analyst/reporting member-tool restrictions. Analysts may retrieve
+disengagement signals and aggregates, but not member profiles or prepare outreach.
+Reporting agents remain aggregate-only. Authentication failures are rejected before AGT and do not
 appear as matched identity-policy decisions. Unknown tool actions still fall
 through to System policy. Where several deny rules match, the displayed origin
 belongs to AGT's selected rule, not a list of every applicable policy.
@@ -784,12 +787,12 @@ No persona is selected initially. The token lives only in page memory; refresh,
 sign-in failure or 401 clears it. Changing persona clears both displayed
 messages and the conversation sent to the model.
 
-| Local mock persona | Aggregate tools | Member tools | Outreach |
-|---|---|---|---|
-| Analyst | Allow | Deny | Deny |
-| Retention Specialist | Allow | Allow | Requires eligibility and explicit approval, including the browser approval flow |
-| Compliance Reviewer | Deny | Deny | Deny |
-| Administrator | Deny | Deny | Deny |
+| Local mock persona | Aggregate tools | Disengagement signals | Member profiles | Outreach |
+|---|---|---|---|---|
+| Analyst | Allow | Allow | Deny | Deny |
+| Retention Specialist | Allow | Allow | Allow | Requires eligibility and explicit approval, including the browser approval flow |
+| Compliance Reviewer | Deny | Deny | Deny | Deny |
+| Administrator | Deny | Deny | Deny | Deny |
 
 Try the cohort example and a member profile under each persona. Inspect the
 MCP `pre_tool` decisions in the panel; chat boundary decisions only identify

@@ -181,6 +181,9 @@ async def test_given_http_process_when_client_connects_then_protocol_is_usable()
                             ) as client:
                                 aggregate = await client.call_tool("get_cohort_churn_analytics", {})
                                 assert not aggregate.is_error
+                                signals = await client.call_tool("get_member_disengagement_signals", {"member_id": "MEM-001"})
+                                assert not signals.is_error
+                                assert signals.structured_content["member_id"] == "MEM-001"
                                 profile = await client.call_tool("get_member_profile", {"member_id": "MEM-001"})
                                 assert profile.is_error == (persona == "analyst")
                                 if persona == "retention_specialist":

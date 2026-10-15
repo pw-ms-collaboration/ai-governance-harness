@@ -407,13 +407,13 @@ flowchart LR
 
 Every combination not listed is denied by default.
 
-| Caller | Aggregate tools | Member-level tools | Outreach case |
-|--------|-----------------|--------------------|---------------|
-| Analyst (OBO) | Allow | Deny | Deny |
-| Retention Specialist (OBO) | Allow | Allow | Allow, MCP elicitation still required |
-| Compliance Reviewer (OBO) | Deny | Deny | Deny |
-| Administrator (OBO) | Deny | Deny | Deny |
-| Reporting agent (app-only) | Allow | Deny | Deny |
+| Caller | Aggregate tools | Disengagement signals | Member profiles | Outreach case |
+|--------|-----------------|-----------------------|-----------------|---------------|
+| Analyst (OBO) | Allow | Allow | Deny | Deny |
+| Retention Specialist (OBO) | Allow | Allow | Allow | Allow, MCP elicitation still required |
+| Compliance Reviewer (OBO) | Deny | Deny | Deny | Deny |
+| Administrator (OBO) | Deny | Deny | Deny | Deny |
+| Reporting agent (app-only) | Allow | Deny | Deny | Deny |
 
 ---
 

@@ -348,6 +348,66 @@ def test_given_guardrail_check_when_recording_then_span_and_metric_are_bounded(
         trace_provider.shutdown()
 
 
+@pytest.mark.parametrize(
+    ("outcome", "mechanism"),
+    [
+        ("requested", "browser_chat"),
+        ("declined", "browser_chat"),
+        ("approved", "mcp_form_elicitation"),
+    ],
+)
+def test_given_human_approval_when_recording_then_span_and_metric_are_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+    outcome: str,
+    mechanism: str,
+) -> None:
+    # Arrange
+    reader = InMemoryMetricReader()
+    metrics_provider = MeterProvider(metric_readers=[reader])
+    spans = InMemorySpanExporter()
+    trace_provider = TracerProvider()
+    trace_provider.add_span_processor(SimpleSpanProcessor(spans))
+    monkeypatch.setattr(
+        governance_telemetry, "tracer", trace_provider.get_tracer("approval-test"),
+    )
+    monkeypatch.setattr(
+        governance_telemetry, "approval_counter",
+        metrics_provider.get_meter("approval-test").create_counter(
+            "governance.human_approval.count",
+        ),
+    )
+    expected = {
+        "governance.approval.outcome": outcome,
+        "governance.approval.tool": "prepare_member_outreach_case",
+        "governance.approval.mechanism": mechanism,
+    }
+
+    try:
+        # Act
+        governance_telemetry.record_human_approval(
+            outcome,
+            tool_name="prepare_member_outreach_case",
+            mechanism=mechanism,
+        )
+
+        # Assert
+        (span,) = spans.get_finished_spans()
+        assert span.name == "governance.human_approval"
+        assert dict(span.attributes) == expected
+        (point,) = [
+            point
+            for resource in reader.get_metrics_data().resource_metrics
+            for scope in resource.scope_metrics
+            for metric in scope.metrics
+            for point in metric.data.data_points
+        ]
+        assert point.value == 1
+        assert dict(point.attributes) == expected
+    finally:
+        metrics_provider.shutdown()
+        trace_provider.shutdown()
+
+
 def test_given_guardrail_exception_when_recording_then_outcome_is_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

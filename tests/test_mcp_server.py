@@ -224,9 +224,24 @@ async def test_given_tool_response_when_releasing_then_checks_advice_boundary(
         assert text in result.model_dump_json()
 
 
+def _capture_approvals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[tuple[str, dict[str, str]]]:
+    approvals: list[tuple[str, dict[str, str]]] = []
+    monkeypatch.setattr(
+        "ai_governance_harness.mcp_server.server.record_human_approval",
+        lambda outcome, **attributes: approvals.append((outcome, attributes)),
+    )
+    return approvals
+
+
 @pytest.mark.anyio
-async def test_given_approval_when_preparing_outreach_case_then_returns_case() -> None:
+async def test_given_approval_when_preparing_outreach_case_then_returns_case(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # Arrange
+    approvals = _capture_approvals(monkeypatch)
+
     async def approve(_context, params):
         assert params.mode == "form"
         assert "approved" in params.requested_schema["properties"]
@@ -254,21 +269,32 @@ async def test_given_approval_when_preparing_outreach_case_then_returns_case() -
         result.structured_content["disengagement_signals"]["member_id"]
         == "MEM-002"
     )
+    assert approvals == [(
+        "approved",
+        {
+            "tool_name": "prepare_member_outreach_case",
+            "mechanism": "mcp_form_elicitation",
+        },
+    )]
 
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(
-    ("action", "expected_message"),
+    ("action", "expected_message", "expected_approval"),
     [
-        ("decline", "Approval was declined. No operation was executed."),
-        ("cancel", "Approval was cancelled. No operation was executed."),
+        ("decline", "Approval was declined. No operation was executed.", "declined"),
+        ("cancel", "Approval was cancelled. No operation was executed.", "cancelled"),
     ],
 )
 async def test_given_non_acceptance_when_preparing_case_then_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
     action: str,
     expected_message: str,
+    expected_approval: str,
 ) -> None:
     # Arrange
+    approvals = _capture_approvals(monkeypatch)
+
     async def do_not_approve(_context, _params):
         return types.ElicitResult(action=action)
 
@@ -282,11 +308,16 @@ async def test_given_non_acceptance_when_preparing_case_then_fails_closed(
     # Assert
     assert result.is_error is True
     assert result.content[0].text.endswith(expected_message)
+    assert [outcome for outcome, _ in approvals] == [expected_approval]
 
 
 @pytest.mark.anyio
-async def test_given_negative_form_response_when_preparing_case_then_fails_closed() -> None:
+async def test_given_negative_form_response_when_preparing_case_then_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # Arrange
+    approvals = _capture_approvals(monkeypatch)
+
     async def reject(_context, _params):
         return types.ElicitResult(
             action="accept",
@@ -305,6 +336,7 @@ async def test_given_negative_form_response_when_preparing_case_then_fails_close
     assert result.content[0].text.endswith(
         "Explicit approval is required. No operation was executed."
     )
+    assert [outcome for outcome, _ in approvals] == ["not_approved"]
 
 
 @pytest.mark.anyio

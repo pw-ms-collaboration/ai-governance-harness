@@ -271,6 +271,28 @@ class GovernanceEngine:
             decision, action=action, source=source, context=get_governance_context(),
         )
 
+    def record_approval_required(
+        self,
+        action: str,
+        *,
+        matched_rule: str = "require-human-approval",
+        source: EventSource = "system",
+    ) -> GovernanceDecision:
+        """Record that a tool call paused for an explicit human approval."""
+        decision = GovernanceDecision(
+            allowed=False,
+            action="require_approval",
+            lifecycle_point=LifecyclePoint.PRE_TOOL,
+            policy_name="human-approval-gate",
+            matched_rule=matched_rule,
+            reason="Explicit human approval is required before this tool runs.",
+            policy_digest=self.policy_digest,
+            enforcement_mode="enforce" if self.settings.enabled else "disabled",
+        )
+        return self._record_decision(
+            decision, action=action, source=source, context=get_governance_context(),
+        )
+
     @staticmethod
     def _record_decision(
         decision: GovernanceDecision,

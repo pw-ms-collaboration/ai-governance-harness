@@ -465,3 +465,38 @@ def test_given_guardrail_span_when_reading_then_preserves_outcome_and_reason(azu
     assert (row.name, row.outcome, row.rule) == (
         "apply_guardrail tool_allowlist", "triggered", "unregistered_tool",
     )
+
+
+def test_given_human_approval_telemetry_when_querying_then_span_and_metric_are_included() -> None:
+    query = insights.history_query(1)
+
+    assert '"governance.human_approval"' in query
+    assert '"governance.human_approval.count"' in query
+    assert 'customDimensions["governance.approval.outcome"]' in query
+    assert '"requested", "approved", "declined", "cancelled", "not_approved"' in query
+    assert '"mcp.elicitation"' in query
+
+
+def test_given_human_approval_rows_when_reading_then_outcome_is_preserved(azure_response) -> None:
+    azure_response(document([
+        ["span", insights.ROLES[1], "governance.human_approval", "approved", None],
+        ["metric", insights.ROLES[0], "governance.human_approval.count", "declined", 2],
+    ], ["kind", "service", "name", "outcome", "total"]))
+
+    span, metric = insights.read_history(APP_ID, 1)
+
+    assert (span.name, span.outcome) == ("governance.human_approval", "approved")
+    assert (metric.name, metric.outcome, metric.total) == (
+        "governance.human_approval.count", "declined", 2,
+    )
+
+
+def test_given_ui_when_loaded_then_renders_human_approval_layer() -> None:
+    client = TestClient(build_chat_app(_settings()))
+
+    page = client.get("/").text
+    script = client.get("/static/insights.js").text
+
+    assert 'class="layer-approval">Human approval<' in page
+    assert 'name === "governance.human_approval"' in script
+    assert '"Human approvals"' in script

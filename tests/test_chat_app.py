@@ -67,6 +67,37 @@ class _StructureParser(HTMLParser):
         self.tags.append((tag, dict(attrs)))
 
 
+class _AncestorParser(HTMLParser):
+    """Record each element with its active ancestors."""
+
+    _VOID = frozenset({"br", "hr", "img", "input", "link", "meta"})
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stack: list[tuple[str, dict[str, str | None]]] = []
+        self.elements: list[
+            tuple[
+                str,
+                dict[str, str | None],
+                tuple[tuple[str, dict[str, str | None]], ...],
+            ]
+        ] = []
+
+    def handle_starttag(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
+    ) -> None:
+        values = dict(attrs)
+        self.elements.append((tag, values, tuple(self.stack)))
+        if tag not in self._VOID:
+            self.stack.append((tag, values))
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag not in self._VOID and self.stack:
+            self.stack.pop()
+
+
 def _settings() -> ChatSettings:
     return ChatSettings(model_deployment="test-model", sidecar_url="http://127.0.0.1:8002", interactive_agent_id=INTERACTIVE_ID)
 
@@ -288,9 +319,12 @@ def test_given_ui_request_when_loading_then_includes_security_headers() -> None:
 
 def test_static_ui_has_required_accessible_structure() -> None:
     # Arrange
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     parser = _StructureParser()
-    parser.feed((STATIC_DIR / "index.html").read_text(encoding="utf-8"))
+    parser.feed(html)
     tags = parser.tags
+    ancestor_parser = _AncestorParser()
+    ancestor_parser.feed(html)
 
     # Assert
     assert any(tag == "html" and attrs.get("lang") == "en" for tag, attrs in tags)
@@ -339,6 +373,48 @@ def test_static_ui_has_required_accessible_structure() -> None:
     assert any(attrs.get("id") == "identity-status" and attrs.get("aria-live") == "polite" for _, attrs in tags)
     options = {attrs.get("value") for tag, attrs in tags if tag == "option"}
     assert {"", "analyst", "retention_specialist", "compliance_reviewer", "administrator"} <= options
+    assert any(
+        tag == "section" and attrs.get("aria-label") == "Identity"
+        for tag, attrs in tags
+    )
+    assert any(tag == "details" and attrs.get("class") == "role-comparison" for tag, attrs in tags)
+    assert any(tag == "details" and attrs.get("class") == "runtime-summary" for tag, attrs in tags)
+    assert any(
+        attrs.get("class") == "governance-header" and "hidden" in attrs for _, attrs in tags
+    )
+    assert 'id="identity-mode"' not in html
+    filter_ids = {attrs.get("id") for _, attrs in tags if "data-policy-filter" in attrs}
+    assert filter_ids == {"rule-filter-stage"}
+    prompt_buttons = [
+        ancestors
+        for tag, attrs, ancestors in ancestor_parser.elements
+        if tag == "button" and attrs.get("class") == "example"
+    ]
+    assert len(prompt_buttons) == 3
+    assert all(
+        any(tag == "form" and attrs.get("id") == "chat-form" for tag, attrs in ancestors)
+        for ancestors in prompt_buttons
+    )
+    assert all(
+        not any(
+            attrs.get("class") == "access-panel"
+            for tag, attrs in ancestors
+        )
+        for ancestors in prompt_buttons
+    )
+    for expected_text in (
+        "Selected-role access",
+        "Preview only. Actual access requires successful sign-in and runtime policy evaluation.",
+        "Try a prompt",
+        "Analyst <span>OBO</span>",
+        "Retention Specialist <span>OBO</span>",
+        "Compliance Reviewer / Administrator <span>OBO</span>",
+        "Reporting agent <span>App-only</span>",
+        "Requires eligibility and explicit approval; browser approval supported",
+    ):
+        assert expected_text in html
+    assert "step-number" not in html
+    assert "Sign in (mock)" not in html
     assert any(attrs.get("id") == "send-button" and "disabled" in attrs for _, attrs in tags)
 
 
@@ -346,6 +422,13 @@ def test_given_identity_ui_when_inspecting_then_no_storage_or_cross_origin():
     script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
     for forbidden in ("localStorage", "sessionStorage", "indexedDB", "document.cookie", ":8002", "http://", "https://"):
         assert forbidden not in script
+    for expected_access in (
+        'aggregate: ["Allow", "allowed"]',
+        'member: ["Deny", "denied"]',
+        'outreach: ["Eligibility + approval", "conditional"]',
+    ):
+        assert expected_access in script
+    assert "signInButton.disabled = isBusy || Boolean(accessToken);" in script
     client = TestClient(build_chat_app(_settings(), _FakeChatService()))
     assert client.get("/").headers["Content-Security-Policy"] == (
         "default-src 'self'; script-src 'self'; style-src 'self'; "
@@ -453,6 +536,8 @@ def test_given_flow_script_when_requested_then_served_without_html_injection() -
     assert response.headers["content-type"].startswith("text/javascript")
     assert "innerHTML" not in response.text
     assert "/api/governance/snapshot" in response.text
+    assert "setOutcomeFilter" in response.text
+    assert "activeOutcome" in response.text
 
 
 def test_given_observability_tab_when_loaded_then_request_flow_shows_every_outcome() -> None:
@@ -468,7 +553,12 @@ def test_given_observability_tab_when_loaded_then_request_flow_shows_every_outco
     for outcome in ("allow", "deny", "approval", "other"):
         assert f'id="flow-count-{outcome}"' in observability
         assert f'id="flow-out-{outcome}"' in observability
+        assert (
+            f'id="flow-node-{outcome}" class="flow-node flow-outcome flow-{outcome}" '
+            'role="button" tabindex="0"'
+        ) in observability
     assert 'id="flow-ticker"' in observability
+    assert 'id="flow-filter-clear"' in observability
     assert 'aria-live="polite"' in observability
     assert "/static/flow.js" in html
 

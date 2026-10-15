@@ -642,13 +642,13 @@
       const svg = svgElement("svg", { viewBox: "0 0 640 220", role: "img", "aria-label": `Tokens per time bucket. ${input.toLocaleString()} input and ${output.toLocaleString()} output tokens in total.` });
       const defs = svgElement("defs", {});
       const pattern = svgElement("pattern", { id: "token-output-hatch", width: 6, height: 6, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" });
-      pattern.append(svgElement("rect", { width: 6, height: 6, fill: "#b083f0" }), svgElement("line", { x1: 0, y1: 0, x2: 0, y2: 6, stroke: "#0b1626", "stroke-width": 2 }));
+      pattern.append(svgElement("rect", { width: 6, height: 6, fill: "#6f42c1" }), svgElement("line", { x1: 0, y1: 0, x2: 0, y2: 6, stroke: "#ffffff", "stroke-width": 2 }));
       defs.append(pattern);
       svg.append(defs);
       for (const fraction of [0, 0.5, 1]) {
         const y = 190 - fraction * 165;
-        svg.append(svgElement("line", { x1: 56, x2: 630, y1: y, y2: y, stroke: "#2b4566" }));
-        const label = svgElement("text", { x: 50, y: y + 4, "text-anchor": "end", fill: "#a9b8cc", "font-size": 12 });
+        svg.append(svgElement("line", { x1: 56, x2: 630, y1: y, y2: y, stroke: "#c5cede" }));
+        const label = svgElement("text", { x: 50, y: y + 4, "text-anchor": "end", fill: "#526078", "font-size": 12 });
         label.textContent = Math.round(peak * fraction).toLocaleString();
         svg.append(label);
       }
@@ -661,7 +661,7 @@
         const group = svgElement("g", { class: "token-bar" });
         group.style.animationDelay = `${index * 40}ms`;
         group.append(
-          svgElement("rect", { x, y: 190 - inputHeight, width, height: inputHeight, fill: "#58a6ff", rx: 2 }),
+          svgElement("rect", { x, y: 190 - inputHeight, width, height: inputHeight, fill: "#174ea6", rx: 2 }),
           svgElement("rect", { x, y: 190 - inputHeight - outputHeight, width, height: outputHeight, fill: "url(#token-output-hatch)", rx: 2 }),
         );
         const title = svgElement("title", {});
@@ -670,7 +670,7 @@
         svg.append(group);
       });
       for (const [row, position, anchor] of [[timeline[0], 56, "start"], [timeline.at(-1), 630, "end"]]) {
-        const label = svgElement("text", { x: position, y: 212, "text-anchor": anchor, fill: "#a9b8cc", "font-size": 12 });
+        const label = svgElement("text", { x: position, y: 212, "text-anchor": anchor, fill: "#526078", "font-size": 12 });
         label.textContent = new Date(row.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
         svg.append(label);
       }

@@ -22,6 +22,8 @@
   const pauseButton = document.querySelector("#flow-pause");
   const replayButton = document.querySelector("#flow-replay");
   const ticker = document.querySelector("#flow-ticker");
+  const tickerTitle = document.querySelector("#flow-ticker-title");
+  const clearFilterButton = document.querySelector("#flow-filter-clear");
   const announcer = document.querySelector("#flow-announcer");
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
@@ -36,6 +38,7 @@
   let latestEvents = [];
   let initialised = false;
   let paused = false;
+  let activeOutcome = null;
   let inFlight = 0;
   let pollTimer = null;
 
@@ -107,7 +110,7 @@
     if (node) {
       pulse(node, "pulse");
     }
-    if (!replay) {
+    if (!replay && (!activeOutcome || activeOutcome === outcome)) {
       addTickerRow(event, outcome, true);
     }
   }
@@ -192,6 +195,34 @@
     }
   }
 
+  function renderTicker(limit = MAX_TICKER) {
+    ticker.replaceChildren();
+    const matchingEvents = activeOutcome
+      ? latestEvents.filter((event) => outcomeFor(event.decision) === activeOutcome)
+      : latestEvents;
+    matchingEvents.slice(-limit).forEach((event) => {
+      addTickerRow(event, outcomeFor(event.decision), false);
+    });
+  }
+
+  function setOutcomeFilter(outcome) {
+    activeOutcome = activeOutcome === outcome ? null : outcome;
+    for (const key of Object.keys(OUTCOMES)) {
+      const node = document.querySelector(`#flow-node-${key}`);
+      const selected = key === activeOutcome;
+      node?.classList.toggle("selected", selected);
+      node?.setAttribute("aria-pressed", String(selected));
+    }
+    clearFilterButton.hidden = !activeOutcome;
+    tickerTitle.textContent = activeOutcome
+      ? `Latest decisions: ${OUTCOMES[activeOutcome].label}`
+      : "Latest decisions";
+    renderTicker();
+    announcer.textContent = activeOutcome
+      ? `Showing ${OUTCOMES[activeOutcome].label.toLowerCase()} decisions.`
+      : "Showing all latest decisions.";
+  }
+
   function announce(events) {
     const totals = {};
     for (const event of events) {
@@ -223,7 +254,7 @@
 
     if (!initialised) {
       initialised = true;
-      events.slice(-8).forEach((event) => addTickerRow(event, outcomeFor(event.decision), false));
+      renderTicker(8);
       return;
     }
     if (fresh.length === 0) {
@@ -293,6 +324,28 @@
     }
     announcer.textContent = `Replaying ${recent.length} recent decisions.`;
     play(recent, true);
+  });
+
+  for (const key of Object.keys(OUTCOMES)) {
+    const node = document.querySelector(`#flow-node-${key}`);
+    node?.addEventListener("click", () => setOutcomeFilter(key));
+    node?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        setOutcomeFilter(key);
+      }
+    });
+  }
+
+  clearFilterButton.addEventListener("click", () => setOutcomeFilter(null));
+  document.addEventListener("click", (event) => {
+    if (
+      activeOutcome
+      && event.target instanceof Element
+      && !event.target.closest(".flow-outcome")
+    ) {
+      setOutcomeFilter(null);
+    }
   });
 
   new MutationObserver(resumeNow).observe(panel, { attributes: true, attributeFilter: ["hidden"] });

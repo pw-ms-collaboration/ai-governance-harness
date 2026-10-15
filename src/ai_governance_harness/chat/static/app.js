@@ -46,6 +46,7 @@ const personaTrigger = document.querySelector("#persona-trigger");
 const personaTriggerText = document.querySelector("#persona-trigger-text");
 const personaMenu = document.querySelector("#persona-menu");
 const signInButton = document.querySelector("#identity-signin");
+const identityPanel = document.querySelector(".header-identity-panel");
 const identityStatus = document.querySelector("#identity-status");
 const selectedRoleName = document.querySelector("#selected-role-name");
 const roleAccessSummary = document.querySelector("#role-access-summary");
@@ -231,6 +232,7 @@ function setBusy(isBusy) {
   personaTrigger.disabled = isBusy;
   if (isBusy) closePersonaMenu(false);
   signInButton.disabled = isBusy || Boolean(accessToken);
+  identityPanel?.classList.toggle("signed-in", Boolean(accessToken));
   clearButton.disabled = isBusy;
   activityStatus.textContent = isBusy ? "Thinking and checking governance tools" : "";
   activityStatus.classList.toggle("busy", isBusy);
@@ -883,7 +885,8 @@ personaSelector.addEventListener("change", () => {
   syncPersonaPicker();
   clearIdentityConversation();
   renderRoleAccessPreview(personaSelector.value);
-  identityStatus.textContent = "Persona changed. Sign in to start a new conversation.";
+  identityStatus.textContent = "Persona changed. Signing in...";
+  signIn({ automatic: true });
 });
 
 async function signIn({ automatic = false } = {}) {
@@ -986,6 +989,13 @@ window.setInterval(() => {
   }
 }, 5000);
 
+const personaHints = Object.freeze({
+  analyst: "Aggregate insights only",
+  retention_specialist: "Member insights, gated outreach",
+  compliance_reviewer: "Data tools blocked",
+  administrator: "Data tools blocked",
+});
+
 function personaOptions() {
   return [...personaMenu.querySelectorAll('[role="option"]')];
 }
@@ -998,7 +1008,24 @@ function buildPersonaMenu() {
       item.id = `persona-option-${option.value}`;
       item.setAttribute("role", "option");
       item.dataset.value = option.value;
-      item.textContent = option.textContent;
+      const initials = document.createElement("span");
+      initials.className = "persona-option-initials";
+      initials.setAttribute("aria-hidden", "true");
+      initials.textContent = option.textContent
+        .split(" ")
+        .map((word) => word[0])
+        .join("")
+        .slice(0, 2);
+      const text = document.createElement("span");
+      text.className = "persona-option-text";
+      const name = document.createElement("span");
+      name.className = "persona-option-name";
+      name.textContent = option.textContent;
+      const hint = document.createElement("span");
+      hint.className = "persona-option-hint";
+      hint.textContent = personaHints[option.value] || "";
+      text.append(name, hint);
+      item.append(initials, text);
       return item;
     });
   personaMenu.replaceChildren(...items);

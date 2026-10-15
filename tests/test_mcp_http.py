@@ -229,6 +229,34 @@ def test_given_hosted_mcp_without_principal_when_posting_then_returns_401() -> N
     assert "X-Correlation-ID" in response.headers
 
 
+def test_given_hosted_http_when_discovering_then_lists_tools_without_session_state() -> None:
+    settings = _hosted_settings(json_response=True)
+    headers = {
+        **_principal_headers(),
+        "Accept": "application/json, text/event-stream",
+    }
+    with TestClient(build_http_app(settings), base_url="http://127.0.0.1:8001") as client:
+        initialized = client.post("/mcp", headers=headers, json={
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18", "capabilities": {},
+                "clientInfo": {"name": "hosted-transport-test", "version": "1"},
+            },
+        })
+        discovered = client.post("/mcp", headers={
+            **headers, "MCP-Protocol-Version": "2025-06-18",
+        }, json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
+
+    assert initialized.status_code == 200
+    assert "mcp-session-id" not in initialized.headers
+    assert discovered.status_code == 200
+    assert {tool["name"] for tool in discovered.json()["result"]["tools"]} == {
+        "get_member_profile", "get_member_disengagement_signals",
+        "get_cohort_churn_analytics", "get_fum_outflow_summary",
+        "prepare_member_outreach_case",
+    }
+
+
 def test_given_public_operational_paths_when_unauthenticated_then_remain_available() -> None:
     # Arrange
     client = TestClient(build_http_app(_hosted_settings()))

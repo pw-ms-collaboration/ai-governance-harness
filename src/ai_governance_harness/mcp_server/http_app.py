@@ -101,7 +101,7 @@ def build_http_app(settings: ServerSettings) -> Starlette:
     app = mcp.streamable_http_app(
         streamable_http_path=settings.mcp_path,
         json_response=settings.json_response,
-        stateless_http=False,
+        stateless_http=settings.hosted,
         max_request_body_size=settings.max_request_body_size,
         host=settings.host,
     )

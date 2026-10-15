@@ -151,7 +151,11 @@ calls MCP, so you do not need to enable direct browser-to-MCP access for the
 reference UI. A custom browser MCP client needs its exact origin explicitly
 allowed.
 
-Streamable HTTP is session-based, not stateless. The middleware accepts
+Local Streamable HTTP is session-based. Hosted MCP uses stateless HTTP for
+[Foundry compatibility](https://learn.microsoft.com/azure/foundry/agents/how-to/mcp-authentication#host-a-local-mcp-server),
+without changing authentication or tool authorization. Hosted workload outreach
+remains denied; local clients retain session-based elicitation support.
+The middleware accepts
 protocol-version headers `2025-11-25` and `2025-06-18`; this tuple is fixed in
 code, not an environment setting. MCP initialization and session negotiation
 are required before tool calls. An ordinary JSON POST or browser GET to the

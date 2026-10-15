@@ -30,6 +30,7 @@ from ai_governance_harness.governance.models import (
     PolicyProvenance,
 )
 from ai_governance_harness.governance.telemetry import (
+    bounded_action,
     provenance_attributes,
     record_decision_metrics,
     tracer,
@@ -152,10 +153,14 @@ class GovernanceEngine:
                 span.set_attribute("governance.source", source)
                 for name, value in context.identity_attributes().items():
                     span.set_attribute(f"governance.{name}", value)
+                toolkit_stage = _TOOLKIT_STAGE_BY_LIFECYCLE[lifecycle_point]
+                # The toolkit has four stages; record the mapping so rule gaps are traceable.
+                span.set_attribute("governance.policy.stage", toolkit_stage)
+                span.set_attribute("governance.action", bounded_action(action))
                 toolkit_decision = self._engine.evaluate(
                     self.settings.agent_id,
                     snapshot,
-                    stage=_TOOLKIT_STAGE_BY_LIFECYCLE[lifecycle_point],
+                    stage=toolkit_stage,
                 )
                 span.set_attribute(
                     "governance.decision",
@@ -164,6 +169,10 @@ class GovernanceEngine:
                 span.set_attribute(
                     "governance.rule.name",
                     toolkit_decision.matched_rule or "unmatched",
+                )
+                span.set_attribute(
+                    "governance.decision.basis",
+                    "rule" if toolkit_decision.matched_rule else "default_action",
                 )
                 provenance = self.rule_provenance(toolkit_decision.matched_rule)
                 span.set_attributes(provenance_attributes(provenance))
@@ -257,6 +266,28 @@ class GovernanceEngine:
             matched_rule=matched_rule,
             policy_digest=self.policy_digest,
             enforcement_mode="enforce",
+        )
+        return self._record_decision(
+            decision, action=action, source=source, context=get_governance_context(),
+        )
+
+    def record_approval_required(
+        self,
+        action: str,
+        *,
+        matched_rule: str = "require-human-approval",
+        source: EventSource = "system",
+    ) -> GovernanceDecision:
+        """Record that a tool call paused for an explicit human approval."""
+        decision = GovernanceDecision(
+            allowed=False,
+            action="require_approval",
+            lifecycle_point=LifecyclePoint.PRE_TOOL,
+            policy_name="human-approval-gate",
+            matched_rule=matched_rule,
+            reason="Explicit human approval is required before this tool runs.",
+            policy_digest=self.policy_digest,
+            enforcement_mode="enforce" if self.settings.enabled else "disabled",
         )
         return self._record_decision(
             decision, action=action, source=source, context=get_governance_context(),

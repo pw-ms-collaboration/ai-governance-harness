@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
+from types import SimpleNamespace, TracebackType
+from typing import ClassVar
 
 import httpx
 import pytest
@@ -11,9 +12,11 @@ from openai import BadRequestError
 from ai_governance_harness.governance import GovernanceEngine, GovernanceSettings
 
 from ai_governance_harness.chat.config import ChatSettings
+from ai_governance_harness.chat.app import build_chat_app
 from ai_governance_harness.chat.service import (
     SYSTEM_INSTRUCTIONS,
     SCOPE_REFUSAL_MESSAGE,
+    ChatContentFilteredError,
     ChatMessage,
     ChatRequest,
     ChatService,
@@ -112,7 +115,34 @@ class _FakeCompletions:
                 content="The synthetic profile was retrieved.",
                 tool_calls=None,
             )
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=message,
+                    finish_reason="tool_calls" if message.tool_calls else "stop",
+                )
+            ]
+        )
+
+
+class _FilteredCompletions(_FakeCompletions):
+    def __init__(self, partial_content: str | None) -> None:
+        super().__init__()
+        self.partial_content = partial_content
+
+    def create(self, **kwargs: object) -> SimpleNamespace:
+        self.calls.append(kwargs)
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    finish_reason="content_filter",
+                    message=SimpleNamespace(
+                        content=self.partial_content,
+                        tool_calls=[_FakeToolCall()],
+                    ),
+                )
+            ]
+        )
 
 
 class _FakeModelClient:
@@ -130,7 +160,9 @@ class _GoalHijackCompletions:
         tool_call.function.name = "shell.execute"
         tool_call.function.arguments = json.dumps({"command": "print secrets"})
         message = SimpleNamespace(content=None, tool_calls=[tool_call])
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=message, finish_reason="tool_calls")]
+        )
 
 
 class _GoalHijackModelClient(_FakeModelClient):
@@ -358,6 +390,22 @@ class _WrappingMcpClient(_SignalMcpClient):
             raise ExceptionGroup("MCP task group failed", [exc])
 
 
+class _GroupingMcpClient(_FakeMcpClient):
+    extra_error: ClassVar[Exception | None] = None
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        if isinstance(exc, Exception):
+            errors: list[Exception] = [ExceptionGroup("MCP task", [exc])]
+            if self.extra_error is not None:
+                errors.append(self.extra_error)
+            raise ExceptionGroup("MCP session", errors)
+
+
 @pytest.fixture()
 def anyio_backend() -> str:
     return "asyncio"
@@ -512,7 +560,13 @@ async def test_given_eligible_outreach_request_then_asks_for_approval(
         lambda: project_client,
     )
     monkeypatch.setattr("ai_governance_harness.chat.service.Client", OutreachMcpClient)
+    approvals: list[tuple[str, dict[str, str]]] = []
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.record_human_approval",
+        lambda outcome, **attributes: approvals.append((outcome, attributes)),
+    )
     service = ChatService(_settings())
+    governance_events.clear()
     request = ChatRequest(
         messages=[
             ChatMessage(
@@ -529,6 +583,18 @@ async def test_given_eligible_outreach_request_then_asks_for_approval(
     assert response.message.startswith("Approval required for MEM-001")
     assert response.tools_used == []
     assert calls == ["get_member_profile"]
+    approval_events = [
+        event for event in governance_events.snapshot()["recent_events"]
+        if event["decision"] == "require_approval"
+    ]
+    assert len(approval_events) == 1
+    assert approval_events[0]["source"] == "chat"
+    assert approval_events[0]["action"] == "prepare_member_outreach_case"
+    assert approval_events[0]["allowed"] is False
+    assert approvals == [(
+        "requested",
+        {"tool_name": "prepare_member_outreach_case", "mechanism": "browser_chat"},
+    )]
 
 
 @pytest.mark.anyio
@@ -619,10 +685,10 @@ async def test_given_explicit_approval_when_outreach_pending_then_executes(
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(
-    ("answer", "expected"),
+    ("answer", "expected", "expected_approval"),
     [
-        ("Decline", "was declined"),
-        ("Tell me more", "Reply **Approve**"),
+        ("Decline", "was declined", "declined"),
+        ("Tell me more", "Reply **Approve**", "requested"),
     ],
 )
 async def test_given_non_approval_when_outreach_pending_then_does_not_execute(
@@ -630,10 +696,16 @@ async def test_given_non_approval_when_outreach_pending_then_does_not_execute(
     monkeypatch: pytest.MonkeyPatch,
     answer: str,
     expected: str,
+    expected_approval: str,
 ) -> None:
     # Arrange
     model_client = _FakeModelClient()
     project_client = _FakeProjectClient(model_client)
+    approvals: list[str] = []
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.record_human_approval",
+        lambda outcome, **_attributes: approvals.append(outcome),
+    )
     monkeypatch.setattr(
         "ai_governance_harness.chat.service.get_foundry_client",
         lambda: project_client,
@@ -663,6 +735,7 @@ async def test_given_non_approval_when_outreach_pending_then_does_not_execute(
     assert expected in response.message
     assert response.tools_used == []
     assert model_client.chat.completions.calls == []
+    assert approvals == [expected_approval]
 
 
 @pytest.mark.anyio
@@ -1271,6 +1344,136 @@ async def test_given_foundry_filter_http_error_then_surfaces_safe_details(
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("partial_content", [None, "Filtered partial output"])
+@pytest.mark.parametrize("mcp_client_type", [_FakeMcpClient, _GroupingMcpClient])
+async def test_filtered_completion_does_not_return_content_or_execute_tools(
+    monkeypatch: pytest.MonkeyPatch,
+    partial_content: str | None,
+    mcp_client_type: type[_FakeMcpClient],
+    caller_identity,
+) -> None:
+    governance_events.clear()
+    _FakeMcpClient.called_tools = []
+    model_client = _FakeModelClient()
+    model_client.chat.completions = _FilteredCompletions(partial_content)
+    project_client = _FakeProjectClient(model_client)
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.Client",
+        mcp_client_type,
+    )
+    service = ChatService(_settings())
+    request = ChatRequest(
+        messages=[ChatMessage(role="user", content="Show MEM-001")]
+    )
+
+    with pytest.raises(ChatContentFilteredError) as error:
+        await service.complete(request, caller_identity)
+
+    assert error.value.code == "model_content_filtered"
+    assert error.value.status_code == 422
+    denial = governance_events.snapshot()["recent_events"][0]
+    assert denial["decision"] == "deny"
+    assert denial["policy_name"] == "azure-ai-foundry"
+    assert denial["matched_rule"] == "content_filter"
+    assert len(model_client.chat.completions.calls) == 1
+    assert _FakeMcpClient.called_tools == []
+    assert project_client.closed is True
+    assert model_client.closed is True
+
+
+@pytest.mark.anyio
+async def test_filter_and_transport_errors_are_not_misclassified_as_only_filtered(
+    monkeypatch: pytest.MonkeyPatch,
+    caller_identity,
+) -> None:
+    _FakeMcpClient.called_tools = []
+    model_client = _FakeModelClient()
+    model_client.chat.completions = _FilteredCompletions(None)
+    project_client = _FakeProjectClient(model_client)
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.Client",
+        _GroupingMcpClient,
+    )
+    monkeypatch.setattr(
+        _GroupingMcpClient,
+        "extra_error",
+        RuntimeError("Sensitive transport detail"),
+    )
+    service = ChatService(_settings())
+    request = ChatRequest(
+        messages=[ChatMessage(role="user", content="Show MEM-001")]
+    )
+
+    with pytest.raises(ChatServiceError) as error:
+        await service.complete(request, caller_identity)
+
+    assert not isinstance(error.value, ChatContentFilteredError)
+    assert str(error.value) == (
+        "An upstream chat dependency could not complete the request."
+    )
+    assert error.value.code == "upstream_failure"
+    assert error.value.status_code == 502
+    assert _FakeMcpClient.called_tools == []
+    assert project_client.closed is True
+    assert model_client.closed is True
+
+
+@pytest.mark.anyio
+async def test_filtered_completion_returns_explicit_stop_through_chat_api(
+    monkeypatch: pytest.MonkeyPatch,
+    caller_identity,
+) -> None:
+    _FakeMcpClient.called_tools = []
+    model_client = _FakeModelClient()
+    model_client.chat.completions = _FilteredCompletions("Filtered partial output")
+    project_client = _FakeProjectClient(model_client)
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.get_foundry_client",
+        lambda: project_client,
+    )
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.service.Client",
+        _GroupingMcpClient,
+    )
+    async def validate(_self, _headers):
+        return caller_identity
+
+    monkeypatch.setattr(
+        "ai_governance_harness.chat.app.SidecarClient.validate", validate,
+    )
+    settings = _settings()
+    app = build_chat_app(settings, ChatService(settings))
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/api/chat",
+            headers={"X-Correlation-ID": "foundry-filter-test"},
+            json={"messages": [{"role": "user", "content": "Show MEM-001"}]},
+        )
+
+    assert response.status_code == 422
+    error = response.json()["error"]
+    assert error["code"] == "model_content_filtered"
+    assert error["correlation_id"] == "foundry-filter-test"
+    assert error["details"]["finish_reason"] == "content_filter"
+    assert "Filtered partial output" not in response.text
+    assert _FakeMcpClient.called_tools == []
+    assert project_client.closed is True
+    assert model_client.closed is True
+
+
+@pytest.mark.anyio
 async def test_given_goal_hijack_when_model_selects_unknown_tool_then_fails_closed(
     monkeypatch: pytest.MonkeyPatch,
     caller_identity,
@@ -1360,9 +1563,8 @@ async def test_given_foundry_filter_when_completing_then_records_caller_denial(
     with pytest.raises(ChatServiceError) as error:
         await service.complete(request, caller_identity)
 
-    assert error.value.code == (
-        "model_content_filtered" if mode == "finish_reason" else "governance_denied"
-    )
+    assert error.value.code == "model_content_filtered"
+    assert error.value.status_code == 422
     if mode == "error":
         assert error.value.details["matched_rule"] == "content_filter"
     event = governance_events.snapshot()["recent_events"][0]
@@ -1491,6 +1693,10 @@ def genai_exporters(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         genai_telemetry, "tracer", trace_provider.get_tracer("genai-test")
     )
+    monkeypatch.setattr(
+        "ai_governance_harness.governance.telemetry.tracer",
+        trace_provider.get_tracer("guardrail-test"),
+    )
     for attribute, factory, metric in (
         (
             "operation_duration",
@@ -1558,8 +1764,26 @@ async def test_given_tool_turn_when_completing_then_emits_genai_semconv_without_
     serialized = json.dumps(
         [dict(span.attributes) for span in finished.values()], default=str
     )
-    for content in ("MEM-001", "Alex Morgan", "Show", "content"):
+    for content in ("MEM-001", "Alex Morgan", "Show"):
         assert content not in serialized
+    # Guardrail names such as foundry_content_filter legitimately contain "content".
+    genai_serialized = json.dumps(
+        [
+            dict(span.attributes) for name, span in finished.items()
+            if not name.startswith("apply_guardrail ")
+        ],
+        default=str,
+    )
+    assert "content" not in genai_serialized
+    guardrails = {
+        span.attributes["governance.guardrail.name"]: span.attributes
+        for name, span in finished.items() if name.startswith("apply_guardrail ")
+    }
+    assert {"tool_allowlist", "personal_advice_scan", "scope_refusal"} <= set(guardrails)
+    assert all(
+        attributes["governance.guardrail.outcome"] == "passed"
+        for attributes in guardrails.values()
+    )
     metrics = {
         metric.name: metric
         for resource in reader.get_metrics_data().resource_metrics
@@ -1611,3 +1835,13 @@ async def test_given_unknown_tool_when_completing_then_agent_span_records_error_
     )
     assert agent.attributes["error.type"] == error.value.code
     assert agent.status.status_code.name == "ERROR"
+    guardrails = {
+        span.attributes["governance.guardrail.name"]: span
+        for span in spans.get_finished_spans()
+        if span.name.startswith("apply_guardrail ")
+    }
+    allowlist = guardrails["tool_allowlist"]
+    assert allowlist.attributes["governance.guardrail.outcome"] == "triggered"
+    assert allowlist.attributes["governance.guardrail.reason"] == "unregistered_tool"
+    assert allowlist.context.trace_id == agent.context.trace_id
+    assert error.value.details["matched_rule"] == "deny-unregistered-tool"

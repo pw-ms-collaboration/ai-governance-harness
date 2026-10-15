@@ -21,6 +21,7 @@ from ai_governance_harness.governance.sandbox import (
     SandboxGuard,
 )
 from ai_governance_harness.governance.retention import RetentionRecord, RetentionReview
+from ai_governance_harness.governance.telemetry import guardrail_span
 from ai_governance_harness.guardrails.advice_filter import tool_response_policy_data
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "synthetic"
@@ -392,6 +393,9 @@ def get_member_profile(member_id: str) -> Dict[str, Any]:
 def require_member_outreach_eligible(member_id: str) -> RetentionReview:
     """Enforce trusted retention facts before preparation or approval."""
     review = get_default_gateway().retention_review(member_id)
+    with guardrail_span("outreach_eligibility", LifecyclePoint.PRE_TOOL) as check:
+        if review.status != "routine_permitted":
+            check.triggered(review.status)
     get_governance_engine().require_allowed(
         LifecyclePoint.PRE_TOOL,
         "prepare_member_outreach_case",

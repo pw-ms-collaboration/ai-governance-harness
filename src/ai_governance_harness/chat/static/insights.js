@@ -142,7 +142,7 @@ import { provenanceLabel } from "./policy-origin.js";
       const outcomeCell = document.createElement("td");
       outcomeCell.append(badge);
       const ruleCell = document.createElement("td");
-      ruleCell.append(span.rule ? element("code", span.rule) : element("span", "Not recorded", "muted"));
+      ruleCell.append(span.rule ? element("code", ruleLabel(span.rule)) : element("span", "Not recorded", "muted"));
       const provenance = span.policy_layer ? {
         layer: span.policy_layer,
         policy_id: span.policy_id,
@@ -221,7 +221,25 @@ import { provenanceLabel } from "./policy-origin.js";
     { key: "tool", label: "Tool", match: (name) => name.startsWith("execute_tool ") },
     { key: "mcp", label: "MCP", match: (name) => /^(MCP send |tools\/call |mcp\.tool\.|http\.server\.request$)/.test(name) },
     { key: "policy", label: "Policy", match: (name) => name === "evaluate.governance.policy" },
+    { key: "guardrail", label: "Guardrail", match: (name) => name.startsWith("apply_guardrail ") },
+    { key: "approval", label: "Human approval", match: (name) => name === "governance.human_approval" },
   ];
+  const approvalOutcomes = [
+    { key: "requested", label: "Approval requested" },
+    { key: "approved", label: "Approved by human" },
+    { key: "declined", label: "Declined by human" },
+    { key: "cancelled", label: "Approval cancelled" },
+    { key: "not_approved", label: "Not approved" },
+  ];
+  const approvalLabel = (outcome) => approvalOutcomes.find((item) => item.key === outcome)?.label || "Human approval";
+  const guardrailOutcomes = [
+    { key: "passed", label: "Passed" },
+    { key: "triggered", label: "Triggered" },
+    { key: "error", label: "Error" },
+  ];
+  const reasonLabel = (reason) => reason && reason !== "none" ? reason.replaceAll("_", " ") : "None";
+  // The toolkit reports no rule when default_action applies; label it explicitly.
+  const ruleLabel = (rule) => rule === "unmatched" ? "default deny (no rule matched)" : rule;
   const genaiRuns = document.querySelector("#genai-runs");
   const genaiShowPolicy = document.querySelector("#genai-show-policy");
   let genaiSpans = [];
@@ -271,6 +289,7 @@ import { provenanceLabel } from "./policy-origin.js";
       ["Input tokens", tokens("gen_ai.client.inference.usage.input_tokens"), "tokens"],
       ["Output tokens", tokens("gen_ai.client.inference.usage.output_tokens"), "tokens"],
       ["Mean model latency", inference.length ? formatDuration(sumDuration(inference) / inference.length) : "No data", "inference"],
+      ["Human approvals", approvalSummary(metrics), "approval"],
     ]) {
       const card = element("div", "", `kpi-${tone}`);
       card.append(element("dt", label), element("dd", String(value)));
@@ -287,8 +306,9 @@ import { provenanceLabel } from "./policy-origin.js";
         .map((row) => row.name.slice("execute_tool ".length)))];
       const policies = policyCounts(related.filter((row) => genaiLayer(row.name).key === "policy"));
       const failed = related.some((row) => row.outcome === "failure");
-      const status = failed ? "error" : policies.deny ? "deny" : policies.require_approval ? "approval" : "ok";
-      const statusLabel = { error: "Error", deny: "Policy denied", approval: "Approval required", ok: "Completed" }[status];
+      const approval = related.filter((row) => genaiLayer(row.name).key === "approval").at(-1);
+      const status = failed ? "error" : policies.deny ? "deny" : policies.require_approval || approval ? "approval" : "ok";
+      const statusLabel = failed ? "Error" : policies.deny ? "Policy denied" : approval ? approvalLabel(approval.outcome) : policies.require_approval ? "Approval required" : "Completed";
       const button = element("button", "", `genai-run status-${status}`);
       button.type = "button";
       button.dataset.operation = run.operation_id;
@@ -298,18 +318,27 @@ import { provenanceLabel } from "./policy-origin.js";
       else toolList.append(element("span", "No tools", "no-tools"));
       const modelCalls = related.filter((row) => row.name.startsWith("chat ")).length;
       const policyTotal = Object.values(policies).reduce((sum, value) => sum + value, 0);
+      const fired = related.filter((row) => row.name.startsWith("apply_guardrail ") && row.outcome === "triggered").length;
       button.append(
         element("span", "", "run-status"),
         element("span", new Date(run.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }), "run-time"),
         element("span", formatDuration(run.duration_ms), "run-duration"),
         toolList,
-        element("span", `${statusLabel} · ${modelCalls} model call${modelCalls === 1 ? "" : "s"} · ${policyTotal} policy check${policyTotal === 1 ? "" : "s"}`, "run-meta"),
+        element("span", `${statusLabel} · ${modelCalls} model call${modelCalls === 1 ? "" : "s"} · ${policyTotal} policy check${policyTotal === 1 ? "" : "s"}${fired ? ` · ${fired} guardrail${fired === 1 ? "" : "s"} fired` : ""}`, "run-meta"),
       );
       const item = document.createElement("li");
       item.append(button);
       genaiRuns.append(item);
     }
     selectRun(runs.some((run) => run.operation_id === genaiSelected) ? genaiSelected : runs[0]?.operation_id);
+  }
+
+  function approvalSummary(metrics) {
+    const rows = metrics.filter((row) => row.name === "governance.human_approval.count");
+    if (!rows.length) return "No data";
+    const total = (key) => rows.filter((row) => row.outcome === key).reduce((sum, row) => sum + (row.total || 0), 0);
+    const declined = total("declined") + total("cancelled") + total("not_approved");
+    return `${total("approved")} approved · ${declined} declined · ${total("requested")} requested`;
   }
 
   function selectRun(operationId) {
@@ -351,6 +380,11 @@ import { provenanceLabel } from "./policy-origin.js";
     const policies = policyCounts(all.filter((row) => genaiLayer(row.name).key === "policy"));
     for (const outcome of outcomes) {
       if (policies[outcome.key]) facts.append(element("span", `${policies[outcome.key]} ${outcome.label.toLowerCase()}`, `fact outcome-${outcome.key}`));
+    }
+    const guardrails = all.filter((row) => genaiLayer(row.name).key === "guardrail");
+    const fired = guardrails.filter((row) => row.outcome === "triggered" || row.outcome === "error").length;
+    if (guardrails.length) {
+      facts.append(element("span", `${guardrails.length} guardrail${guardrails.length === 1 ? "" : "s"} · ${fired} fired`, `fact${fired ? " outcome-deny" : ""}`));
     }
     const operation = element("span", "Operation ");
     operation.append(element("code", all[0].operation_id));
@@ -438,6 +472,11 @@ import { provenanceLabel } from "./policy-origin.js";
         const outcome = outcomes.find((item) => item.key === row.outcome);
         if (outcome) meta.append(element("span", outcome.label, `outcome-${outcome.key}`));
       }
+      if (layer.key === "approval") meta.append(element("span", approvalLabel(row.outcome), `approval-${row.outcome}`));
+      if (layer.key === "guardrail" && row.outcome !== "passed") {
+        const outcome = guardrailOutcomes.find((item) => item.key === row.outcome);
+        if (outcome) meta.append(element("span", `${outcome.label}${row.rule && row.rule !== "none" ? `: ${reasonLabel(row.rule)}` : ""}`, row.outcome === "error" ? "outcome-require_approval" : "outcome-deny"));
+      }
       const hosted = markers.get(row) || [];
       const counts = policyCounts(hosted);
       for (const outcome of outcomes) {
@@ -447,7 +486,7 @@ import { provenanceLabel } from "./policy-origin.js";
 
       const track = element("div", "", "genai-track");
       track.setAttribute("aria-hidden", "true");
-      const flagged = row.outcome === "failure" || row.outcome === "deny";
+      const flagged = ["failure", "deny", "triggered", "error"].includes(row.outcome);
       const bar = element("div", "", `genai-bar layer-${layer.key}${flagged ? " failure" : ""}`);
       bar.style.left = position(spanStart(row));
       bar.style.width = `${100 * (row.duration_ms || 0) / total}%`;
@@ -533,7 +572,7 @@ import { provenanceLabel } from "./policy-origin.js";
       const item = element("li", "", `hotspot-rule${index === 0 ? " top" : ""}`);
       item.style.setProperty("--delay", `${index * 70}ms`);
       const head = element("div", "", "hotspot-rule-head");
-      head.append(element("span", `#${index + 1}`, "hotspot-rank"), element("code", rule.name),
+      head.append(element("span", `#${index + 1}`, "hotspot-rank"), element("code", ruleLabel(rule.name)),
         element("strong", rule.blocked.toLocaleString(), "hotspot-count"));
       const bar = element("div", "", "hotspot-bar");
       bar.setAttribute("aria-hidden", "true");
@@ -652,13 +691,13 @@ import { provenanceLabel } from "./policy-origin.js";
       const svg = svgElement("svg", { viewBox: "0 0 640 220", role: "img", "aria-label": `Tokens per time bucket. ${input.toLocaleString()} input and ${output.toLocaleString()} output tokens in total.` });
       const defs = svgElement("defs", {});
       const pattern = svgElement("pattern", { id: "token-output-hatch", width: 6, height: 6, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" });
-      pattern.append(svgElement("rect", { width: 6, height: 6, fill: "#b083f0" }), svgElement("line", { x1: 0, y1: 0, x2: 0, y2: 6, stroke: "#0b1626", "stroke-width": 2 }));
+      pattern.append(svgElement("rect", { width: 6, height: 6, fill: "#0f2f66" }), svgElement("line", { x1: 0, y1: 0, x2: 0, y2: 6, stroke: "#ffffff", "stroke-width": 2 }));
       defs.append(pattern);
       svg.append(defs);
       for (const fraction of [0, 0.5, 1]) {
         const y = 190 - fraction * 165;
-        svg.append(svgElement("line", { x1: 56, x2: 630, y1: y, y2: y, stroke: "#2b4566" }));
-        const label = svgElement("text", { x: 50, y: y + 4, "text-anchor": "end", fill: "#a9b8cc", "font-size": 12 });
+        svg.append(svgElement("line", { x1: 56, x2: 630, y1: y, y2: y, stroke: "#d5dce8" }));
+        const label = svgElement("text", { x: 50, y: y + 4, "text-anchor": "end", fill: "#526078", "font-size": 12 });
         label.textContent = Math.round(peak * fraction).toLocaleString();
         svg.append(label);
       }
@@ -671,7 +710,7 @@ import { provenanceLabel } from "./policy-origin.js";
         const group = svgElement("g", { class: "token-bar" });
         group.style.animationDelay = `${index * 40}ms`;
         group.append(
-          svgElement("rect", { x, y: 190 - inputHeight, width, height: inputHeight, fill: "#58a6ff", rx: 2 }),
+          svgElement("rect", { x, y: 190 - inputHeight, width, height: inputHeight, fill: "#4a7fd4", rx: 2 }),
           svgElement("rect", { x, y: 190 - inputHeight - outputHeight, width, height: outputHeight, fill: "url(#token-output-hatch)", rx: 2 }),
         );
         const title = svgElement("title", {});
@@ -680,7 +719,7 @@ import { provenanceLabel } from "./policy-origin.js";
         svg.append(group);
       });
       for (const [row, position, anchor] of [[timeline[0], 56, "start"], [timeline.at(-1), 630, "end"]]) {
-        const label = svgElement("text", { x: position, y: 212, "text-anchor": anchor, fill: "#a9b8cc", "font-size": 12 });
+        const label = svgElement("text", { x: position, y: 212, "text-anchor": anchor, fill: "#526078", "font-size": 12 });
         label.textContent = new Date(row.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
         svg.append(label);
       }

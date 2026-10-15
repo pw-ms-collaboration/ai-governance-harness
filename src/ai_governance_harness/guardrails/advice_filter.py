@@ -9,6 +9,9 @@ import re
 from collections.abc import Iterator
 from typing import List, Optional, Tuple
 
+from ai_governance_harness.governance.models import LifecyclePoint
+from ai_governance_harness.governance.telemetry import guardrail_span
+
 GENERAL_ADVICE_WARNING = (
     "--- GENERAL ADVICE WARNING (ASIC RG 244) ---\n"
     "This information is general in nature and has been prepared without taking into account "
@@ -149,10 +152,13 @@ def tool_response_policy_data(payload: object) -> dict[str, str]:
     response has been legally classified as factual information or general advice.
     """
     guardrail = AdviceClassificationGuardrail()
-    detected = any(
-        guardrail.scan_for_personal_advice(text)
-        for text in _response_text(payload)
-    )
+    with guardrail_span("personal_advice_scan", LifecyclePoint.POST_TOOL) as check:
+        detected = any(
+            guardrail.scan_for_personal_advice(text)
+            for text in _response_text(payload)
+        )
+        if detected:
+            check.triggered("personal_advice_detected")
     return {
         "result_type": type(payload).__name__,
         "advice_scan_status": "personal_advice_detected" if detected else "passed",

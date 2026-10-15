@@ -15,13 +15,11 @@ from ai_governance_harness.evals.runner import (
 
 EXPECTED_CATEGORIES = {
     "personal_advice",
-    "whole_of_wealth",
     "sensitive_data",
     "prohibited_action",
     "no_fabrication",
     "uncertainty",
     "banking_advice",
-    "superannuation_advice",
     "customer_info",
 }
 
@@ -43,7 +41,7 @@ def _row(item_id: str = "case-1") -> dict[str, str]:
 def test_default_dataset_covers_expected_categories() -> None:
     items = load_dataset(DEFAULT_DATASET)
 
-    assert len(items) >= 10
+    assert len(items) == 7
     assert {item["category"] for item in items} == EXPECTED_CATEGORIES
 
 

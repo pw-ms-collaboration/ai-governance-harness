@@ -295,7 +295,7 @@ def setup(tmp_path, monkeypatch):
         "\n".join(
             case.model_dump_json()
             for case in load_cases()
-            if case.id in {"adv-002", "unc-001", "cus-001"}
+            if case.id in {"adv-002", "unc-001", "cus-002"}
         )
     )
     monkeypatch.setattr(

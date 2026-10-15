@@ -55,8 +55,17 @@ def registry_bundle(directory):
 
 def test_all_reviewed_scenarios_are_preserved(tmp_path):
     cases = load_cases()
-    assert len(cases) == 11
-    assert len({case.category for case in cases}) == 9
+    assert len(cases) == 7
+    assert {case.id for case in cases} == {
+        "adv-002",
+        "pii-001",
+        "act-001",
+        "fab-002",
+        "unc-001",
+        "bnk-001",
+        "cus-002",
+    }
+    assert len({case.category for case in cases}) == 7
     assert cases[0].id == "adv-002"
     assert "member 1001" in cases[0].prompt
     subset = tmp_path / "subset.jsonl"

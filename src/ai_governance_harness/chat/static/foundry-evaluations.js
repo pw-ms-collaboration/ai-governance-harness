@@ -141,9 +141,10 @@
       jobActive = job?.status === "running";
       element("run").disabled = jobActive || starting;
       element("run").textContent = jobActive ? "Running Eval..." : "Run Eval";
+      element("job-status").hidden = !jobActive;
       element("job-status").textContent = jobActive
         ? `Running agent scenarios and Foundry evaluation: ${job.run_id}`
-        : job ? `Evaluation ${job.status}: ${job.run_id}` : "Ready to run the packaged agent evaluation.";
+        : "";
       if (job && ["error", "cancelled"].includes(job.status)) {
         element("job-error").textContent = job.error || "Evaluation did not complete. Check Foundry before retrying.";
         element("job-error").hidden = false;
@@ -155,6 +156,7 @@
       }
     } catch (error) {
       element("run").disabled = true;
+      element("job-status").hidden = false;
       element("job-status").textContent = "Job status unavailable. Reload to reconnect before starting another evaluation.";
       element("job-error").textContent = error.message;
       element("job-error").hidden = false;
@@ -168,6 +170,7 @@
     element("run").disabled = true;
     element("run").textContent = "Starting Eval...";
     element("job-error").hidden = true;
+    element("job-status").hidden = false;
     element("job-status").textContent = "Starting agent evaluation...";
     try {
       const response = await fetch("/api/foundry/evaluation-jobs", {

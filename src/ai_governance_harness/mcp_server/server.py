@@ -83,6 +83,7 @@ def _call_gateway(tool_name: str, operation: Callable[[], ResultT]) -> ResultT:
     error_category: str | None = None
     with tracer.start_as_current_span(f"mcp.tool.{tool_name}") as span:
         span.set_attribute("mcp.tool.name", tool_name)
+        span.set_attribute("gen_ai.tool.name", tool_name)
         try:
             result = dict(operation())
             result.setdefault(
@@ -198,7 +199,7 @@ def get_member_profile(member_id: MemberId) -> dict[str, Any]:
     ),
     meta=build_tool_metadata(
         intent="member_disengagement_signals",
-        browser_chat_enabled=False,
+        browser_chat_enabled=True,
     ),
 )
 def get_member_disengagement_signals(member_id: MemberId) -> dict[str, Any]:
@@ -223,7 +224,7 @@ def get_member_disengagement_signals(member_id: MemberId) -> dict[str, Any]:
     ),
     meta=build_tool_metadata(
         intent="cohort_churn_analytics",
-        browser_chat_enabled=False,
+        browser_chat_enabled=True,
     ),
 )
 def get_cohort_churn_analytics() -> dict[str, Any]:
@@ -244,7 +245,7 @@ def get_cohort_churn_analytics() -> dict[str, Any]:
     ),
     meta=build_tool_metadata(
         intent="fum_outflow_summary",
-        browser_chat_enabled=False,
+        browser_chat_enabled=True,
     ),
 )
 def get_fum_outflow_summary() -> dict[str, Any]:

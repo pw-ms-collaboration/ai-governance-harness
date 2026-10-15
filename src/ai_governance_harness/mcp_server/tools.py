@@ -21,6 +21,7 @@ from ai_governance_harness.governance.sandbox import (
     SandboxGuard,
 )
 from ai_governance_harness.governance.retention import RetentionRecord, RetentionReview
+from ai_governance_harness.governance.telemetry import guardrail_span
 from ai_governance_harness.guardrails.advice_filter import tool_response_policy_data
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "synthetic"
@@ -175,6 +176,9 @@ class SuperannuationDataGateway:
     @governed_read_only_tool("get_member_disengagement_signals")
     def get_member_disengagement_signals(self, member_id: str) -> Dict[str, Any]:
         """Analyze contribution drops, digital inactivity, and closure inquiries for a member."""
+        return self._compute_disengagement_signals(member_id)
+
+    def _compute_disengagement_signals(self, member_id: str) -> Dict[str, Any]:
         member = self._members.get(member_id)
         if not member:
             raise MemberNotFoundError(f"Member '{member_id}' not found.")
@@ -295,7 +299,7 @@ class SuperannuationDataGateway:
         digital_inactive_members: List[str] = []
 
         for m_id in self._members.keys():
-            signals = self.get_member_disengagement_signals(m_id)
+            signals = self._compute_disengagement_signals(m_id)
             if signals["immediate_outreach_required"]:
                 closure_inquiry_members.append(m_id)
             if signals["contribution_analysis"]["drop_detected"]:
@@ -339,7 +343,7 @@ class SuperannuationDataGateway:
         risk_by_phase: Dict[str, float] = {}
 
         for m_id, acc in self._accounts.items():
-            signals = self.get_member_disengagement_signals(m_id)
+            signals = self._compute_disengagement_signals(m_id)
             bal = acc.get("balance", 0.0)
             phase = acc.get("phase", "Accumulation")
 
@@ -389,6 +393,9 @@ def get_member_profile(member_id: str) -> Dict[str, Any]:
 def require_member_outreach_eligible(member_id: str) -> RetentionReview:
     """Enforce trusted retention facts before preparation or approval."""
     review = get_default_gateway().retention_review(member_id)
+    with guardrail_span("outreach_eligibility", LifecyclePoint.PRE_TOOL) as check:
+        if review.status != "routine_permitted":
+            check.triggered(review.status)
     get_governance_engine().require_allowed(
         LifecyclePoint.PRE_TOOL,
         "prepare_member_outreach_case",

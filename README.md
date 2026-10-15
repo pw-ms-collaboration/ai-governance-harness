@@ -1,6 +1,6 @@
 ---
 title: AI Governance Harness
-description: Local-first reference implementation and team onboarding for observable, default-deny AI agent governance.
+description: Local-first AI governance and team onboarding with guarded mock agent identities.
 ---
 
 **A local-first reference implementation for observable, default-deny AI agent
@@ -63,6 +63,7 @@ and the [team verification steps](./docs/getting-started.md#verify-foundry-guard
 | Default-deny enforcement | Policy checks before and after model and tool activity across chat, MCP, and direct gateway calls |
 | Observable governance | Live allow and deny decisions, active rules, runtime readiness, circuit state, sandbox posture, and OWASP Agentic evidence |
 | Bounded MCP access | Five schema-validated tools over stdio and session-based Streamable HTTP, with no arbitrary paths or writes |
+| Local mock identity | Signed RS256 tokens, staff personas, OBO forwarding, app-only reporting, and default-deny role rules; not real Microsoft Entra |
 | Human approval | MCP form elicitation that proceeds only after validated approval and fails closed otherwise |
 | Privacy-safe telemetry | Bounded events that exclude prompts, tool payloads, model responses, tokens, and identity claims |
 | Reliability controls | Independent circuit breakers, timeouts, readiness checks, and sandbox capability classification |
@@ -172,9 +173,9 @@ results, tokens, and model responses are excluded from application telemetry.
 | Tool | Purpose | Browser chat |
 |------|---------|--------------|
 | `get_member_profile` | Returns a synthetic member's internal fund profile | Enabled |
-| `get_member_disengagement_signals` | Returns factual churn and disengagement signals | Direct MCP only |
-| `get_cohort_churn_analytics` | Returns aggregate cohort churn analytics | Direct MCP only |
-| `get_fum_outflow_summary` | Returns aggregate funds-under-management outflow risk | Direct MCP only |
+| `get_member_disengagement_signals` | Returns factual churn and disengagement signals | Enabled, role-governed |
+| `get_cohort_churn_analytics` | Returns aggregate cohort churn analytics | Enabled, role-governed |
+| `get_fum_outflow_summary` | Returns aggregate funds-under-management outflow risk | Enabled, role-governed |
 | `prepare_member_outreach_case` | Requests MCP form approval before preparing a synthetic, read-only outreach case | Enabled |
 
 The remote tool surface does not accept filesystem paths, arbitrary data
@@ -186,6 +187,11 @@ derive authorization from natural-language descriptions or maintain a separate
 tool-name allowlist. Descriptions remain mutually exclusive selection guidance:
 profile requests use `get_member_profile`, while prepare/open/create/start
 retention-case requests use `prepare_member_outreach_case`.
+
+Exposure metadata does not grant access. MCP still enforces the local mock
+staff-role matrix. Outreach additionally requires `routine_permitted`
+eligibility and explicit approval; eligibility alone never grants access to
+an anonymous caller, analyst, or reporting agent.
 
 ### MCP Form Elicitation
 
@@ -381,6 +387,8 @@ The editable installation makes the package and these commands available:
 * `ai-governance-mcp`
 * `ai-governance-chat`
 * `ai-governance-dev`
+* `ai-governance-identity` (local mock issuer)
+* `ai-governance-report` (local mock reporting agent)
 
 [pyproject.toml](./pyproject.toml) is the dependency source of truth. The
 repository intentionally does not maintain a duplicate `requirements.txt`.
@@ -473,8 +481,18 @@ CHAT_PORT=8080
 MCP_SERVER_URL=http://127.0.0.1:8001/mcp
 ```
 
-`MCP_PORT` and the port inside `MCP_SERVER_URL` must match. Both service ports
-are configurable. The defaults use MCP port `8001` and chat port `8080`.
+`MCP_PORT` and the port inside `MCP_SERVER_URL` must match. All three ports
+are configurable: local mock issuer `8002`, MCP `8001`, chat `8080`.
+The launcher derives the mock URLs and synthetic IDs, so an existing Foundry
+`.env` still works with `uv run ai-governance-dev`. For separate terminals,
+copy the local mock settings from [.env.example](./.env.example) into your
+existing `.env` without overwriting its Foundry credentials. Keep the mock
+tenant separate from `AZURE_TENANT_ID`, which is still your Foundry tenant.
+
+The shared mock guard requires `MOCK_IDENTITY_ENABLED=true`, both configured
+environment variables to be `local`, `development`, or `test`, no hosted
+runtime indicators, and loopback service binds. It rejects conflicting
+environment settings. Never relax policy to compensate for a mock token error.
 
 Configure governance:
 
@@ -519,24 +537,24 @@ prove end-to-end project access.
 
 ## Start MCP and the Chat UI
 
-### Start Both Services
+### Start All Three Services
 
 The recommended local workflow is:
 
 ```sh
-ai-governance-dev
+uv run ai-governance-dev
 ```
 
 The launcher:
 
 1. Loads configuration from `.env`.
-2. Confirms that the configured MCP and chat ports are available.
-3. Starts the MCP service.
-4. Waits for MCP readiness.
+2. Checks the local mock guard and all three ports.
+3. Starts the local mock issuer and waits for its health endpoint.
+4. Starts MCP and waits for governance, sandbox and JWKS readiness.
 5. Starts the chat service.
 6. Waits for chat readiness.
 7. Opens the chat UI in the default browser.
-8. Stops both child processes when you press `Ctrl+C`.
+8. Stops all three child processes when you press `Ctrl+C`.
 
 With the default configuration, open:
 
@@ -546,20 +564,26 @@ http://127.0.0.1:8080
 
 ### Start the Services Separately
 
-Start MCP in the first terminal:
+Start the local mock issuer in the first terminal:
 
 ```sh
-ai-governance-mcp
+uv run ai-governance-identity
 ```
 
-Start the chat service in the second terminal:
+Start MCP in the second terminal:
 
 ```sh
-ai-governance-chat
+uv run ai-governance-mcp
 ```
 
-Both commands load `.env`. Separate terminals are useful when inspecting MCP
-and chat logs independently.
+Start the chat service in the third terminal:
+
+```sh
+uv run ai-governance-chat
+```
+
+All commands load `.env`. Wait for each service before starting the next.
+The mock issuer generates its signing key in memory and never writes it.
 
 ### Run MCP over stdio
 
@@ -567,18 +591,26 @@ PowerShell:
 
 ```powershell
 $env:MCP_TRANSPORT = "stdio"
-ai-governance-mcp
+$env:MOCK_IDENTITY_ENABLED = "true"
+$env:MOCK_IDENTITY_LOCAL_PERSONA = "retention_specialist"
+uv run ai-governance-mcp
 ```
 
 macOS or Linux:
 
 ```sh
 export MCP_TRANSPORT=stdio
-ai-governance-mcp
+export MOCK_IDENTITY_ENABLED=true
+export MOCK_IDENTITY_LOCAL_PERSONA=retention_specialist
+uv run ai-governance-mcp
 ```
 
 The stdio process reserves standard output for MCP protocol messages and sends
-diagnostics to standard error.
+diagnostics to standard error. Connect an MCP client to this command; it is not
+an interactive shell. Without `MOCK_IDENTITY_LOCAL_PERSONA`, data tools deny.
+This local mock persona is token-less and needs no running issuer. `analyst`
+allows only aggregates; `retention_specialist` allows member tools as well.
+The other two personas deny all data tools.
 
 ## Local Endpoints
 
@@ -588,13 +620,23 @@ With the default ports:
 |----------|---------|
 | `http://127.0.0.1:8080` | Browser chat UI |
 | `http://127.0.0.1:8080/api/chat` | Chat API used by the browser |
+| `http://127.0.0.1:8080/api/mock-identity/signin` | Same-origin local mock persona sign-in |
 | `http://127.0.0.1:8080/api/governance/snapshot` | Merged privacy-safe chat and MCP governance snapshot |
 | `http://127.0.0.1:8080/health/live` | Chat liveness |
 | `http://127.0.0.1:8080/health/ready` | Chat governance and sandbox readiness |
 | `http://127.0.0.1:8001/mcp` | MCP Streamable HTTP endpoint |
 | `http://127.0.0.1:8001/governance/snapshot` | MCP process governance snapshot |
 | `http://127.0.0.1:8001/health/live` | MCP liveness |
-| `http://127.0.0.1:8001/health/ready` | MCP governance and sandbox readiness |
+| `http://127.0.0.1:8001/health/ready` | MCP governance, sandbox and JWKS readiness |
+| `http://127.0.0.1:8002/healthz` | Local mock issuer health |
+| `http://127.0.0.1:8002/mock/signin` | Local mock sign-in, proxied by chat |
+| `http://127.0.0.1:8002/Validate` | Local mock subject-token validation |
+| `http://127.0.0.1:8002/AuthorizationHeader/mcp` | Local mock OBO exchange |
+| `http://127.0.0.1:8002/AuthorizationHeaderUnauthenticated/mcp` | Local mock app-only exchange |
+
+Local mock discovery is served at
+`http://127.0.0.1:8002/00000000-0000-4000-8000-000000000001/v2.0/.well-known/openid-configuration`.
+Its `jwks_uri` points to the public signing key. These GUIDs are synthetic.
 
 Chat API failures use a structured, privacy-safe error envelope:
 
@@ -640,6 +682,12 @@ eliminating unnecessary post-tool model decisions for a factual profile lookup.
 The browser, static assets, and API responses use `Cache-Control: no-store` so
 the UI error contract and governance table cannot drift behind the running
 service after an update.
+
+Missing, malformed or expired local mock credentials return
+`authentication_required` (401, with `WWW-Authenticate: Bearer`).
+An unavailable local mock sidecar returns `identity_unavailable` (503).
+Both use the same error envelope. Anonymous health and governance endpoints
+remain available. MCP data requests require a signed local mock token.
 
 Personalized financial-advice requests pass through a dedicated, tool-free
 Foundry classifier before the primary assistant. The classifier uses strict
@@ -705,10 +753,31 @@ production-facing deployment remains future work; there is no automatic
 development/production presentation switch yet.
 
 The OAuth protected-resource metadata routes exist for future hosted
-authentication work. Local development does not require Container Apps identity
-headers.
+authentication work. Local mock authentication verifies JWTs instead of
+trusting caller-supplied Container Apps headers.
 
 ## Use the Chat UI
+
+Choose a persona under **Mock identity**, then select **Sign in (mock)**.
+No persona is selected initially. The token lives only in page memory; refresh,
+sign-in failure or 401 clears it. Changing persona clears both displayed
+messages and the conversation sent to the model.
+
+| Local mock persona | Aggregate tools | Member tools | Outreach |
+|---|---|---|---|
+| Analyst | Allow | Deny | Deny |
+| Retention Specialist | Allow | Allow | Requires eligibility and explicit approval, including the browser approval flow |
+| Compliance Reviewer | Deny | Deny | Deny |
+| Administrator | Deny | Deny | Deny |
+
+Try the cohort example and a member profile under each persona. Inspect the
+MCP `pre_tool` decisions in the panel; chat boundary decisions only identify
+the interactive caller. A model may explain an MCP denial in a successful
+chat response, so the panel is the authoritative record of tool authorization.
+Personal-advice requests remain denied regardless of persona.
+
+The local mock does not prove real Entra role assignment. Foundry inference
+still uses your developer `az login` through `DefaultAzureCredential`.
 
 The included dataset contains synthetic member IDs such as:
 
@@ -733,6 +802,7 @@ control plane without exposing request content. It shows:
 
 * Allowed and denied decision totals.
 * Recent policy decisions from the chat and MCP processes.
+* A local mock label and each event's boundary, actor, token type and staff role.
 * Runtime readiness, policy digest, circuit states, and sandbox posture.
 * Active default-deny policy rules.
 * Repository-specific OWASP Agentic evidence and known limitations.
@@ -787,6 +857,9 @@ describe the current design:
 5. [Present governance through a same-origin observability panel](./docs/planning/adrs/0005-present-governance-through-a-same-origin-observability-panel.md)
 6. [Govern Toolkit dependency risk with an expiring VEX exception](./docs/planning/adrs/0006-govern-toolkit-dependency-risk-with-an-expiring-vex-exception.md)
 7. [Use feed-neutral manifests and repeatable team commands](./docs/planning/adrs/0007-use-feed-neutral-manifests-and-repeatable-team-commands.md)
+8. [Target Microsoft Entra Agent ID after the local mock MVP](./docs/planning/adrs/0008-use-microsoft-entra-agent-id-for-agent-identity.md)
+9. [Enforce staff and agent policy context, exercised by the local mock](./docs/planning/adrs/0009-enforce-agent-and-staff-identity-through-governance-policy-context.md)
+10. [Use a local-only mock Entra Agent ID issuer for the MVP](./docs/planning/adrs/0010-use-a-local-only-mock-entra-agent-id-issuer-for-the-mvp.md)
 
 ### How to Use These Records
 
@@ -811,7 +884,14 @@ requiring another ADR.
 ## Existing Command-Line Interface
 
 The original deterministic CLI remains available and does not call Foundry or
-cross the MCP transport:
+cross the MCP transport. First configure its guarded local mock persona:
+
+```powershell
+$env:MOCK_IDENTITY_ENABLED = "true"
+$env:MOCK_IDENTITY_LOCAL_PERSONA = "retention_specialist"
+```
+
+On macOS/Linux, use `export` for the same variables. Unset means deny.
 
 ```sh
 python -m ai_governance_harness.cli profile MEM-001
@@ -828,6 +908,39 @@ python -m ai_governance_harness.cli --live profile MEM-001
 
 It still reads the local synthetic dataset and does not make a model inference
 request.
+
+### Run the Local Mock Reporting Agent
+
+With the issuer and MCP running, and the local mock settings from
+[.env.example](./.env.example) present, run:
+
+```powershell
+uv run ai-governance-report
+uv run ai-governance-report --json
+```
+
+The local mock app-only agent should print:
+
+```text
+get_cohort_churn_analytics: allowed
+get_fum_outflow_summary: allowed
+get_member_profile: denied
+```
+
+If your older `.env` has no local mock reporting settings, set these in the
+report terminal (adjust ports if needed):
+
+```powershell
+$env:MOCK_IDENTITY_ENABLED = "true"
+$env:AGENT_ID_SIDECAR_URL = "http://127.0.0.1:8002"
+$env:MCP_SERVER_URL = "http://127.0.0.1:8001/mcp"
+$env:AGENT_ID_REPORTING_ID = "00000000-0000-4000-8000-000000000006"
+uv run ai-governance-report --json
+```
+
+The command emits only tool outcomes, not data or credentials. Exit codes are
+0 for completed calls (including policy denials), 1 for dependency failures,
+and 2 for configuration or guard refusal. It needs no Foundry access.
 
 ## Validate the Project
 
@@ -928,10 +1041,29 @@ Check:
 2. `AZURE_AI_PROJECT_ENDPOINT` identifies the intended Foundry project.
 3. `az account show` reports the expected tenant and subscription.
 4. `MCP_SERVER_URL` matches the running MCP host, port, and path.
-5. Both readiness endpoints report `"status":"ready"` with governance enabled
-   and the sandbox either ready or not required for the read-only surface.
+5. All three readiness endpoints report ready, including MCP `identity.jwks`
+   equal to `loaded`.
+6. A local mock persona is signed in, and its role permits the selected tool.
 
 Restart the services after changing `.env`.
+
+### A local mock token stops working after restart
+
+The local mock issuer creates a new signing key at startup. Sign in again in
+the UI. MCP refetches an unknown key ID at most once every five seconds, so
+wait briefly or restart MCP if an immediate retry still returns 401.
+User tokens expire after one hour; MCP tokens expire after ten minutes.
+
+### MCP denies everything or reports unavailable JWKS
+
+Check that the local mock issuer is running and the configured issuer, JWKS
+URL, tenant and audience match its synthetic settings. A failed JWKS fetch
+returns readiness 503 and rejects credentials. Use the combined launcher to
+derive matching settings. Do not add an anonymous allow rule.
+
+For stdio or CLI data denials, check the opt-in local mock persona separately.
+For guard refusals, check both environment variables and hosting indicators.
+Never unset a real hosting indicator to force the mock to run.
 
 ### Foundry authentication uses the wrong tenant
 
@@ -986,11 +1118,14 @@ Implemented and locally validated:
 * Foundry-powered MCP tool calling.
 * Accessible dependency-free browser chat.
 * Separate and combined local launchers.
+* Guarded local mock agent identity, signed tokens, per-request OBO, staff
+  personas and app-only reporting. This is not a real Entra deployment.
 
 Deferred:
 
 * Azure Container Apps deployment.
-* Deployed Microsoft Entra authentication.
+* Real Entra Agent ID provisioning and validation under ADR 0008; the current
+  local mock does not establish hosted or role-assignment assurance.
 * Privileged Docker, Azure Container Apps, or Hyperlight sandbox providers.
 * A universal human-approval interface and external memory governance.
 * Third-party OWASP certification or independent security audit.

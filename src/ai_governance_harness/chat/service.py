@@ -11,6 +11,8 @@ from urllib.request import urlopen
 from typing import Any, Literal, Protocol
 
 import anyio
+import httpx2
+from mcp.client.streamable_http import streamable_http_client
 from mcp import Client, types
 from openai import APIStatusError
 from pydantic import (
@@ -21,7 +23,11 @@ from pydantic import (
     field_validator,
 )
 
+from ai_governance_harness.chat import genai_telemetry
 from ai_governance_harness.chat.config import ChatSettings
+from ai_governance_harness.errors import ChatServiceError
+from ai_governance_harness.errors import ChatErrorCode as ChatErrorCode
+from ai_governance_harness.identity.sidecar import AgentAuth, CallerIdentity, SidecarClient
 from ai_governance_harness.foundry_client import get_foundry_client
 from ai_governance_harness.governance import (
     GovernanceDeniedError,
@@ -29,6 +35,7 @@ from ai_governance_harness.governance import (
     get_governance_engine,
 )
 from ai_governance_harness.governance.reliability import ReliabilityGuard
+from ai_governance_harness.governance.telemetry import guardrail_span
 from ai_governance_harness.governance.retention import RetentionReview
 from ai_governance_harness.governance.snapshot import (
     build_governance_snapshot,
@@ -51,7 +58,10 @@ from ai_governance_harness.mcp_server.tool_contracts import (
 
 SYSTEM_INSTRUCTIONS = (
     "You are an internal assistant for business analysts working only with "
-    "synthetic in-fund superannuation data. Use get_member_profile for factual "
+    "synthetic in-fund superannuation data. Use the available tools for cohort "
+    "risk, FUM summaries and member disengagement signals when requested. "
+    "Governance enforces the caller's role; never bypass a denied tool. "
+    "Use get_member_profile for factual "
     "member and account-profile requests. Use prepare_member_outreach_case when "
     "the user asks to prepare, open, create, or start a retention outreach case; "
     "that workflow checks eligibility and requires explicit human approval. Do "
@@ -59,7 +69,7 @@ SYSTEM_INSTRUCTIONS = (
     "invent tool results. If asked for contact details, use the profile's "
     "communication preference and state that no email address or phone number "
     "is recorded. For unsupported customer information, explain the supported "
-    "profile and retention-outreach capabilities. Do not give personal "
+    "member, aggregate and retention-outreach capabilities. Do not give personal "
     "financial advice, recommend actions for a member, or claim visibility into "
     "external assets. Keep responses concise."
 )
@@ -78,19 +88,6 @@ _DECLINE_RESPONSES = frozenset(
     {"cancel", "decline", "declined", "do not approve", "no"}
 )
 
-ChatErrorCode = Literal[
-    "chat_service_error",
-    "client_capability_required",
-    "classification_unavailable",
-    "governance_denied",
-    "invalid_model_response",
-    "invalid_request",
-    "model_content_filtered",
-    "model_output_limit",
-    "model_round_limit",
-    "unsafe_tool_result",
-    "upstream_failure",
-]
 SCOPE_REFUSAL_PREFIX = "Sorry, I can't assist with this request"
 SCOPE_REFUSAL_MESSAGE = (
     "Sorry, I can’t assist with this request. I can provide factual synthetic "
@@ -107,19 +104,6 @@ PROFILE_FIELDS = (
     "account",
     "provenance",
 )
-
-logger = logging.getLogger(__name__)
-_SAFE_ERROR_VALUE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
-
-ChatErrorCode = Literal[
-    "chat_service_error",
-    "governance_denied",
-    "invalid_model_response",
-    "invalid_request",
-    "model_round_limit",
-    "unsafe_tool_result",
-    "upstream_failure",
-]
 
 
 def _is_scope_refusal(message: str) -> bool:
@@ -138,23 +122,6 @@ def _restrict_tool_payload(tool_name: str, payload: Any) -> Any:
     if tool_name != "get_member_profile" or not isinstance(payload, dict):
         return payload
     return {key: payload[key] for key in PROFILE_FIELDS if key in payload}
-
-
-class ChatServiceError(RuntimeError):
-    """Raised when a chat turn cannot be completed safely."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        code: ChatErrorCode = "chat_service_error",
-        status_code: int = 502,
-        details: dict[str, str] | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.code = code
-        self.status_code = status_code
-        self.details = dict(details or {})
 
 
 def _governance_error_details(error: GovernanceDeniedError) -> dict[str, str]:
@@ -178,11 +145,17 @@ def _governance_error_details(error: GovernanceDeniedError) -> dict[str, str]:
 
 def _governance_service_error(error: GovernanceDeniedError) -> ChatServiceError:
     """Convert a policy denial to the public chat-service error contract."""
+    details = _governance_error_details(error)
+    if (
+        details.get("policy_name") == "azure-ai-foundry"
+        and details.get("matched_rule") == "content_filter"
+    ):
+        return ChatContentFilteredError(details=details)
     return ChatServiceError(
         "Governance policy denied the requested operation.",
         code="governance_denied",
         status_code=403,
-        details=_governance_error_details(error),
+        details=details,
     )
 
 
@@ -284,10 +257,14 @@ def _known_service_error(error: BaseException) -> ChatServiceError | None:
     if mcp_capability_error is not None:
         return mcp_capability_error
     if isinstance(error, BaseExceptionGroup):
+        known_error = None
         for nested_error in error.exceptions:
-            known_error = _known_service_error(nested_error)
-            if known_error is not None:
-                return known_error
+            nested_known_error = _known_service_error(nested_error)
+            if nested_known_error is None:
+                return None
+            if known_error is None:
+                known_error = nested_known_error
+        return known_error
     return None
 
 
@@ -352,13 +329,7 @@ def _model_stop_error(
     details = _empty_model_response_details(completion, choice)
     finish_reason = details.get("finish_reason")
     if finish_reason == "content_filter":
-        return ChatServiceError(
-            "Azure AI Foundry blocked the model response under a configured "
-            "content filter.",
-            code="model_content_filtered",
-            status_code=422,
-            details=details,
-        )
+        return ChatContentFilteredError(details=details)
     if finish_reason == "length" and recovery_attempted:
         return ChatServiceError(
             "The model reached its configured output limit before returning "
@@ -388,6 +359,11 @@ def _foundry_guardrail_code(error: APIStatusError) -> str | None:
     return None
 
 
+def _identity_failure(error: Exception) -> bool:
+    known = _known_service_error(error)
+    return known is not None and known.code in {"authentication_required", "identity_unavailable"}
+
+
 def _advice_classifier_context(
     messages: list[ChatMessage],
 ) -> tuple[str, str | None]:
@@ -409,6 +385,19 @@ def _classification_stop_reason(policy_data: dict[str, str]) -> str | None:
     if policy_data["confidence"] == "low":
         return "low_confidence"
     return None
+
+
+class ChatContentFilteredError(ChatServiceError):
+    """Raised when Foundry filters a generated response."""
+
+    def __init__(self, *, details: dict[str, str] | None = None) -> None:
+        super().__init__(
+            "Azure AI Foundry blocked the model response under a configured "
+            "content filter.",
+            code="model_content_filtered",
+            status_code=422,
+            details=details,
+        )
 
 
 class ChatMessage(BaseModel):
@@ -712,8 +701,12 @@ class ChatService:
             raise ValueError("MCP governance snapshot must be an object.")
         return document
 
-    async def complete(self, request: ChatRequest) -> ChatResponse:
+    async def complete(self, request: ChatRequest, caller: CallerIdentity) -> ChatResponse:
         """Complete one chat turn without persisting conversation content."""
+        with genai_telemetry.invoke_agent_span(model=self._settings.model_deployment):
+            return await self._complete(request, caller)
+
+    async def _complete(self, request: ChatRequest, caller: CallerIdentity) -> ChatResponse:
         if len(request.messages) > self._settings.max_messages:
             raise ChatServiceError(
                 "The conversation is too long.",
@@ -753,43 +746,57 @@ class ChatService:
                 source="chat",
             )
 
-            classification_failure_reason: str | None = None
-            try:
-                async def classify_request() -> AdviceRequestClassification:
-                    return await self._advice_classifier.classify(
-                        model_client,
-                        current_user_text=current_user_text,
-                        previous_user_text=previous_user_text,
-                    )
+            with guardrail_span(
+                "advice_request_classifier", LifecyclePoint.INPUT,
+            ) as classifier_check:
+                classification_failure_reason: str | None = None
+                try:
+                    async def classify_request() -> AdviceRequestClassification:
+                        return await self._advice_classifier.classify(
+                            model_client,
+                            current_user_text=current_user_text,
+                            previous_user_text=previous_user_text,
+                        )
 
-                classification = await self._classifier_reliability.call(
-                    classify_request
+                    classification = await self._classifier_reliability.call(
+                        classify_request
+                    )
+                    classification_data = classification.to_policy_data()
+                except AdviceClassificationFailure as exc:
+                    classification_failure_reason = exc.reason
+                    classification_data = classification_failure_policy_data(
+                        exc.reason
+                    )
+                except Exception as exc:
+                    classification_failure_reason = "unavailable"
+                    classification_data = classification_failure_policy_data(
+                        "unavailable"
+                    )
+                    logger.warning(
+                        "Advice classifier unavailable",
+                        extra={"failure_type": type(exc).__name__},
+                    )
+                classification_stop_reason = (
+                    classification_failure_reason
+                    or _classification_stop_reason(classification_data)
                 )
-                classification_data = classification.to_policy_data()
-            except AdviceClassificationFailure as exc:
-                classification_failure_reason = exc.reason
-                classification_data = classification_failure_policy_data(
-                    exc.reason
-                )
-            except Exception as exc:
-                classification_failure_reason = "unavailable"
-                classification_data = classification_failure_policy_data(
-                    "unavailable"
-                )
-                logger.warning(
-                    "Advice classifier unavailable",
-                    extra={"failure_type": type(exc).__name__},
-                )
+                if classification_failure_reason == "filtered":
+                    classifier_check.triggered("filtered")
+                elif classification_failure_reason is not None:
+                    classifier_check.error(classification_failure_reason)
+                elif classification_stop_reason is not None:
+                    classifier_check.triggered(classification_stop_reason)
+                elif (
+                    classification_data.get("request_intent")
+                    == "financial_recommendation"
+                ):
+                    classifier_check.triggered("financial_recommendation")
 
             self._governance.require_allowed(
                 LifecyclePoint.POST_MODEL,
                 "foundry.advice_classifier",
                 policy_data=classification_data,
                 source="chat",
-            )
-            classification_stop_reason = (
-                classification_failure_reason
-                or _classification_stop_reason(classification_data)
             )
             try:
                 self._governance.require_allowed(
@@ -824,12 +831,20 @@ class ChatService:
                     return types.ElicitResult(action="decline")
                 return types.ElicitResult(action="cancel")
 
-            async with Client(
-                self._settings.mcp_url,
+            sidecar = SidecarClient(
+                self._settings.sidecar_url, timeout=self._governance.settings.operation_timeout_seconds,
+            )
+            async with httpx2.AsyncClient(
+                auth=AgentAuth(sidecar, self._settings.interactive_agent_id, caller),
+                trust_env=False, follow_redirects=False,
+                timeout=self._governance.settings.operation_timeout_seconds,
+            ) as http, Client(
+                streamable_http_client(self._settings.mcp_url, http_client=http),
                 elicitation_callback=resolve_elicitation,
             ) as mcp_client:
                 discovered = await self._mcp_reliability.call(
                     mcp_client.list_tools,
+                    ignore_error=_identity_failure,
                 )
                 allowed_tools = [
                     tool
@@ -953,18 +968,25 @@ class ChatService:
                                 reasoning_effort="minimal",
                                 verbosity="low",
                             )
-                        try:
-                            completion = await anyio.to_thread.run_sync(
-                                lambda: model_client.chat.completions.create(
-                                    **completion_options,
+                        with genai_telemetry.inference_span(
+                            model=self._settings.model_deployment,
+                            model_client=model_client,
+                            max_tokens=self._settings.max_output_tokens,
+                        ) as inference:
+                            try:
+                                completion = await anyio.to_thread.run_sync(
+                                    lambda: model_client.chat.completions.create(
+                                        **completion_options,
+                                    )
                                 )
-                            )
-                        except APIStatusError as exc:
-                            guardrail_code = _foundry_guardrail_code(exc)
-                            if guardrail_code is None:
-                                raise
-                            return None, guardrail_code
-                        return completion, None
+                            except APIStatusError as exc:
+                                guardrail_code = _foundry_guardrail_code(exc)
+                                if guardrail_code is None:
+                                    raise
+                                inference.fail(guardrail_code)
+                                return None, guardrail_code
+                            inference.record_response(completion)
+                            return completion, None
 
                     completion, guardrail_code = await self._foundry_reliability.call(
                         request_completion,
@@ -983,6 +1005,11 @@ class ChatService:
                                     recovery_attempted=empty_response_retried,
                                 )
                                 break
+                    with guardrail_span(
+                        "foundry_content_filter", LifecyclePoint.POST_MODEL,
+                    ) as content_filter_check:
+                        if guardrail_code is not None:
+                            content_filter_check.triggered(guardrail_code)
                     if guardrail_code is not None:
                         decision = self._governance.record_external_denial(
                             LifecyclePoint.POST_MODEL,
@@ -1054,9 +1081,17 @@ class ChatService:
                     )
                     for tool_call in assistant_message.tool_calls:
                         tool_name = tool_call.function.name
+                        with guardrail_span(
+                            "tool_allowlist", LifecyclePoint.PRE_TOOL,
+                        ) as allowlist_check:
+                            if tool_name not in tool_by_name:
+                                allowlist_check.triggered("unregistered_tool")
                         if tool_name not in tool_by_name:
                             self._governance.require_allowed(
-                                LifecyclePoint.PRE_TOOL, tool_name, source="chat",
+                                LifecyclePoint.PRE_TOOL,
+                                tool_name,
+                                policy_data={"tool_status": "unregistered"},
+                                source="chat",
                             )
                             raise ChatServiceError(
                                 "The model selected an unknown tool.",
@@ -1095,12 +1130,20 @@ class ChatService:
                             )
 
                             async def read_retention_profile() -> Any:
-                                return await mcp_client.call_tool(
-                                    "get_member_profile", {"member_id": member_id},
-                                )
+                                with genai_telemetry.execute_tool_span(
+                                    tool_name="get_member_profile",
+                                    call_id=None,
+                                ) as profile_execution:
+                                    profile = await mcp_client.call_tool(
+                                        "get_member_profile", {"member_id": member_id},
+                                    )
+                                    if profile.is_error:
+                                        profile_execution.fail("tool_error")
+                                    return profile
 
                             profile_result = await self._mcp_reliability.call(
                                 read_retention_profile,
+                                ignore_error=_identity_failure,
                             )
                             self._governance.require_allowed(
                                 LifecyclePoint.POST_TOOL,
@@ -1132,6 +1175,11 @@ class ChatService:
                                     "Staff must verify the internal case records.",
                                     code="unsafe_tool_result",
                                 ) from None
+                            with guardrail_span(
+                                "outreach_eligibility", LifecyclePoint.PRE_TOOL,
+                            ) as eligibility_check:
+                                if review.status != "routine_permitted":
+                                    eligibility_check.triggered(review.status)
                             policy_data.update(review.policy_data())
                         try:
                             self._governance.require_allowed(
@@ -1159,9 +1207,16 @@ class ChatService:
                             )
 
                         async def call_tool() -> Any:
-                            return await mcp_client.call_tool(tool_name, arguments)
+                            with genai_telemetry.execute_tool_span(
+                                tool_name=tool_name,
+                                call_id=getattr(tool_call, "id", None),
+                            ) as tool_execution:
+                                result = await mcp_client.call_tool(tool_name, arguments)
+                                if result.is_error:
+                                    tool_execution.fail("tool_error")
+                                return result
 
-                        result = await self._mcp_reliability.call(call_tool)
+                        result = await self._mcp_reliability.call(call_tool, ignore_error=_identity_failure)
                         self._governance.require_allowed(
                             LifecyclePoint.POST_TOOL,
                             tool_name,
@@ -1216,7 +1271,7 @@ class ChatService:
             known_error = _known_service_error(exc)
             if known_error is not None:
                 raise known_error from exc
-            logger.exception("Chat service failed unexpectedly")
+            logger.error("Chat service failed unexpectedly")
             raise ChatServiceError(
                 "An upstream chat dependency could not complete the request.",
                 code="upstream_failure",
@@ -1233,8 +1288,18 @@ class ChatService:
         )
 
     def _sanitize_response(self, response: str) -> str:
-        scoped = self._wealth_guardrail.sanitize_scope_claims(response)
-        safe, _ = self._advice_guardrail.enforce_advice_boundaries(scoped)
+        with guardrail_span(
+            "whole_of_wealth_scope", LifecyclePoint.OUTPUT,
+        ) as scope_check:
+            scoped = self._wealth_guardrail.sanitize_scope_claims(response)
+            if scoped != response:
+                scope_check.triggered("scope_claim_rewritten")
+        with guardrail_span(
+            "personal_advice_output_filter", LifecyclePoint.OUTPUT,
+        ) as advice_check:
+            safe, violated = self._advice_guardrail.enforce_advice_boundaries(scoped)
+            if violated:
+                advice_check.triggered("personal_advice_replaced")
         return safe
 
     def _finalize_response(
@@ -1244,8 +1309,12 @@ class ChatService:
     ) -> ChatResponse:
         """Apply output guardrails and record the final governance decision."""
         sanitized = self._sanitize_response(response)
-        if _is_scope_refusal(sanitized):
-            sanitized = SCOPE_REFUSAL_MESSAGE
+        with guardrail_span(
+            "scope_refusal", LifecyclePoint.OUTPUT,
+        ) as refusal_check:
+            if _is_scope_refusal(sanitized):
+                sanitized = SCOPE_REFUSAL_MESSAGE
+                refusal_check.triggered("out_of_scope")
         unique_tools = list(dict.fromkeys(tools_used))
         self._governance.require_allowed(
             LifecyclePoint.OUTPUT,

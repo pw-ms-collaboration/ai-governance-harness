@@ -47,6 +47,22 @@ rules:
     stage: pre_tool
     condition: "action.type == 'prepare_member_outreach_case' and data.retention_handling_status in ['review_required', 'unknown']"
     action: deny
+  - name: deny-outreach-without-eligibility-facts
+    description: "BU-SUPER-002 v1.0; source: superannuation-outreach-policy-source.yaml; missing or unrecognised eligibility facts."
+    provenance:
+      layer: business-unit
+      policy_id: BU-SUPER-002
+      policy_version: "1.0"
+      source: superannuation-outreach-policy-source.yaml
+    stage: pre_tool
+    # The toolkit evaluates `not in` as false, so each known status is excluded with `!=`.
+    condition: "action.type == 'prepare_member_outreach_case' and data.retention_handling_status != 'routine_permitted' and data.retention_handling_status != 'duplicate_open' and data.retention_handling_status != 'specialist_required' and data.retention_handling_status != 'account_exited' and data.retention_handling_status != 'review_required' and data.retention_handling_status != 'unknown'"
+    action: deny
+  - name: deny-unregistered-tool
+    description: "Model selected a tool that is not registered for browser chat."
+    stage: pre_tool
+    condition: "data.tool_status == 'unregistered'"
+    action: deny
   - name: deny-identified-member-financial-recommendation
     description: "BU-SUPER-001 v1.0; source: superannuation-ba-policy-source.yaml; request advice boundary."
     provenance:
@@ -60,6 +76,11 @@ rules:
   - name: deny-external-security-recommendation
     stage: pre_input
     condition: "action.type == 'chat.input' and data.request_intent == 'financial_recommendation' and data.product_scope == 'external_security'"
+    action: deny
+  - name: deny-general-financial-recommendation
+    description: "Financial recommendations are out of scope even when not tied to an identified member."
+    stage: pre_input
+    condition: "action.type == 'chat.input' and data.request_intent == 'financial_recommendation' and data.advice_subject != 'identified_member' and data.product_scope != 'external_security'"
     action: deny
   - name: deny-unclassified-chat-input
     stage: pre_input
@@ -113,23 +134,31 @@ rules:
     stage: post_tool
     condition: "action.type == 'foundry.advice_classifier'"
     action: allow
-  - name: allow-member-profile
+  - name: allow-chat-tools
     stage: pre_tool
-    condition: "action.type == 'get_member_profile'"
+    condition: "governance.boundary == 'chat' and governance.actor == 'interactive' and action.type in ['get_member_profile', 'get_member_disengagement_signals', 'get_cohort_churn_analytics', 'get_fum_outflow_summary']"
     action: allow
-  - name: allow-member-signals
+  - name: allow-mcp-analyst-aggregates
     stage: pre_tool
-    condition: "action.type == 'get_member_disengagement_signals'"
+    condition: "governance.boundary == 'mcp' and governance.actor == 'interactive' and governance.token_type == 'user' and governance.staff_role == 'analyst' and action.type in ['get_cohort_churn_analytics', 'get_fum_outflow_summary']"
     action: allow
-  - name: allow-cohort-analytics
+  - name: allow-mcp-retention-tools
     stage: pre_tool
-    condition: "action.type == 'get_cohort_churn_analytics'"
+    condition: "governance.boundary == 'mcp' and governance.actor == 'interactive' and governance.token_type == 'user' and governance.staff_role == 'retention_specialist' and action.type in ['get_member_profile', 'get_member_disengagement_signals', 'get_cohort_churn_analytics', 'get_fum_outflow_summary']"
     action: allow
-  - name: allow-fum-summary
+  - name: allow-reporting-aggregates
     stage: pre_tool
-    condition: "action.type == 'get_fum_outflow_summary'"
+    condition: "governance.boundary == 'mcp' and governance.actor == 'reporting' and governance.token_type == 'app' and action.type in ['get_cohort_churn_analytics', 'get_fum_outflow_summary']"
     action: allow
-  - name: allow-eligible-outreach-case
+  - name: allow-local-analyst-aggregates
+    stage: pre_tool
+    condition: "governance.boundary == 'local' and governance.staff_role == 'analyst' and action.type in ['get_cohort_churn_analytics', 'get_fum_outflow_summary']"
+    action: allow
+  - name: allow-local-retention-tools
+    stage: pre_tool
+    condition: "governance.boundary == 'local' and governance.staff_role == 'retention_specialist' and action.type in ['get_member_profile', 'get_member_disengagement_signals', 'get_cohort_churn_analytics', 'get_fum_outflow_summary']"
+    action: allow
+  - name: allow-chat-eligible-outreach-case
     description: "BU-SUPER-002 v1.0; source: superannuation-outreach-policy-source.yaml; confirmed routine eligibility."
     provenance:
       layer: business-unit
@@ -137,7 +166,25 @@ rules:
       policy_version: "1.0"
       source: superannuation-outreach-policy-source.yaml
     stage: pre_tool
-    condition: "action.type == 'prepare_member_outreach_case' and data.retention_handling_status == 'routine_permitted'"
+    condition: "governance.boundary == 'chat' and governance.actor == 'interactive' and action.type == 'prepare_member_outreach_case' and data.retention_handling_status == 'routine_permitted'"
+    action: allow
+  - name: allow-mcp-eligible-outreach-case
+    provenance:
+      layer: business-unit
+      policy_id: BU-SUPER-002
+      policy_version: "1.0"
+      source: superannuation-outreach-policy-source.yaml
+    stage: pre_tool
+    condition: "governance.boundary == 'mcp' and governance.actor == 'interactive' and governance.token_type == 'user' and governance.staff_role == 'retention_specialist' and action.type == 'prepare_member_outreach_case' and data.retention_handling_status == 'routine_permitted'"
+    action: allow
+  - name: allow-local-eligible-outreach-case
+    provenance:
+      layer: business-unit
+      policy_id: BU-SUPER-002
+      policy_version: "1.0"
+      source: superannuation-outreach-policy-source.yaml
+    stage: pre_tool
+    condition: "governance.boundary == 'local' and governance.staff_role == 'retention_specialist' and action.type == 'prepare_member_outreach_case' and data.retention_handling_status == 'routine_permitted'"
     action: allow
   - name: allow-member-profile-result
     description: "BU-SUPER-001 v1.0; source: superannuation-ba-policy-source.yaml; requires a passed advice scan."

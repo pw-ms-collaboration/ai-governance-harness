@@ -1,0 +1,177 @@
+{
+  "version": "Notebook/1.0",
+  "isLocked": false,
+  "fallbackResourceIds": [
+    "/subscriptions/58e2334a-e2a8-4f53-9121-a29a6b4a501d/resourceGroups/rg-aigovernance-amp-guardrails-hack/providers/microsoft.insights/components/rg-aigovernance-applicationinsight"
+  ],
+  "items": [
+    {
+      "type": 1,
+      "name": "overview",
+      "content": {
+        "json": "# AI Governance Observability\nTelemetry from the local chat and MCP services. This workbook reads existing Application Insights data; it does not configure collection or execute agent actions.\n\nGovernance denials are policy outcomes, not necessarily failed spans. Spans may be sampled; an empty chart is not proof of service health. The recent-span IDs support investigation, but do not establish complete chat-to-model-to-MCP correlation. No prompts, responses, member records, or tool payloads are shown."
+      }
+    },
+    {
+      "type": 9,
+      "name": "time-range",
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "5bc88bc9-4c15-45b4-b6e3-241507734182",
+            "name": "TimeRange",
+            "type": 4,
+            "isRequired": true,
+            "value": {
+              "durationMs": 3600000
+            },
+            "typeSettings": {
+              "selectableValues": [
+                {
+                  "durationMs": 1800000
+                },
+                {
+                  "durationMs": 3600000
+                },
+                {
+                  "durationMs": 14400000
+                },
+                {
+                  "durationMs": 86400000
+                }
+              ]
+            }
+          }
+        ],
+        "style": "pills"
+      }
+    },
+    {
+      "type": 3,
+      "name": "telemetry-freshness",
+      "content": {
+        "version": "KqlItem/1.0",
+        "title": "Last received telemetry by service (not a health probe)",
+        "query": "let roles = datatable(Service:string)[\"ai-governance-harness-chat\", \"ai-governance-harness-mcp\"];\nlet received = union customMetrics, requests, dependencies\n| where timestamp {TimeRange}\n| where cloud_RoleName in (\"ai-governance-harness-chat\", \"ai-governance-harness-mcp\")\n| summarize LastReceived=max(timestamp), TelemetryRows=count() by Service=cloud_RoleName;\nroles | join kind=leftouter received on Service\n| project Service, LastReceived, TelemetryRows=coalesce(TelemetryRows, tolong(0)), Evidence=iff(isnull(LastReceived), \"No telemetry in selected range\", \"Telemetry received; not proof of readiness\")",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "size": 0,
+        "timeContextFromParameter": "TimeRange",
+        "visualization": "table",
+        "crossComponentResources": [
+          "/subscriptions/58e2334a-e2a8-4f53-9121-a29a6b4a501d/resourceGroups/rg-aigovernance-amp-guardrails-hack/providers/microsoft.insights/components/rg-aigovernance-applicationinsight"
+        ]
+      }
+    },
+    {
+      "type": 3,
+      "name": "governance-decisions",
+      "content": {
+        "version": "KqlItem/1.0",
+        "title": "Governance decisions by service and outcome",
+        "query": "customMetrics\n| where timestamp {TimeRange}\n| where cloud_RoleName in (\"ai-governance-harness-chat\", \"ai-governance-harness-mcp\")\n| where name == \"governance.policy.decision.count\"\n| extend Decision=tostring(customDimensions[\"governance.decision\"])\n| summarize Decisions=sum(valueSum) by bin(timestamp, 5m), Service=cloud_RoleName, Decision\n| order by timestamp asc",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "size": 0,
+        "timeContextFromParameter": "TimeRange",
+        "visualization": "timechart",
+        "crossComponentResources": [
+          "/subscriptions/58e2334a-e2a8-4f53-9121-a29a6b4a501d/resourceGroups/rg-aigovernance-amp-guardrails-hack/providers/microsoft.insights/components/rg-aigovernance-applicationinsight"
+        ]
+      }
+    },
+    {
+      "type": 3,
+      "name": "governance-duration",
+      "content": {
+        "version": "KqlItem/1.0",
+        "title": "Mean policy evaluation duration (ms, weighted by evaluations)",
+        "query": "customMetrics\n| where timestamp {TimeRange}\n| where cloud_RoleName in (\"ai-governance-harness-chat\", \"ai-governance-harness-mcp\")\n| where name == \"governance.policy.evaluation.duration\"\n| summarize TotalSeconds=sum(valueSum), Evaluations=sum(valueCount) by bin(timestamp, 5m), Service=cloud_RoleName\n| where Evaluations > 0\n| extend MeanDurationMs=1000.0 * TotalSeconds / Evaluations\n| project timestamp, Service, MeanDurationMs\n| order by timestamp asc",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "size": 0,
+        "timeContextFromParameter": "TimeRange",
+        "visualization": "timechart",
+        "crossComponentResources": [
+          "/subscriptions/58e2334a-e2a8-4f53-9121-a29a6b4a501d/resourceGroups/rg-aigovernance-amp-guardrails-hack/providers/microsoft.insights/components/rg-aigovernance-applicationinsight"
+        ]
+      }
+    },
+    {
+      "type": 3,
+      "name": "http-volume",
+      "content": {
+        "version": "KqlItem/1.0",
+        "title": "MCP HTTP request volume",
+        "query": "customMetrics\n| where timestamp {TimeRange}\n| where cloud_RoleName == \"ai-governance-harness-mcp\"\n| where name == \"mcp.http.request.count\"\n| summarize Requests=sum(valueSum) by bin(timestamp, 5m)\n| order by timestamp asc",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "size": 0,
+        "timeContextFromParameter": "TimeRange",
+        "visualization": "timechart",
+        "crossComponentResources": [
+          "/subscriptions/58e2334a-e2a8-4f53-9121-a29a6b4a501d/resourceGroups/rg-aigovernance-amp-guardrails-hack/providers/microsoft.insights/components/rg-aigovernance-applicationinsight"
+        ]
+      }
+    },
+    {
+      "type": 3,
+      "name": "tool-volume",
+      "content": {
+        "version": "KqlItem/1.0",
+        "title": "MCP tool call volume",
+        "query": "customMetrics\n| where timestamp {TimeRange}\n| where cloud_RoleName == \"ai-governance-harness-mcp\"\n| where name == \"mcp.tool.call.count\"\n| extend Tool=tostring(customDimensions[\"mcp.tool.name\"])\n| summarize Calls=sum(valueSum) by bin(timestamp, 5m), Tool\n| order by timestamp asc",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "size": 0,
+        "timeContextFromParameter": "TimeRange",
+        "visualization": "timechart",
+        "crossComponentResources": [
+          "/subscriptions/58e2334a-e2a8-4f53-9121-a29a6b4a501d/resourceGroups/rg-aigovernance-amp-guardrails-hack/providers/microsoft.insights/components/rg-aigovernance-applicationinsight"
+        ]
+      }
+    },
+    {
+      "type": 3,
+      "name": "span-performance",
+      "content": {
+        "version": "KqlItem/1.0",
+        "title": "Recorded span duration and failures (sampled span evidence)",
+        "query": "union withsource=SpanTable requests, dependencies\n| where timestamp {TimeRange}\n| where cloud_RoleName in (\"ai-governance-harness-chat\", \"ai-governance-harness-mcp\")\n| summarize RecordedSpans=count(), FailedSpans=countif(success == false), UnknownOutcome=countif(isnull(success)), MeanDuration=avg(duration), P95Duration=percentile(duration, 95) by Service=cloud_RoleName, SpanTable, name\n| order by FailedSpans desc, RecordedSpans desc\n| take 50",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "size": 0,
+        "timeContextFromParameter": "TimeRange",
+        "visualization": "table",
+        "crossComponentResources": [
+          "/subscriptions/58e2334a-e2a8-4f53-9121-a29a6b4a501d/resourceGroups/rg-aigovernance-amp-guardrails-hack/providers/microsoft.insights/components/rg-aigovernance-applicationinsight"
+        ]
+      }
+    },
+    {
+      "type": 3,
+      "name": "recent-spans",
+      "content": {
+        "version": "KqlItem/1.0",
+        "title": "Recent OTel spans and operation IDs",
+        "query": "union withsource=SpanTable requests, dependencies\n| where timestamp {TimeRange}\n| where cloud_RoleName in (\"ai-governance-harness-chat\", \"ai-governance-harness-mcp\")\n| project timestamp, Service=cloud_RoleName, SpanTable, name, duration, success, operation_Id, operation_ParentId, id\n| order by timestamp desc\n| take 100",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "size": 0,
+        "timeContextFromParameter": "TimeRange",
+        "visualization": "table",
+        "crossComponentResources": [
+          "/subscriptions/58e2334a-e2a8-4f53-9121-a29a6b4a501d/resourceGroups/rg-aigovernance-amp-guardrails-hack/providers/microsoft.insights/components/rg-aigovernance-applicationinsight"
+        ]
+      }
+    },
+    {
+      "type": 1,
+      "name": "trace-query-guidance",
+      "content": {
+        "json": "## Investigate a trace\nCopy an `operation_Id` from the table, open **Logs** on this Application Insights resource, and query:\n\n```kusto\nunion requests, dependencies\n| where timestamp > ago(24h)\n| where operation_Id == \"<operation-id>\"\n| project timestamp, cloud_RoleName, name, duration, success, id, operation_ParentId\n| order by timestamp asc\n```\n\nOTel spans live in `requests` and `dependencies`; `traces` contains log records. These queries use Application Insights resource-scoped table names. Workspace-scoped queries use `AppRequests`, `AppDependencies`, and `AppMetrics` with different columns. Histogram means use aggregated sums and counts; span percentiles describe retained spans, not a policy-duration histogram percentile."
+      }
+    }
+  ]
+}

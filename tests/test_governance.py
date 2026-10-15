@@ -63,6 +63,7 @@ def _decision(action: str = "allow") -> GovernanceDecision:
     )
 
 
+@pytest.mark.usefixtures("mcp_caller")
 def test_policy_allows_known_tool_and_denies_unknown_action() -> None:
     engine = GovernanceEngine(_settings())
 
@@ -73,7 +74,7 @@ def test_policy_allows_known_tool_and_denies_unknown_action() -> None:
     denied = engine.evaluate(LifecyclePoint.PRE_TOOL, "shell.execute")
 
     assert allowed.allowed is True
-    assert allowed.matched_rule == "allow-member-profile"
+    assert allowed.matched_rule == "allow-mcp-retention-tools"
     assert denied.allowed is False
     assert denied.action == "deny"
 
@@ -221,6 +222,7 @@ def test_given_denied_policy_when_requiring_allowed_then_exposes_decision() -> N
 
 
 @pytest.mark.parametrize("enabled", [True, False])
+@pytest.mark.usefixtures("chat_caller")
 def test_given_external_denial_when_recording_then_enforces_and_counts_it(
     enabled: bool,
 ) -> None:
@@ -242,6 +244,8 @@ def test_given_external_denial_when_recording_then_enforces_and_counts_it(
     assert decision.enforcement_mode == "enforce"
     assert snapshot["counts"]["deny"] == 1
     assert snapshot["recent_events"][0]["policy_name"] == "azure-ai-foundry"
+    assert snapshot["recent_events"][0]["boundary"] == "chat"
+    assert snapshot["recent_events"][0]["actor"] == "interactive"
     assert decision.provenance is None
     assert snapshot["recent_events"][0]["provenance"] is None
 
@@ -269,6 +273,16 @@ def test_given_external_denial_when_recording_then_enforces_and_counts_it(
             },
             False,
             "deny-external-security-recommendation",
+        ),
+        (
+            {
+                "request_intent": "financial_recommendation",
+                "advice_subject": "general_audience",
+                "financial_action": "allocate",
+                "product_scope": "superannuation_option",
+            },
+            False,
+            "deny-general-financial-recommendation",
         ),
         (
             {"classification_status": "unavailable"},
@@ -370,6 +384,7 @@ def test_given_tool_scan_status_when_evaluating_result_then_requires_passed_scan
         assert decision.matched_rule == "deny-personal-advice-tool-response"
 
 
+@pytest.mark.usefixtures("mcp_caller")
 def test_given_direct_gateway_advice_when_returning_result_then_policy_blocks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -546,6 +561,11 @@ def test_snapshot_merge_rejects_malformed_remote_events_and_sensitive_fields() -
         },
     }
 
+    valid_event = remote["events"]["recent_events"][0]
+    remote["events"]["recent_events"].extend([
+        {**valid_event, "oid": "private-object-marker"},
+        {**valid_event, "azp": "private-agent-marker"},
+    ])
     merged = merge_governance_snapshots(local, remote)
 
     assert merged["status"] == "ready"
@@ -553,6 +573,8 @@ def test_snapshot_merge_rejects_malformed_remote_events_and_sensitive_fields() -
     serialized = json.dumps(merged)
     assert "account@example.com" not in serialized
     assert "made_up" not in serialized
+    assert "private-object-marker" not in serialized
+    assert "private-agent-marker" not in serialized
 
 
 def test_snapshot_reports_remote_unavailability_as_partial() -> None:
@@ -584,3 +606,80 @@ def test_policy_evaluation_p95_is_below_100_ms() -> None:
 
     p95 = statistics.quantiles(durations, n=100)[94]
     assert p95 < 100
+
+
+@pytest.mark.parametrize(
+    ("action", "policy_data", "expected_rule"),
+    [
+        ("shell.execute", {"tool_status": "unregistered"}, "deny-unregistered-tool"),
+        (
+            "prepare_member_outreach_case",
+            {"tool_known": True},
+            "deny-outreach-without-eligibility-facts",
+        ),
+        (
+            "prepare_member_outreach_case",
+            {"retention_handling_status": "not_a_status"},
+            "deny-outreach-without-eligibility-facts",
+        ),
+        (
+            "prepare_member_outreach_case",
+            {"retention_handling_status": "routine_permitted"},
+            "allow-chat-eligible-outreach-case",
+        ),
+    ],
+)
+def test_given_pre_tool_facts_when_evaluating_then_named_rule_matches(
+    action: str,
+    policy_data: dict[str, object],
+    expected_rule: str,
+) -> None:
+    # Arrange
+    engine = GovernanceEngine(_settings())
+    context = GovernanceContext(boundary="chat", actor="interactive")
+
+    # Act
+    decision = engine.evaluate(
+        LifecyclePoint.PRE_TOOL, action, policy_data=policy_data, context=context,
+    )
+
+    # Assert
+    assert decision.matched_rule == expected_rule
+
+
+def test_given_every_classification_when_evaluating_input_then_a_rule_matches() -> None:
+    # Arrange
+    from itertools import product
+
+    from ai_governance_harness.guardrails.advice_classifier import (
+        AdviceSubject,
+        ClassificationConfidence,
+        FinancialAction,
+        ProductScope,
+        RequestIntent,
+    )
+
+    engine = GovernanceEngine(_settings())
+    unmatched = []
+
+    # Act
+    for intent, subject, action, scope, confidence in product(
+        RequestIntent, AdviceSubject, FinancialAction, ProductScope,
+        ClassificationConfidence,
+    ):
+        policy_data = {
+            "classification_status": "classified",
+            "request_intent": intent.value,
+            "advice_subject": subject.value,
+            "financial_action": action.value,
+            "product_scope": scope.value,
+            "confidence": confidence.value,
+        }
+        decision = engine.evaluate(
+            LifecyclePoint.INPUT, "chat.input", policy_data=policy_data,
+        )
+        if decision.matched_rule is None:
+            unmatched.append(policy_data)
+
+    # Assert
+    assert unmatched == []
